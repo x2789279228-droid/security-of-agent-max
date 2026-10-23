@@ -18,6 +18,25 @@ permissions:
   contents: read
 
 jobs:
+  # ── Schema 对齐 / 兼容性门禁（JSON ↔ Avro ↔ Java，相对 baseline FULL）──
+  schema-compat:
+    name: Schema compatibility gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend deps
+        run: pip install -r backend/requirements.lock pytest
+      - name: Align Python / Flink / baseline
+        run: python tools/check-schema-compat.py
+      - name: Contract tests
+        working-directory: backend
+        run: pytest -q tests/test_schema_compat.py tests/test_arch_unification.py
+
   # ── 后端: pytest + 覆盖率门禁 ──
   backend-test:
     name: Backend pytest (coverage)
@@ -27,6 +46,10 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 断言弱化门禁要拿 PR 的**基线分支**做 diff，
+          # 浅克隆拿不到 origin/<base>，merge-base 会失败。
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -37,9 +60,42 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.lock pytest-cov
 
+      - name: 断言弱化门禁（§十三「全量回归」行）
+        # 整改方案 §十三「全量回归」行要求：
+        #   「全量测试通过，并且原有测试没有通过删除断言或放宽安全要求来人为变绿」
+        # 后半句此前**没有任何工具在判** ——
+        # 断言从 `assert set(x) == {...}` 改成 `assert {...}.issubset(x)` 之后，
+        # 全量测试照样全绿，而在 CI 输出里这两种写法长得一模一样。
+        #
+        # 工具自带已知答案自检：分类器自己坏了会退出 2，
+        # 不会给出「通过」结论（崩了 ≠ 查过了）。
+        working-directory: .
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          BASE="HEAD"
+          if [ -n "$BASE_REF" ] && git rev-parse --verify "origin/$BASE_REF" >/dev/null 2>&1; then
+            BASE=$(git merge-base HEAD "origin/$BASE_REF")
+          fi
+          echo "断言弱化门禁基线：$BASE"
+          python tools/assert-no-assert-weakening.py --base "$BASE"
+
+      - name: 结构护栏测试（不依赖 DB/Kafka/Redis）
+        # 与覆盖率门禁分开跑: 这些断言锁定的是"不许回退"的不变量
+        # (CORS 层级 / SQL 参数化 / /rag 鉴权 / 健康仪表不得硬编码 ok / 泄密门禁)
+        run: pytest -q tests/test_security_fixes_2026_10_03.py
+
       - name: Run tests with coverage
-        # 覆盖率门禁: 当前基线 21% → 设 20% 防回归; 目标提升至 60% (路线图阶段4)
-        run: pytest -q --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=20
+        # 2026-10-23 第一阶段止血: 门禁 20% → 55%(实测基线 ~64%, 留出波动余量)。
+        # 后续随 testcontainers 集成测试落地继续收紧到 60%+。
+        run: pytest -q --cov=. --cov-report=term-missing --cov-report=xml --cov-fail-under=55
+
+      - name: Detection eval baseline (synthetic, non-gating)
+        # 合成标定集，不冒充生产数据；产物用于 before/after 对比。
+        run: |
+          python -m eval_datasets.evaluate_detection --json > detection-eval.json
+          python -m eval_datasets.evaluate_detection > detection-eval.txt
 
       - name: Upload coverage report
         if: always()
@@ -47,6 +103,110 @@ jobs:
         with:
           name: backend-coverage
           path: backend/coverage.xml
+
+      - name: Upload detection eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detection-eval
+          path: |
+            backend/detection-eval.json
+            backend/detection-eval.txt
+
+      - name: Static risk scans (non-gating, artifacts)
+        # 吞异常 / 零覆盖是报告工具，不是门禁；先把结果留档，M6 再收紧。
+        working-directory: .
+        run: |
+          python tools/scan-swallowed-failures.py | tee swallowed-failures.txt
+          python tools/scan-active-zero-coverage.py | tee active-zero-coverage.txt
+
+      - name: Upload static risk scans
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-risk-scans
+          path: |
+            swallowed-failures.txt
+            active-zero-coverage.txt
+
+  # ── 静态分析门禁 (2026-10-23 第一阶段止血新增) ──
+  # ruff: 语法/未定义名/未用导入等"真问题"(规则集固定在 ruff.toml, 本地可复现)
+  # bandit: 安全扫描, MEDIUM+ 阻断。
+  #   skip 理由(均为有意为之, 移除前先与 backend/ 代码对齐):
+  #   - B108: /tmp 下的 known_hosts 等路径, 容器内临时文件, 非跨用户场景
+  #   - B701: jinja2 autoescape=False 仅用于 LLM 提示词模板(非 HTML 渲染)
+  #   - B608: 现存 6 处均为"标识符插值(ORM __tablename__/字面量/白名单化),
+  #           值全部走绑定参数"的安全惯用法; 后续统一迁移到 quoted-identifier
+  #           helper 后可移除本 skip
+  static-analysis:
+    name: Static analysis (ruff + bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install linters
+        run: pip install ruff==0.17.2 bandit==1.9.4
+      - name: Ruff (fail on real issues)
+        run: ruff check backend
+      - name: Bandit (MEDIUM+ severity blocks)
+        run: >-
+          bandit -r backend -x backend/tests,backend/eval_datasets
+          -ll --skip B108,B701,B608 --quiet
+
+  # ── 真 PostgreSQL 集成测试 (2026-10-23 第二阶段) ──
+  # 修复前 229 个测试文件全跑 sqlite 内存库: PG 方言 / tsvector 生成列 /
+  # alembic 迁移链从未被验证。ubuntu runner 自带 Docker → testcontainers
+  # 拉真 PG 16 跑迁移+审批持久化; 本地 Docker 未启动时自动 skip。
+  pg-integration:
+    name: PostgreSQL integration (testcontainers)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install deps
+        run: pip install -r requirements.lock pytest pytest-asyncio "testcontainers[postgres]>=4.7"
+      - name: Run PG integration tests
+        run: pytest -q tests/integration -p no:cacheprovider
+
+  # ── API 契约一致性 (2026-10-23 第三批) ──
+  # backend/openapi.json(导出自 FastAPI) 与 frontend/src/types/api-generated.ts
+  # 都提交入库; 本 job 重新生成并 diff —— 后端改了端点/模型但没重新导出 → PR 红。
+  # 修复链路: FastAPI(唯一事实源) → export_openapi.py → openapi-typescript(Node API,
+  # 因仓库路径含中文, redocly 的文件 resolver 会 URL-encode 路径导致 ENOENT)。
+  api-contract:
+    name: API contract (openapi to TS types)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Export OpenAPI schema
+        run: python backend/tools/export_openapi.py
+      - name: Generate TS types
+        working-directory: frontend
+        run: npm ci && npm run gen:api
+      - name: Fail if generated files are stale
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- backend/openapi.json             && echo "[api-contract] openapi.json OK"             || { echo "::error::backend/openapi.json 未随代码更新 — 运行 python backend/tools/export_openapi.py 并提交"; exit 1; }
+          git diff --exit-code -- frontend/src/types/api-generated.ts             && echo "[api-contract] api-generated.ts OK"             || { echo "::error::前端类型未随 schema 更新 — 在 frontend/ 运行 npm run gen:api 并提交"; exit 1; }
 
   # ── 前端: lint + 类型检查 + 生产构建 ──
   frontend-check:
@@ -68,6 +228,17 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
+      - name: 安全/结构护栏测试（无需 node_modules）
+        # 2026-10-03 新增。断言的是"不许回退"的不变量:
+        #   - 健康仪表初值不得为 'ok'（探测完成前必须显示 UNKNOWN）
+        #   - 全部业务路由必须挂 Guard
+        #   - 破坏性响应动作必须经 ConfirmDialog
+        # 放在 npm ci 之后但只依赖 node 的类型剥离, 失败信息直接指向被改坏的不变量。
+        run: node --experimental-strip-types --test scripts/securityUxFixes.test.ts
+
+      - name: 既有前端逻辑测试
+        run: npm run test:pipeline
+
   # ── Flink: Maven 编译打包 (构建耗时, 用 actions/cache 加速) ──
   flink-build:
     name: Flink Maven build
@@ -84,7 +255,7 @@ jobs:
           java-version: '11'
           cache: maven
 
-      - name: Build jar
+      - name: Build jar and run contract tests
         run: mvn -B -ntp package
 
       - name: Verify lz4-java (CVE-2026-59949) dependency
@@ -108,6 +279,60 @@ jobs:
         with:
           name: flink-jar
           path: flink-jobs/target/*.jar
+
+  # ── Flink 验证: 让「编译 + 窗口逻辑真执行」在 CI 里真的跑起来 ──
+  # 背景: 上面 backend-test job 没装 JDK/Maven, ~/.m2 是空的。于是
+  #   test_flink_jobs_compile 与新增的 17 条窗口层真执行断言
+  #   **全部静默 skip** —— 在 CI 界面上, "被跳过" 和 "通过" 长得一模一样。
+  #   flink-build job 虽装了 Maven, 但它是独立 job, 缓存不共享给 pytest。
+  # 这个 job 给它们一套真实工具链, 并用 JUnit XML 反过来断言
+  # 「0 条被跳过 且 确实执行了足够多的用例」——
+  # 否则删掉测试也能让门禁变绿, 那就又是一个假门禁。
+  flink-verification:
+    name: Flink verification (compile + window execution)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+          cache-dependency-path: flink-jobs/pom.xml
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend deps
+        run: pip install -r requirements.lock pytest pytest-asyncio
+
+      - name: Warm the Maven cache (window tests compile with -o, offline)
+        # 这两条测试用 mvn -o 离线模式跑, 因此 ~/.m2 必须先有 Flink 依赖。
+        # 第二个命令额外预取 dependency-plugin —— 窗口 harness 需要导出
+        # 依赖 classpath, 该插件不在默认插件集里, 冷缓存下会解析失败。
+        run: |
+          mvn -B -ntp -DskipTests -f ../flink-jobs/pom.xml compile
+          mvn -B -ntp -f ../flink-jobs/pom.xml \
+              org.apache.maven.plugins:maven-dependency-plugin:3.6.1:build-classpath \
+              -Dmdep.outputFile=target/cp.txt
+
+      - name: Run Flink verification and assert it did not skip
+        # 最后一步必须回头核对 JUnit XML —— pytest 的退出码不区分
+        # 「通过」和「全部跳过」，两者都是 0。
+        run: |
+          set -euo pipefail
+          pytest -q -p no:cacheprovider --tb=short \
+                 tests/test_sigma_aggregation_action_chain.py \
+                 --junitxml="$RUNNER_TEMP/flink_window.xml"
+          python ../tools/assert-junit-no-skip.py \
+                 "$RUNNER_TEMP/flink_window.xml" --min-tests 60
 
   # ── Docker: 校验 3 个 Dockerfile 可构建 (PR 只构建不推送, 共享 GHA 缓存) ──
   docker-build:
@@ -146,23 +371,39 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ── 协议安全: MCP JSON-RPC 静态检查 (ccs-lint, 挡嵌套字段注入协议漏洞) ──
+  # ── 协议安全: MCP 工具参数字段注入防护 ──
   # 依据: IETF Internet-Draft _ccsReceipt, 2026-04 OX Security 协议级"不修"漏洞
-  ccs-lint:
-    name: MCP Guard ccs-lint
+  #
+  # 2026-10-03 替换说明:
+  #   原实现调 `npx -y ccs-lint` 并同时配了 `continue-on-error: true` 与 `|| echo`，
+  #   使该 job **恒绿且不可能失败** —— 工具 1.0.2 缺 src/lint.js(MODULE_NOT_FOUND)，
+  #   而 `||` 进一步把真实命中也吞成 0。这等于一个假的安全门禁。
+  #
+  #   它真正要守的不变量是「MCP 工具参数不接受多余/嵌套字段注入」。该不变量在
+  #   backend/mcp_guard/validator.py 中由 ConfigDict(extra="forbid") 真实实现，
+  #   因此改用一条**可版本控制、可在本地复现**的测试来守，而不是依赖坏掉的 npm 包。
+  mcp-arg-injection:
+    name: MCP Guard 字段注入防护
     runs-on: ubuntu-latest
-    continue-on-error: true  # ccs-lint@1.0.2 npm 发布版缺 src/lint.js(MODULE_NOT_FOUND), 工具缺陷待上游修复; CI 不因此阻塞
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: '22'
-      - name: Run ccs-lint over MCP-related sources
-        run: |
-          # 用法: ccs-lint <file.json> | --stdin | --demo
-          # (工具 1.0.2 发布版缺失 /src/lint.js, 详见 https://github.com/dshcorrectover/ccs-proxy)
-          npx -y ccs-lint --demo || echo "ccs-lint 工具不可用或检出演示攻击(预期 exit=1); CI 容错继续"
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install deps
+        run: pip install -r requirements.lock pytest pytest-asyncio
+      - name: 注入防护断言（extra=forbid / 嵌套走私 / 越界值 / 非法 IP）
+        run: pytest -q -k "mcp_arg_models or mcp_validator_rejects"
 
-  # ── SCA 漏洞扫描 (Trivy fs+config) ──
+  # ── SCA 漏洞扫描 (Trivy fs) ──
+  # 2026-10-03 修复: 原为 exit-code '1' + continue-on-error: true, 退出码被完全吞掉
+  # ——「扫描没跑起来」与「扫出 Critical」在 CI 界面上完全一样, 都是绿的。
+  # 现在: Critical 阻断; 全部结果落 artifact 并写入 job summary, 便于 triage。
   security-scan:
     name: Trivy security scan
     runs-on: ubuntu-latest
@@ -174,8 +415,16 @@ jobs:
           scan-type: fs
           scan-ref: .
           format: table
-          exit-code: '1'
-        continue-on-error: true  # 扫描 Critical 级失败(当前基线), 防 CI 阻塞但记录
+          severity: 'CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'          # 仅 Critical 阻断
+      - name: 留存全量结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-fs-report.txt
+          if-no-files-found: ignore
 
   # ── 后端 API 冒烟 (FastAPI TestClient, 用 sqlite 内存库; 防 demo 挂产线) ──
   api-smoke:
@@ -211,3 +460,41 @@ jobs:
           assert r.status_code == 200, f"metrics {r.status_code}"
           print("[smoke] /api/health /api/auth/login /metrics OK")
           PY
+
+  # ── 泄密门禁: 防止密钥随交付包外泄 (2026-10-03 审计新增) ──
+  # 背景: .gitignore 已正确忽略 .env / certs/ / config/ssh/，git 也未跟踪它们。
+  #      但【打包分发】走 zip/tar，不读 .gitignore。2026-10-03 审计在
+  #      shared-memory-platform.zip 中检出 .env、Kafka 全套私钥/keystore、
+  #      OpenSSH 私钥与 nginx 明文口令 —— 这些凭证必须视为已泄露并轮换。
+  #      本 job 用同一套规则阻断"新的"泄漏。
+  leak-gate:
+    name: Secret leak gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 发布包自检 (tools/release.sh 同一套规则)
+        run: |
+          bash tools/release.sh "$RUNNER_TEMP/dist"
+          echo "[leak-gate] 发布目录净化自检通过"
+
+      - name: 工作区密钥文件扫描
+        run: |
+          set -euo pipefail
+          PAT='(^|/)\.env($|\.)|(^|/)certs/|\.pem$|\.p12$|\.jks$|id_rsa|firewall_key|htpasswd$|flink-credentials|-creds$|known_hosts$'
+          ALLOW='\.example$|\.example\.[a-z]+$|/config/suricata/\.gitkeep$'
+          HITS=$(git ls-files | grep -E "$PAT" | grep -Ev "$ALLOW" || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::版本库中存在疑似密钥文件:"; echo "$HITS"
+            exit 1
+          fi
+          echo "[leak-gate] git 跟踪文件中未发现密钥"
+
+      - name: Git 历史私钥扫描
+        run: |
+          set -euo pipefail
+          if git log --all -p 2>/dev/null | grep -nE 'BEGIN (OPENSSH |RSA |EC |DSA )?PRIVATE KEY' | head -20; then
+            echo "::error::Git 历史中检出私钥内容 —— 视为已泄露，请轮换并清理历史"
+            exit 1
+          fi
+          echo "[leak-gate] Git 历史中未检出私钥"

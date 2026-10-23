@@ -1,0 +1,21 @@
+# Ruff 静态检查配置 (2026-10-23 CI 门禁引入)
+# 原则: 门禁只挡"真问题"(语法/未定义名/未用导入/错误风险),
+#       风格类(排序/类型标注现代化/blind-except)不在第一阶段门禁内,
+#       后续按域逐步收紧 select。
+# 注意: ruff 新版默认规则集会变宽, 这里显式固定, 保证本地与 CI 一致。
+target-version = "py311"
+line-length = 200
+extend-exclude = ["frontend", "flink-jobs", "docs", "demo", "tools"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    # app.py / 各模块大量"先初始化再 import"的启动顺序依赖(如 basicConfig 后挂路由),
+    # 是刻意的初始化模式, 静态重排反而破坏行为
+    "E402",
+    # SQLAlchemy filter 惯用法: .where(X.enabled == True) 与 `is True` 语义不同
+    "E712",
+]
+# 测试目录里的未用导入常用于触发模块级 patch, 不算错
+[lint.per-file-ignores]
+"backend/tests/**" = ["F401", "F841"]
