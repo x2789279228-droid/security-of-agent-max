@@ -342,12 +342,32 @@ class TestParamValidation:
 # 5. SafeExecutor 集成测试
 # ════════════════════════════════════════════
 
+class _IdemRedisStub:
+    """幂等检查用的最小 Redis stub (exists/set)。
+
+    2026-10-23 第二阶段: live + 幂等不可用 → fail-closed 拒绝执行。
+    live 路径的测试(执行+验证)必须提供可用的幂等存储 —— 这正是
+    生产语义: 真实执行的前提是幂等保护在线。
+    """
+
+    def __init__(self):
+        self._keys = set()
+
+    async def exists(self, key):
+        return key in self._keys
+
+    async def set(self, key, val, ex=None):
+        self._keys.add(key)
+        return True
+
+
 class TestSafeExecutor:
     """SafeExecutor 集成测试"""
 
     def setup_method(self):
         self.se = SafeExecutor()
         self.se.initialize()
+        self.se.set_redis(_IdemRedisStub())
 
     @pytest.mark.asyncio
     async def test_whitelist_blocks_arbitrary_command(self):
@@ -365,7 +385,6 @@ class TestSafeExecutor:
     @pytest.mark.asyncio
     async def test_asset_whitelist_blocks_protected_ip(self):
         # 先添加受保护资产
-        from response_engine.asset_whitelist import asset_whitelist
         asset_whitelist.initialize(protected_assets_str="10.0.0.1", labels_str="core-gw")
 
         async def live_fn(cmd):
@@ -423,6 +442,9 @@ class TestSafeExecutor:
     @pytest.mark.asyncio
     async def test_live_mode_with_verification(self):
         """live 模式执行 + 执行后验证"""
+        from response_engine.execution_modes import execution_router
+        old_mode = execution_router.mode
+        execution_router.mode = MODE_LIVE
         call_count = []
 
         async def live_fn(cmd):
@@ -432,13 +454,16 @@ class TestSafeExecutor:
                 return {"success": True, "stdout": "1  DROP  all  --  1.2.3.4  0.0.0.0/0  /* FW-RULE-44444 */"}
             return {"success": True, "stdout": "OK"}
 
-        result = await self.se.execute(
-            action_name="block_ip",
-            command="iptables -I INPUT -s 1.2.3.4 -j DROP -m comment --comment 'FW-RULE-44444'",
-            params={"src_ip": "1.2.3.4", "rule_id": "FW-RULE-44444"},
-            platform="linux",
-            live_fn=live_fn,
-        )
+        try:
+            result = await self.se.execute(
+                action_name="block_ip",
+                command="iptables -I INPUT -s 1.2.3.4 -j DROP -m comment --comment 'FW-RULE-44444'",
+                params={"src_ip": "1.2.3.4", "rule_id": "FW-RULE-44444"},
+                platform="linux",
+                live_fn=live_fn,
+            )
+        finally:
+            execution_router.mode = old_mode
         assert result["success"] is True
         assert result["verified"] is True
         assert len(call_count) >= 2  # 执行 + 验证查询
