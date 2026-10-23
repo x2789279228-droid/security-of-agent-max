@@ -76,8 +76,24 @@ class SourceRegistry:
 
     def load_from_config(self):
         """从配置加载预注册 API Key（不写 DB，仅热缓存）"""
+        raw = (settings.source_api_keys or "").strip()
+        if not raw:
+            # 2026-10-23：源码内置演示密钥已删除。空配置不再有默认来源 ——
+            # HTTP 直连模式下未注册的数据源会被拒绝（fail-closed）。
+            env_name = (getattr(settings, "env_name", "dev") or "dev").lower()
+            if env_name == "prod":
+                logger.error(
+                    "SourceRegistry: SOURCE_API_KEYS 未配置 —— 生产环境必须在 .env "
+                    "显式设置数据源密钥（JSON: api_key → 源名），否则所有日志源将被拒绝"
+                )
+            else:
+                logger.info(
+                    "SourceRegistry: SOURCE_API_KEYS 未配置，无预置来源 "
+                    "（演示值见 .env.example；生产必须使用私有密钥）"
+                )
+            return
         try:
-            keys = json.loads(settings.source_api_keys)
+            keys = json.loads(raw)
             for api_key, name in keys.items():
                 self._sources[api_key] = DataSource(
                     api_key=api_key,
@@ -106,7 +122,7 @@ class SourceRegistry:
             return
 
         # 仅保留 config 中的非 DB 来源（避免重复），优先 DB
-        config_keys = set(self._sources.keys())
+        set(self._sources.keys())
         db_keys_by_hash = {}
         for r in rows:
             # DB 没有明文 key，无法直接做 authenticate by 明文 — 但 authenticate 入参是明文

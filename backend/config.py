@@ -3,6 +3,25 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
+#: 2026-10-20 修复（整改报告 §9.48）：`SHARED_MEMORY_SKIP_DOTENV` 之前**只**挡住了
+#: `_load_project_root_env()`（把项目根 .env 灌进 os.environ 那条通道），
+#: **挡不住** pydantic-settings 自己的 dotenv 源 —— `class Config` 里的
+#: `env_file = ".env"` 是**无条件**的，只受 CWD 约束。
+#:
+#: 实测后果：README 文档的 `pytest backend/tests -q`（**仓库根**执行）
+#: 在**收集期**直接崩（16 条 extra_forbidden）—— 因为仓库根有 `.env`，
+#: 而里面的键既不是 `SHARED_MEMORY_` 前缀、也不是 Settings 的声明字段；
+#: pydantic-settings 会把 dotenv 里**任何未声明的键**当成 extra 塞进数据，
+#: `extra="forbid"` 于是直接抛 ValidationError。
+#: conftest 已经设了开关，**仍然崩** —— 开关根本没管到这条通道。
+#:
+#: 现在这个开关同时管住**两条**通道：打开 ⇒ **一个 .env 都不读**
+#: （既不灌 os.environ，也不作为 dotenv 源）。
+_SKIP_DOTENV = os.environ.get("SHARED_MEMORY_SKIP_DOTENV", "").strip() in (
+    "1", "true", "TRUE", "yes"
+)
+
+
 class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://localhost:5432/shared_memory"
@@ -60,11 +79,15 @@ class Settings(BaseSettings):
     jwt_secret: str = ""
     allowed_origins: str = '["http://localhost:3001", "http://127.0.0.1:3001"]'
     rate_limit_per_minute: int = 120
+    # 不可逆写动作(DLQ replay 等)独立配额,与 crit/std 分桶,默认远低于 120/min
+    rate_limit_strict_per_minute: int = 10
     # HTTP 全局限流白名单的"追加项"(逗号分隔路径前缀, 见 http_guards.RATE_LIMIT_WHITELIST)
     # 默认白名单已覆盖全部业务域/运营只读端点; 此处只用于现场临时放开某个前缀, 无需改代码
     rate_limit_whitelist: str = ""
     admin_user: str = "admin"
     admin_password: str = ""
+    # 公开自助注册默认关闭；演示/测试环境显式开启。
+    allow_self_registration: bool = False
 
     # Response Engine Transport
     response_transport_mode: str = "auto"    # "stub" | "ssh" | "auto"
@@ -73,6 +96,9 @@ class Settings(BaseSettings):
     response_ssh_user: str = ""              # SSH 用户名
     response_ssh_key_file: str = ""          # SSH 私钥路径（容器内）
     response_ssh_key: str = ""               # SSH 私钥内容（直接填入，自动写入文件）
+    # 主机密钥校验：默认失败关闭。known_hosts 必须存在；仅隔离靶场可显式放开。
+    response_ssh_known_hosts: str = "/tmp/ssh/known_hosts"
+    response_ssh_allow_unknown_host: bool = False
 
     # Kafka 消息总线
     kafka_bootstrap: str = "localhost:9092"
@@ -96,6 +122,9 @@ class Settings(BaseSettings):
     # 审计溢出 topic：内存队列满且 Redis PQ 失败时，P0/P1 持久化到此，禁止静默丢弃
     kafka_topic_audit_overflow: str = "security-audit-overflow"
     kafka_consumer_group: str = "soc-backend"
+    # DLQ 查询索引保留天数。到期删除索引行；原始负载在库里只有密文。
+    # Kafka topic security-logs-dlq 的 broker 保留时间仍按部署配置，默认与这里一致。
+    dlq_retention_days: int = 30
     kafka_enabled: bool = False              # True=Kafka 模式, False=兼容旧 HTTP 直连模式
     # Confluent Schema Registry (跨运行时 Schema 契约, 见 schema_registry.py)
     schema_registry_url: str = "http://schema-registry:8081"
@@ -106,6 +135,11 @@ class Settings(BaseSettings):
     otel_enabled: bool = True
     otel_endpoint: str = "http://otel-collector:4317"
     env_name: str = "dev"
+    # 日志格式: ""=按 env 自动(prod=json, 其余=text); 显式 "json"|"text" 覆盖
+    log_format: str = ""
+    # 启动时自动执行 alembic upgrade head（生产/容器部署建议开启;
+    # 迁移失败将阻止启动 —— fail-closed, 不允许带未迁移的 schema 进流量）
+    auto_migrate: bool = False
 
     # ── Temporal (4 层 Agent 编排: 可靠性/长任务/可视化) ──
     temporal_enabled: bool = False        # True=用 Temporal 编排, False=回退 async 兜底
@@ -143,6 +177,9 @@ class Settings(BaseSettings):
     audit_p1_use_temporal: bool = False
     # 结论缓存 (同签名短期内复用)
     audit_cache_ttl_s: int = 600
+    # 跨进程审计认领 TTL(秒): SET NX EX 抢占, 防多进程重复审计同一事件。
+    # 应 ≥ 最长审计车道超时(audit_timeout_p0_s=90); 认领失败=他进程在审, 跳过。
+    audit_claim_ttl_s: int = 120
     # 流量型事件(DDOS/PORT_SCAN)默认规则收口, 不进 LLM
     audit_volumetric_skip_llm: bool = True
     audit_llm_single_timeout_s: float = 15.0
@@ -150,9 +187,14 @@ class Settings(BaseSettings):
     # 有界审计 worker(取代无界 create_task + 双 Semaphore)
     audit_workers: int = 12
     audit_queue_max: int = 2000
-    # P0/P1 内存队列满时永不 overflow 丢弃：Redis PQ → Kafka overflow → 进程内 P0 兜底 deque
+    # P0/P1 内存队列满时不返回 overflow：Redis PQ → Kafka overflow → 进程内 deque。
+    # deque 和内存堆都是易失的。停机时把剩下的任务写入 Kafka 或 spill 日志；
+    # 写不出去就计 volatile_lost，不能再叫绝不丢失。
     audit_p0_never_drop: bool = True
     audit_p1_never_drop: bool = True
+    shutdown_drain_timeout_s: float = 20.0
+    audit_spill_path: str = ""
+    audit_recovery_limit: int = 2000
     # ── Ingest 事件驱动 Phase 1（同进程分层，不拆微服务）──
     ingest_http_queued_status: int = 202          # Kafka 入队成功返回码；同步回退仍 200
     ingest_parallel_detect: bool = True           # anomaly + sigma 并行；失败隔离
@@ -177,15 +219,99 @@ class Settings(BaseSettings):
     llm_p0_reserve: int = 2
     llm_slot_timeout_s: float = 30.0
     llm_429_retry_s: float = 1.0
-    # EventBus SSE
+    # 单次 LLM HTTP 超时。每分钟请求上限，0 表示不再叠加速率闸（并发闸仍然生效）。
+    llm_request_timeout_s: float = 90.0
+    # P2-E-3: 连接超时单独可配。修复前用 httpx.Timeout(单值) 把
+    # connect/read/write/pool 全部设成 llm_request_timeout_s ——
+    # 一个连不上的上游要等满 90 秒才失败，而不是 connect 设的 10 秒。
+    llm_connect_timeout_s: float = 10.0
+    # P2-E-2: 通用重试的指数退避基数与上限（全抖动）。
+    # 修复前三次重试之间零等待直接重发。
+    llm_retry_base_s: float = 0.5
+    llm_retry_max_s: float = 8.0
+    llm_rate_per_minute: int = 600
+    # ── 资源容量。入口只读这一组，业务路径不要再写死另一套数字。──
+    # HTTP：绝对上限是单次请求硬顶。max_batch 是单批处理上限。
+    # batch_policy=chunk 时按 max_batch 切块；=reject 时超过 max_batch 直接 413。
+    http_ingest_max_body_bytes: int = 1_048_576
+    http_ingest_max_batch: int = 200
+    http_ingest_absolute_max: int = 1000
+    http_ingest_batch_policy: str = "chunk"
+    http_ingest_batch_timeout_s: float = 30.0
+    http_ingest_downstream_wait_s: float = 2.0
+    http_overload_status: int = 503
+    http_overload_retry_after_s: int = 2
+    # 接入之后的后台任务（快速响应、案例聚合）同时最多这么多个。满了就跳过，不堆积。
+    http_background_max: int = 8
+    # 审计队列水位。高水位拒绝新的 HTTP 接入并暂停 Kafka 拉取；降到低水位后继续消化。
+    audit_queue_high_watermark: float = 0.8
+    audit_queue_low_watermark: float = 0.5
+    # 单批检测扇出（HTTP 直连、Kafka python-ingest、手动分析共用这一闸）
+    audit_batch_concurrency: int = 8
+    # 数据库：连接池见 db_pool_*。这里是并发写上限，以及 PostgreSQL 语句超时。
+    db_write_max_concurrency: int = 8
+    db_write_timeout_s: float = 5.0
+    db_query_timeout_s: float = 30.0
+    # Kafka 生产：单批条数、进程内在途发送、单次发送超时。
+    kafka_produce_batch_size: int = 100
+    kafka_produce_max_inflight: int = 32
+    kafka_produce_timeout_s: float = 10.0
+    # P2-B-4: 工具执行并发上限 + 闸门准入等待。
+    # 修复前 Executor 的 asyncio.gather 无 Semaphore：一批挂死的工具
+    # 会让整轮审计永不返回（且 timeout_ms 是死字段，从未被读取）。
+    tool_exec_max_concurrency: int = 8
+    tool_exec_admit_timeout_s: float = 5.0
+    # 单个工具执行超时（毫秒）。0 = 退回注册表里各工具自报的 timeout_ms。
+    tool_exec_default_timeout_ms: int = 0
+    # P3-6: 审计查询工具的参数上界。
+    # 修复前 event_store.query 的 limit 原样透传给 event_store.query，
+    # 而 event_ids 分支连 limit 都不看（直接 .scalars().all()）——
+    # 这两个值都能经 missed_threats[].evidence 自由文本被放大到任意规模。
+    # 取值依据：生产路径合法的 limit 最大是 200（Decomposer 硬编码 20/50/100/200），
+    # 这里给 5 倍余量，既不打断现有审计，又把放大面截断。
+    tool_query_max_limit: int = 1000
+    # event_ids 的上界单独更小：它每一项都要进 SQL 的 IN 列表，代价随项数增长。
+    tool_query_max_event_ids: int = 500
+    # Kafka 消费。若进程里已经设置了不带前缀的旧环境变量，启动时仍优先用旧变量。
+    kafka_consume_concurrency: int = 1
+    kafka_max_poll_records: int = 50
+    # 单次 poll 后允许的处理上限。过短会在慢审计时被踢出组，循环直接结束且以前不会拉起。
+    kafka_max_poll_interval_ms: int = 600000
+    kafka_consumer_restart_initial_s: float = 1.0
+    kafka_consumer_restart_max_s: float = 30.0
+    kafka_audit_store_concurrency: int = 12
+    kafka_fetch_pause_s: float = 0.5
+    # 消费侧重试：区分临时故障与永久错误。旧实现是 0.5s+1.0s=1.5s 总等待。
+    kafka_retry_initial_s: float = 1.0
+    kafka_retry_multiplier: float = 2.0
+    kafka_retry_max_delay_s: float = 30.0
+    kafka_retry_jitter: float = 0.2
+    kafka_retry_budget_s: float = 60.0
+    kafka_retry_max_attempts: int = 5
+    # 延迟重试 Topic。ordering=strict（默认）不发 retry topic，避免同一业务键后续消息越过未完成记录。
+    # ordering=unordered 才允许发往 retry topic 并提交原 offset。
+    kafka_retry_topic_enabled: bool = False
+    kafka_topic_retry: str = "security-logs-retry"
+    kafka_retry_ordering: str = "strict"  # strict | unordered
+    kafka_retry_topic_max_hops: int = 5
+    kafka_retry_topic_delay_s: float = 15.0
+    # EventStore 热缓存。TTL 是失效广播丢失后的陈旧上界，不能替代正确的失效。
+    # 0 = 取 audit_timeout_p2_s（最短审计车道超时，流水线状态新鲜度要求）。
+    event_store_hot_cache_ttl_s: float = 0
+    event_store_hot_cache_max: int = 2000
+    # EventBus SSE。queue_max 是可合并的状态队列；critical 满了不踢已入队事件。
     event_bus_max_subscribers: int = 256
     event_bus_queue_max: int = 500
+    event_bus_critical_queue_max: int = 200
 
     # Sigma 检测引擎: pySigma=真 Sigma(pySigma+SQLite backend 读 rules/*.yml), legacy=原纯 dict 匹配
     sigma_engine: str = "pySigma"
 
-    # 数据源认证
-    source_api_keys: str = '{"soc-syslog-2024":"syslog-adapter","soc-api-2024":"api-client","soc-simulator-2024":"log-simulator"}'
+    # 数据源认证（JSON: api_key → 源名）。
+    # 2026-10-23 安全修复：删除源码内置的演示密钥默认值 —— 公开仓库里谁能读到
+    # 谁就能伪装成合法日志源。现在默认空 = 不预置任何来源（fail-closed）；
+    # 演示环境请显式设置（见 .env.example 的示例值），生产必须换成私有密钥。
+    source_api_keys: str = ""
 
     # SSH 防火墙适配器 (Linux iptables)
     fw_ssh_host: str = ""
@@ -193,6 +319,9 @@ class Settings(BaseSettings):
     fw_ssh_user: str = ""
     fw_ssh_password: str = ""
     fw_use_sudo: bool = True
+    # 主机密钥校验：默认失败关闭。known_hosts 必须存在；仅隔离靶场可显式放开。
+    fw_ssh_known_hosts: str = "/tmp/ssh/known_hosts"
+    fw_ssh_allow_unknown_host: bool = False
 
     # MCP Guard 网关
     mcp_guard_enabled: bool = True       # 启用 4 层 Guard 检查
@@ -225,14 +354,21 @@ class Settings(BaseSettings):
     stuck_auto_reset_minutes: int = 30
 
     # ── 安全执行层 (SafeExecutor) ──
-    execution_mode: str = "live"             # dry_run | mock | live
+    # 默认 dry_run：真实执行必须由部署环境显式开启（最小惊讶 + 失败关闭）。
+    execution_mode: str = "dry_run"          # dry_run | mock | live
+    # fail-closed(2026-10-23): live 模式下幂等检查不可用(Redis 挂) → 拒绝执行。
+    # 执行侧幂等是纯 Redis(§9.52), Redis 失效时放行=重复封禁无防护。
+    # 仅隔离靶场且接受该风险时才可显式关闭。
+    require_idempotency_for_live: bool = True
     protected_assets: str = ""               # 受保护 IP/CIDR（逗号分隔）
     protected_assets_labels: str = ""        # 对应标签（逗号分隔）
     fw_ssh_user_readonly: str = ""           # 只读 SSH 账号（nmap/查询用）
     ttl_scan_interval: int = 30             # TTL 过期扫描间隔（秒）
 
     # ── 控制面安全（审批 HMAC / JWT 吊销 / 来源限制）──
-    control_hmac_key: str = ""               # 空则回退 jwt_secret
+    # 2026-10-23：prod 环境不再允许回退 jwt_secret（见 security_crypto.control_hmac_key）
+    # —— 审批签名与 JWT 必须使用不同密钥，泄露时不至于一起失守。
+    control_hmac_key: str = ""               # prod 必填；dev/test 空则回退 jwt_secret
     approval_ttl_minutes: int = 15
     approval_ttl_critical_minutes: int = 10
     api_allowlist: str = ""                  # 逗号分隔 IP/CIDR，空=不启用
@@ -382,18 +518,21 @@ class Settings(BaseSettings):
     demo_traffic_enabled: bool = False
     demo_traffic_interval_s: int = 300
 
-    # ── LLM 成本控制 (P0.T 引入) ──
-    # 上不封顶: 0 = 无上限(默认, LLM审计永不因预算降级); >0 = 日预算额(设备回退时)
-    # 上不封顶: 0 = 无上限(默认, LLM 审计永不因预算降级); >0 = 显式日额度(如需回退硬门禁)
-    llm_daily_budget_tokens: int = 0
-    # 统一开关: True=无上限，所有 LLM 预算只记账不关肘(审计/增强/维度), False=恢复预算门禁(回退)
-    llm_budget_unlimited: bool = True
-              # 每日全局 token 预算, 超限降级
+    # ── LLM 成本控制 (P0.T 引入; 2026-10-23 第二阶段默认对齐) ──
+    # 默认给真实上限: 5M tokens/天(演示/中小流量远用不完; 超限走分级降级,
+    # P0 有 audit_p0_reserve_pct 预留不会被饿死)。生产可按量调整或显式关闭。
+    # 此前默认 0+unlimited=True = 成本完全无界, 预算体系(soft/hard pct)是死配置。
+    llm_daily_budget_tokens: int = 5_000_000
+    # False=预算硬门禁(超限低优车道降级, P0 保留); True=只记账不关(回退到无上限)
+    llm_budget_unlimited: bool = False
     llm_price_input_per_1k_tokens: float = 0.0            # 输入每千 token 单价(¥), 0=不估算费用
     llm_price_output_per_1k_tokens: float = 0.0           # 输出每千 token 单价(¥), 0=不估算费用
 
     class Config:
-        env_file = ".env"
+        # 2026-10-20（§9.48）：见文件头 _SKIP_DOTENV 的说明。
+        # 开关打开 ⇒ 不读任何 .env（此前只挡了 os.environ 注入那条通道，
+        # pydantic 自己的 dotenv 源是**另一条**通道，会绕过开关）。
+        env_file = None if _SKIP_DOTENV else ".env"
         env_prefix = "SHARED_MEMORY_"
 
 
@@ -404,8 +543,21 @@ def _load_project_root_env() -> None:
     在 .env 含非 UTF-8(GBK)中文注释时整文件解析失败。此函数逐行按 ASCII 安全解析
     只提取 KEY=VALUE，跳过注释/乱码行，兼容「本机以 backend/ 为 CWD」。
     已存在环境变量(如 docker 注入)不覆盖。
+
+    2026-10-03 安全修复：新增 SHARED_MEMORY_SKIP_DOTENV 开关。
+      本函数在 **import 期**改写进程 os.environ —— 这意味着测试进程会加载开发者
+      机器上的真实 .env。实测后果：.env 里的 RESPONSE_POLICIES_DIR 指向 Linux
+      容器路径(/data/response_policies)，在 Windows 上不存在 → 全局 policy_engine
+      指向空目录 → 全量测试 15 个失败中的 10 个。
+      同一路径还会泄漏 FW_SSH_PASSWORD / QDRANT_URL / FIELD_ENCRYPTION_KEY 等，
+      使"无凭据时应当降级"的测试在配了真实凭据的机器上反而去连真实服务。
+
+      因此测试必须显式设 SHARED_MEMORY_SKIP_DOTENV=1（见 tests/conftest.py，
+      须早于任何 config/models 的 import）。
     """
     import re
+    if _SKIP_DOTENV:
+        return
     for cand in (Path(__file__).resolve().parent.parent / ".env", Path.cwd() / ".env"):
         if not cand.exists():
             continue
