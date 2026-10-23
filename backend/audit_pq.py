@@ -12,12 +12,34 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 PQ_KEY = "soc:audit:pq"
 PQ_PAYLOAD_PREFIX = "soc:audit:pq:payload:"  # event_id → JSON payload
+
+# 原子弹出：ZPOPMIN + GET + DEL 必须在同一次 EVAL 里完成。
+# 否则 zpopmin 成功后进程崩溃，payload 变孤儿，任务不可恢复。
+_POP_LUA = """
+local items = redis.call('ZPOPMIN', KEYS[1], 1)
+if #items == 0 then return nil end
+local member = items[1]
+local key = ARGV[1] .. member
+local payload = redis.call('GET', key)
+redis.call('DEL', key)
+if not payload then return {member, ''} end
+return {member, payload}
+"""
+
+
+async def _dead_letter(member: str, reason: str, detail: str = "") -> None:
+    """丢失任务落死信（best-effort, 不影响队列主路径）。"""
+    try:
+        from audit_dead_letters import record
+        await record(int(member), reason=reason, detail=detail)
+    except Exception as e:
+        logger.debug(f"[AuditPQ] dead letter record failed: {e}")
 
 
 def _payload_is_temporal_agent(payload: dict) -> bool:
@@ -109,6 +131,40 @@ class AuditPriorityQueue:
         """弹出最高优先级任务; 空队列返回 None。"""
         if self._redis is None:
             return None
+        # 优先走 Lua：ZPOPMIN + GET + DEL 原子完成，避免“成员已出队、
+        # payload 变孤儿”的不可恢复窗口。fake/旧客户端不支持 eval 时回退。
+        if hasattr(self._redis, "eval"):
+            try:
+                res = await self._redis.eval(
+                    _POP_LUA, 1, PQ_KEY, PQ_PAYLOAD_PREFIX,
+                )
+                if not res:
+                    return None
+                member, raw = res[0], res[1]
+                if isinstance(member, bytes):
+                    member = member.decode()
+                if isinstance(raw, bytes):
+                    raw = raw.decode()
+                if not raw:
+                    logger.error(
+                        f"[AuditPQ] LOST member={member} reason=payload_missing (atomic pop)"
+                    )
+                    try:
+                        from metrics import inc_audit_pq_lost
+                        inc_audit_pq_lost("payload_missing")
+                    except Exception:
+                        pass
+                    await _dead_letter(member, "payload_missing", "atomic pop")
+                    return None
+                payload = json.loads(raw)
+                try:
+                    from metrics import inc_audit_pq_dequeue
+                    inc_audit_pq_dequeue(str(payload.get("tier") or "?"))
+                except Exception:
+                    pass
+                return payload
+            except Exception as e:
+                logger.warning(f"[AuditPQ] atomic pop failed, fallback: {e}")
         try:
             # ZPOPMIN: 最小 score = 最高优
             items = await self._redis.zpopmin(PQ_KEY, count=1)
@@ -120,6 +176,17 @@ class AuditPriorityQueue:
             raw = await self._redis.get(f"{PQ_PAYLOAD_PREFIX}{member}")
             await self._redis.delete(f"{PQ_PAYLOAD_PREFIX}{member}")
             if not raw:
+                # payload 先于 ZSET 成员过期：任务已不可恢复，必须显式可见。
+                logger.error(
+                    f"[AuditPQ] LOST member={member} reason=payload_missing "
+                    "(payload TTL 先于 ZSET 过期，任务无法重放)"
+                )
+                try:
+                    from metrics import inc_audit_pq_lost
+                    inc_audit_pq_lost("payload_missing")
+                except Exception:
+                    pass
+                await _dead_letter(member, "payload_missing", "fallback pop")
                 return None
             if isinstance(raw, bytes):
                 raw = raw.decode()
@@ -185,7 +252,19 @@ class AuditPriorityQueue:
                     m = m.decode()
                 raw = await self._redis.get(f"{PQ_PAYLOAD_PREFIX}{m}")
                 if not raw:
-                    continue  # 幽灵成员; purge_stale 兜底清理
+                    # 幽灵成员：立即清理 + 计数，避免“永远扫不到、也无告警”。
+                    await self._redis.zrem(PQ_KEY, m)
+                    logger.error(
+                        f"[AuditPQ] LOST member={m} reason=payload_missing "
+                        "(pop_matching)"
+                    )
+                    try:
+                        from metrics import inc_audit_pq_lost
+                        inc_audit_pq_lost("payload_missing")
+                    except Exception:
+                        pass
+                    await _dead_letter(m, "payload_missing", "pop_matching ghost")
+                    continue
                 if isinstance(raw, bytes):
                     raw = raw.decode()
                 try:
@@ -240,6 +319,7 @@ class AuditPriorityQueue:
                 exists = await self._redis.exists(f"{PQ_PAYLOAD_PREFIX}{m}")
                 if not exists:
                     await self._redis.zrem(PQ_KEY, m)
+                    await _dead_letter(m, "purged_ghost", "purge_stale")
                     n += 1
         except Exception as e:
             logger.debug(f"[AuditPQ] purge skipped: {e}")

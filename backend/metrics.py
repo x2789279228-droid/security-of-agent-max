@@ -9,12 +9,17 @@ prometheus-fastapi-instrumentator 会内省 app.routes 并访问 route.path,
   soc_http_requests_total{method,status}      HTTP 请求计数
   soc_http_request_duration_seconds{method}   HTTP 请求耗时直方图
   soc_kafka_consumer_total{topic}             Kafka 消费计数 (由 kafka_consumer 注入)
+
+六组核心运营指标见 core_metrics.py（接入 / Kafka lag / 流水线 / DLQ / SSE / 缓存生命周期）。
+event_id 只进结构化日志，不进指标标签。
 """
 import logging
 import time
 
 from fastapi import Request, Response
 from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+import core_metrics  # noqa: F401  注册六组核心运营指标
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +53,29 @@ AUDIT_PQ_ENQUEUE = Counter(
 AUDIT_PQ_DEQUEUE = Counter(
     "soc_audit_pq_dequeue_total", "审计优先级队列出队", ["tier"]
 )
+AUDIT_PQ_LOST = Counter(
+    "soc_audit_pq_lost_total",
+    "审计优先级队列成员存在但 payload 已丢失（任务不可恢复）",
+    ["reason"],
+)
+AUDIT_DEAD_LETTER = Counter(
+    "soc_audit_dead_letter_total",
+    "审计死信落库计数（PQ 丢失任务的最后痕迹, 可重放）",
+    ["reason"],
+)
+AUDIT_DEAD_LETTER_REPLAYED = Counter(
+    "soc_audit_dead_letter_replayed_total", "审计死信重放进审计 worker 计数"
+)
+AUDIT_CLAIM = Counter(
+    "soc_audit_claim_total",
+    "审计跨进程认领结果（claimed=本进程获得 / contended=被他进程持有）",
+    ["result"],
+)
+SIGMA_ENGINE_DEGRADED = Counter(
+    "soc_sigma_engine_degraded_total",
+    "pySigma 引擎降级到 legacy dict 匹配（检测语义已改变, 必须可见）",
+    ["reason"],
+)
 AUDIT_LANE_ADMIT = Counter(
     "soc_audit_lane_admit_total", "审计车道准入", ["lane", "tier"]
 )
@@ -68,7 +96,21 @@ AUDIT_QUEUE_DEPTH = Gauge("soc_audit_queue_depth", "内存审计队列深度")
 AUDIT_WORKERS = Gauge("soc_audit_worker_busy", "配置的审计 worker 数")
 DB_POOL_CHECKEDOUT = Gauge("soc_db_pool_checkedout", "DB 池已借出连接", ["pool"])
 EVENTBUS_SUBSCRIBERS = Gauge("soc_eventbus_subscribers", "SSE 订阅者数")
-EVENTBUS_DROPS = Counter("soc_eventbus_drops_total", "SSE 慢消费者丢弃的事件")
+EVENTBUS_DROPS = Counter(
+    "soc_eventbus_drops_total",
+    "SSE 慢消费者丢弃的事件",
+    ["event_type", "severity", "lane"],
+)
+EVENTBUS_GAPS = Counter(
+    "soc_eventbus_gaps_total",
+    "critical 通知未入队，客户端需按 SecurityEvent.id 补查",
+    ["event_type", "severity"],
+)
+EVENTBUS_REDIS_FAILURES = Counter(
+    "soc_eventbus_redis_failures_total",
+    "EventBus Redis 广播或桥接失败",
+    ["op"],
+)
 
 # ── P2 接入管道指标 (网关 / 审计不丢 / 阶段耗时) ──
 AUDIT_SHED = Counter(
@@ -149,6 +191,13 @@ def inc_audit_pq_dequeue(tier: str = "?") -> None:
         pass
 
 
+def inc_audit_pq_lost(reason: str = "payload_missing") -> None:
+    try:
+        AUDIT_PQ_LOST.labels(reason=reason or "?").inc()
+    except Exception:
+        pass
+
+
 def inc_audit_lane_admit(lane: str = "?", tier: str = "?") -> None:
     try:
         AUDIT_LANE_ADMIT.labels(lane=lane or "?", tier=tier or "?").inc()
@@ -201,9 +250,42 @@ def set_audit_runtime(inflight: int = 0, queue_depth: int = 0, workers: int = 0)
         pass
 
 
-def inc_eventbus_drop(n: int = 1) -> None:
+def _eventbus_label(value: str, fallback: str = "unknown") -> str:
+    text = str(value or "").strip().lower() or fallback
+    return text[:80]
+
+
+def inc_eventbus_drop(
+    n: int = 1,
+    event_type: str = "unknown",
+    severity: str = "info",
+    lane: str = "bulk",
+) -> None:
+    """慢消费者丢弃。lane=bulk 是可合并的状态更新；lane=critical 表示无法保留、也无法按事件 ID 补查。"""
     try:
-        EVENTBUS_DROPS.inc(max(1, int(n)))
+        EVENTBUS_DROPS.labels(
+            event_type=_eventbus_label(event_type),
+            severity=_eventbus_label(severity, "info"),
+            lane=_eventbus_label(lane, "bulk"),
+        ).inc(max(1, int(n)))
+    except Exception:
+        pass
+
+
+def inc_eventbus_gap(n: int = 1, event_type: str = "unknown", severity: str = "info") -> None:
+    """critical 通知没有放进队列。对应安全事件仍在库里，客户端用游标补查。"""
+    try:
+        EVENTBUS_GAPS.labels(
+            event_type=_eventbus_label(event_type),
+            severity=_eventbus_label(severity, "info"),
+        ).inc(max(1, int(n)))
+    except Exception:
+        pass
+
+
+def inc_eventbus_redis_failure(op: str = "listen") -> None:
+    try:
+        EVENTBUS_REDIS_FAILURES.labels(op=_eventbus_label(op, "listen")).inc()
     except Exception:
         pass
 
@@ -288,9 +370,15 @@ def inc_edr_event(source: str = "sysmon") -> None:
         pass
 
 
-def inc_intel_ioc(source: str = "misp") -> None:
+def inc_intel_ioc(source: str = "misp", n: int = 1) -> None:
+    """
+    n = 本次拉到的 IOC **条数**（不是调用次数）。
+
+    与 IOC 记录自带的 source 字段同源，才能按源下钻；
+    合并成一个总数会让「拉了 MISP 300 / CSV 2」显示成 302。
+    """
     try:
-        INTEL_IOC.labels(source=source or "misp").inc()
+        INTEL_IOC.labels(source=source or "misp").inc(n)
     except Exception:
         pass
 
@@ -332,6 +420,12 @@ async def metrics_endpoint(request: Request) -> Response:
     try:
         from event_bus import event_bus
         set_eventbus_subscribers(event_bus.subscriber_count)
+        crit, bulk = event_bus.queue_depth_by_lane()
+        core_metrics.set_eventbus_queue_depth(crit, bulk)
+    except Exception:
+        pass
+    try:
+        core_metrics.evaluate_core_alerts()
     except Exception:
         pass
     return Response(
