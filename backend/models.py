@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, Date, JSON, Boolean, Float, ForeignKey, UniqueConstraint, text
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, JSON, Boolean, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import DeclarativeBase
@@ -24,6 +24,9 @@ def _make_engine(pool_size: int, max_overflow: int, pool_timeout: float):
             pool_pre_ping=True,
             pool_recycle=1800,
         )
+    if str(url or "").startswith("postgresql"):
+        query_timeout = float(getattr(settings, "db_query_timeout_s", 30) or 30)
+        kw["connect_args"] = {"command_timeout": query_timeout}
     return create_async_engine(url, **kw)
 
 
@@ -84,6 +87,9 @@ class SecurityEvent(Base):
     # 上游唯一事件 ID (Flink/UUID) — 唯一索引实现幂等, 替换原 Redis 24h 去重
     # (跨运行时重放/Exactly-Once 兜底: 同一 eventId 只落库一次)
     event_id = Column(String(64), nullable=True, unique=True, index=True)
+    correlation_id = Column(String(128), nullable=True, index=True)
+    parent_event_id = Column(String(64), nullable=True, index=True)
+    trace_id = Column(String(128), nullable=True)
     session_id = Column(String(100), nullable=False, index=True)
     event_type = Column(String(50), nullable=False)
     severity = Column(String(20), nullable=False, index=True)
@@ -671,7 +677,9 @@ class ThreatIoc(Base):
     first_seen = Column(DateTime(timezone=True), nullable=True)
     last_seen = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True)
-    tags = Column(MutableJSON, default=list)
+    # tags 是数组：MutableDict 会拒绝 list（实测 "Attribute 'tags' does not
+    # accept objects of type <class 'list'>"），必须用 MutableList。
+    tags = Column(MutableListJSON, default=list)
     context = Column(MutableJSON, default=dict)                  # 附加上下文（家族名、样本哈希等）
     is_active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
@@ -1032,58 +1040,154 @@ class ToolAnomaly(Base):
     trace_id = Column(String(64), default="")
 
 
-async def _migrate_existing_tables(conn):
-    """增量迁移：为旧版本已存在的表补列 (create_all 不会 ALTER 已有表)。
+class DlqRecord(Base):
+    """死信恢复索引。
 
-    场景: pgdata 卷建于早期版本, security_events 缺 anomaly_score/status/case_id,
-    导致 INSERT 报 "column does not exist"。PostgreSQL 支持 IF NOT EXISTS, 幂等安全。
+    原始负载只放 payload_ciphertext。查询接口不读这列。
+    同一条 Kafka 消息（topic, partition, offset）重复失败时更新这一行，不另开一条。
     """
-    if not settings.database_url.startswith("postgresql"):
-        return
-    stmts = [
-        "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS anomaly_score REAL DEFAULT 0.0",
-        "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS status VARCHAR(30) DEFAULT 'new'",
-        "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS case_id INTEGER",
-        "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS event_id VARCHAR(64)",
-        # 幂等兜底: 同一 eventId 只落库一次 (替换 Redis 24h 去重)
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_security_events_event_id ON security_events(event_id)",
-        # 可观测: pipeline_spans 增加 trace_id 列 (关联 OTel/Tempo)
-        "ALTER TABLE pipeline_spans ADD COLUMN IF NOT EXISTS trace_id VARCHAR(32) DEFAULT ''",
-        "ALTER TABLE llm_traces ADD COLUMN IF NOT EXISTS trace_id VARCHAR(32) DEFAULT ''",
-        "CREATE INDEX IF NOT EXISTS idx_llm_traces_trace_id ON llm_traces(trace_id)",
-        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS source_type VARCHAR(30) DEFAULT 'agent_output'",
-        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS provenance_id VARCHAR(100) DEFAULT ''",
-        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64) DEFAULT ''",
-        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS trust REAL DEFAULT 0.2",
-        "ALTER TABLE memories ADD COLUMN IF NOT EXISTS signed BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64) DEFAULT ''",
-        "ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'pending'",
-        "ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS submitted_by VARCHAR(80) DEFAULT ''",
-        "ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS approved_by VARCHAR(80) DEFAULT ''",
-        "UPDATE knowledge_docs SET approval_status = 'signed_import' "
-        "WHERE source IN ('mitre-attack','capec','cve','seed','playbook') "
-        "AND (approval_status IS NULL OR approval_status = 'pending')",
-        "ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ",
-        "ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS valid_until TIMESTAMPTZ",
-        "ALTER TABLE knowledge_docs ADD COLUMN IF NOT EXISTS cutoff_policy VARCHAR(20) DEFAULT 'strict'",
-        "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS search_lex TEXT DEFAULT ''",
-        "ALTER TABLE self_play_learned_rules ADD COLUMN IF NOT EXISTS review_report JSONB DEFAULT '{}'",
-        "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS search_tsv tsvector "
-        "GENERATED ALWAYS AS (to_tsvector('simple', coalesce(search_lex,'') || ' ' || "
-        "coalesce(title,'') || ' ' || coalesce(content,''))) STORED",
-        "CREATE INDEX IF NOT EXISTS knowledge_chunks_tsv_gin ON knowledge_chunks USING gin(search_tsv)",
-    ]
-    for s in stmts:
-        try:
-            await conn.execute(text(s))
-        except Exception:
-            pass  # 表不存在等异常由 create_all/首次 init.sql 路径兜底
+    __tablename__ = "dlq_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "original_topic", "original_partition", "original_offset",
+            name="uq_dlq_source_offset",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String(128), default="", index=True)
+    original_topic = Column(String(200), nullable=False, default="", index=True)
+    original_partition = Column(Integer, nullable=False, default=-1)
+    original_offset = Column(Integer, nullable=False, default=-1)
+    consumer_group = Column(String(200), default="")
+    attempt_count = Column(Integer, nullable=False, default=1)
+    first_failed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_failed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    error_class = Column(String(80), default="")
+    error_code = Column(String(80), default="", index=True)
+    sanitized_error = Column(Text, default="")
+    message_schema_version = Column(String(40), default="")
+    envelope_version = Column(String(20), default="dlq.v1")
+    message_timestamp = Column(DateTime(timezone=True), nullable=True)
+    payload_ciphertext = Column(Text, default="")
+    payload_sha256 = Column(String(64), default="")
+    payload_complete = Column(Boolean, default=False)
+    trace_id = Column(String(128), default="")
+    kafka_dlq_acked = Column(Boolean, default=False)
+    replay_status = Column(String(20), default="pending", index=True)
+    replayed_at = Column(DateTime(timezone=True), nullable=True)
+    replayed_by = Column(String(100), default="")
+    replay_idempotency_key = Column(String(120), default="", index=True)
+    replay_claimed_at = Column(DateTime(timezone=True), nullable=True)
+    replay_result = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AuditDeadLetter(Base):
+    """审计死信（2026-10-23 第二阶段）。
+
+    修复前：Redis PQ 的 payload TTL 先于 ZSET 成员过期时，任务"丢得只剩
+    一个计数器"（inc_audit_pq_lost）—— 漏审不可恢复、不可审计。
+    现在：发现丢失的瞬间把 event_id 落库（同 event+reason 幂等），
+    启动时 audit_dead_letters.replay_dead_letters() 把未重放的再送进
+    audit worker，形成"丢失 → 可见 → 可重放"的闭环。
+    """
+    __tablename__ = "audit_dead_letters"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(Integer, nullable=False, index=True)
+    reason = Column(String(60), nullable=False, default="payload_missing")
+    detail = Column(Text, default="")
+    replay_attempts = Column(Integer, nullable=False, default=0)
+    replayed_at = Column(DateTime(timezone=True), nullable=True)
+    replay_note = Column(String(200), default="")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (
+        UniqueConstraint("event_id", "reason", name="uq_audit_dead_letter_event_reason"),
+    )
+
+
+class ApprovalTicketRecord(Base):
+    """审批工单持久化（2026-10-23 第一阶段止血）。
+
+    修复前 ApprovalQueue 是纯进程内存 dict（human_approval.py）——
+    后端重启即丢全部 PENDING 高危操作工单，审批链在故障下不可用：
+    提交方等不到批准（最终超时），审批人看不到待办，已批动作无据可查。
+
+    现为 write-behind：工单提交/批准/拒绝时异步落库，启动时 restore()
+    把非终态工单拉回内存。行仅由后端单进程写（多进程幂等属第二阶段）。
+    """
+    __tablename__ = "approval_tickets"
+
+    id = Column(String(64), primary_key=True)          # uuid4 hex
+    policy_name = Column(String(200), default="")
+    threat_info = Column(JSON, default=dict)
+    actions = Column(JSON, default=list)
+    actions_digest = Column(String(64), default="")    # approve 时防篡改比对
+    sig = Column(String(128), default="")              # 审批 HMAC 签名（外部审批回传）
+    status = Column(String(20), default="pending", index=True)
+    created_at = Column(Float, default=0.0, index=True)
+    expires_at = Column(Float, default=0.0)
+    approved_by = Column(String(100), default="")
+    approved_at = Column(Float, default=0.0)
+    reject_reason = Column(Text, default="")
+    result = Column(JSON, nullable=True)
+    priority = Column(String(8), default="p2")
+    match_status = Column(String(40), default="")
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CadCircuitState(Base):
+    """P1-D-2: CAD 熔断器的**跨进程权威状态**（单行，key=1）。
+
+    修复前熔断器是模块级单例的纯进程内存：
+      · FastAPI 进程里 `/cad/status` 显示 CLOSED，
+        而 Temporal worker 进程里可能早已 tripped（两套内存互不可见）；
+      · 进程重启即清零，且没有任何记录表明「曾经熔断过」。
+
+    现改为 DB 单行 + 乐观并发（version CAS）：
+    每个进程写自己的本地缓存，但所有状态转移都必须先落库；
+    读缓存时校验 version，发现被别的进程改过则重新加载。
+    """
+    __tablename__ = "cad_circuit_state"
+
+    id = Column(Integer, primary_key=True, default=1)
+    # 状态机位置: closed / open / half_open
+    state = Column(String(20), nullable=False, default="closed")
+    reason = Column(Text, default="")
+    # 熔断发生时刻（epoch 秒）。跨进程比较冷却期必须用它，不能用本地 clock。
+    tripped_at = Column(Float, default=0.0)
+    # 连续坏审核计数（真正的"连续"，修复前 _bad_count 从未自增）
+    consecutive_bad = Column(Integer, nullable=False, default=0)
+    audit_count = Column(Integer, nullable=False, default=0)
+    # 监督系统自身故障计数（CAD 抛异常 / 熔断不可持久化）
+    supervision_failures = Column(Integer, nullable=False, default=0)
+    last_supervision_error = Column(Text, default="")
+    # half_open 探针预算：冷却后只允许 N 次试探，不是一次性全放行
+    half_open_probes_left = Column(Integer, nullable=False, default=0)
+    # 乐观锁：所有状态转移都必须带上读到的 version
+    version = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 async def init_db():
+    """建表（幂等）。
+
+    2026-10-23：schema 演进的权威路径改为 Alembic（backend/migrations/），
+    原先这里 `except: pass` 吞错的手搓 ALTER 列表已移入
+    migrations/versions/ 的 baseline 迁移（幂等、有日志、失败可见）。
+    本函数保留 create_all 供测试/全新 sqlite 部署使用；生产 PG 卷由
+    SHARED_MEMORY_AUTO_MIGRATE=true 触发 `alembic upgrade head` 管理。
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _migrate_existing_tables(conn)
+
+
+async def dispose_engines() -> None:
+    """关闭连接池。停机路径在业务写入完成之后调用。"""
+    await engine_oltp.dispose()
+    if engine_bg is not engine_oltp:
+        await engine_bg.dispose()
 
 async def get_session():
     async with async_session() as session:

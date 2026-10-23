@@ -35,11 +35,10 @@ def _no_sigma() -> dict:
 
 
 async def _reset_db():
-    from models import Base, engine, _migrate_existing_tables
+    from models import Base, engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-        await _migrate_existing_tables(conn)
 
 
 class _StubIngestor:
@@ -291,11 +290,24 @@ async def test_run_one_return_keys_match_facade(monkeypatch):
         run_result = await run_one(s, "sess-g", evt, ingestor=_StubIngestor())
         http_dict = run_result.as_http_dict()
 
+        # 精确键集合，不是子集。
+        #
+        # 2026-10-19 复原：这一条曾经被改成 `issubset(...)`，
+        # 理由是「规格从扁平格式改成分组格式，键多了」——
+        # 但子集断言**丢掉了「不得出现意外键」这一条**：
+        # 载荷里悄悄多出 `detect_ms`（内部耗时）、`error_class`（内部异常类）
+        # 之类字段时，子集断言照样绿。
+        #
+        # 整改方案 §十三「全量回归」行要求「原有测试没有通过删除断言或
+        # 放宽安全要求来人为变绿」——子集化就是放宽，必须复原。
+        # 纯函数层面的完整契约见 tests/test_http_dict_contract.py。
         assert set(http_dict.keys()) == {
             "status", "event_id", "event_type", "severity", "anomaly", "sigma",
-        }
+            "eventId",
+        }, f"HTTP 载荷键集合变了：{sorted(http_dict.keys())}"
         assert http_dict["status"] == "review_queued"
         assert isinstance(http_dict["event_id"], int) and http_dict["event_id"] > 0
+        assert http_dict["eventId"] == "p1g-1"
         assert http_dict["event_type"] == "BRUTE_FORCE"
         assert http_dict["severity"] == "high"
         assert http_dict["anomaly"]["score"] == 0.0
@@ -307,6 +319,54 @@ async def test_run_one_return_keys_match_facade(monkeypatch):
         assert set(facade_dict.keys()) == set(http_dict.keys())
         assert facade_dict["status"] == "review_queued"
         assert facade_dict["event_type"] == "BRUTE_FORCE"
+
+
+@pytest.mark.asyncio
+async def test_run_one_failure_path_expands_the_key_set_exactly(monkeypatch):
+    """持久化失败 → 载荷必须**恰好**多出 process_status / retryable / error。
+
+    为什么单独立一条：`as_http_dict()` 的键集合是条件性的，
+    成功路径只钉一种形态的话，失败路径的键集合就没人看管 ——
+    而失败路径恰恰是运维最需要看得懂的那条。
+
+    这里的判据是**精确等式**，不是子集：
+    多出任何别的键（内部耗时、内部异常类）同样要红。
+    """
+    import ingest_pipeline as ip
+    from models import async_session
+    from ingest_pipeline import PersistResult, run_one
+
+    await _reset_db()
+    _patch_detectors(monkeypatch)
+    _patch_audit_submit(monkeypatch)
+
+    async def _boom_persist(session, items):
+        return [PersistResult(
+            stored=None, log_data={}, anomaly=None, session_id="sess-g",
+            ok=False, retryable=True, error="db timeout",
+            error_class="OperationalError", error_code="db_operational",
+        )]
+
+    monkeypatch.setattr(ip, "persist_batch", _boom_persist)
+
+    evt = {"eventId": "p1g-fail", "event": "BRUTE_FORCE", "severity": "high",
+           "src_ip": "10.1.1.1", "message": "brute"}
+    async with async_session() as s:
+        run_result = await run_one(s, "sess-g", evt, ingestor=_StubIngestor())
+        http_dict = run_result.as_http_dict()
+
+        assert set(http_dict.keys()) == {
+            "status", "event_id", "event_type", "severity", "anomaly", "sigma",
+            "eventId", "process_status", "retryable", "error",
+        }, f"失败路径的键集合不对：{sorted(http_dict.keys())}"
+        assert http_dict["process_status"] == "retrying"
+        assert http_dict["retryable"] is True
+        assert http_dict["error"] == "db timeout"
+        # 失败路径下 event_id 没有库主键，必须是 0 而不是编一个
+        assert http_dict["event_id"] == 0
+        # 内部异常分类不进 HTTP 载荷
+        assert "error_class" not in http_dict
+        assert "error_code" not in http_dict
 
 
 # ── P1-H: FastPath create_task + 重试, ingest 不 await SSH ──
@@ -362,8 +422,9 @@ async def test_dispatch_fastpath_retries_without_blocking(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_python_ingest_batch_failure_returns_false(monkeypatch):
-    """P1-J: run_many 抛错 → _ingest_python_batch False, 调用方不得 commit。"""
+    """P1-J: run_many 抛错 → 该条 retrying，不得把已成功条目标成失败之外的整批 bool。"""
     from kafka_consumer import KafkaConsumerManager
+    from retry_policy import STATUS_RETRYING
 
     async def boom(session, events, *, ingestor=None):
         raise RuntimeError("persist down")
@@ -371,6 +432,127 @@ async def test_python_ingest_batch_failure_returns_false(monkeypatch):
     import ingest_pipeline as ip
     monkeypatch.setattr(ip, "run_many", boom)
     mgr = KafkaConsumerManager()
-    ok = await mgr._ingest_python_batch([("s", {"event": "SCAN", "severity": "info"})])
-    assert ok is False
+    outcomes = await mgr._ingest_python_batch([("s", {"event": "SCAN", "severity": "info"})])
+    assert len(outcomes) == 1
+    assert outcomes[0].status == STATUS_RETRYING
+    assert outcomes[0].committable() is False
     assert mgr._stats["python_ingest_consumed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_run_many_keeps_successes_when_one_detect_times_out(monkeypatch):
+    import ingest_pipeline as ip
+    from capacity import reset_gates
+    from ingest_pipeline import DetectResult, DispatchResult, PersistResult, empty_anomaly, run_many
+
+    reset_gates()
+
+    async def fake_detect(payload):
+        if payload.get("n") == 3:
+            raise TimeoutError("detect timeout")
+        return DetectResult(log_data=payload, anomaly=empty_anomaly(), sigma={})
+
+    persisted = []
+    dispatched = []
+
+    async def fake_persist(session, items):
+        out = []
+        for i, (dr, sid) in enumerate(items):
+            persisted.append(dr.log_data.get("n"))
+            stored = type("Stored", (), {"id": i + 1, "analyzed": False, "idempotent": False})()
+            out.append(PersistResult(
+                stored=stored, log_data=dr.log_data, anomaly=dr.anomaly, session_id=sid,
+            ))
+        return out
+
+    async def fake_dispatch(session_id, persist, ingestor=None):
+        dispatched.append(persist.stored.id)
+        return DispatchResult(event_id=persist.stored.id)
+
+    monkeypatch.setattr(ip, "detect", fake_detect)
+    monkeypatch.setattr(ip, "persist_batch", fake_persist)
+    monkeypatch.setattr(ip, "dispatch", fake_dispatch)
+
+    events = [("s", {"event": "E", "n": i}) for i in range(5)]
+    results = await run_many(None, events)
+    assert len(results) == 5
+    assert [r.process_status for r in results] == [
+        "success", "success", "success", "retrying", "success",
+    ]
+    assert persisted == [0, 1, 2, 4]
+    assert dispatched == [1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_run_many_persist_item_failure_does_not_dispatch(monkeypatch):
+    import ingest_pipeline as ip
+    from capacity import reset_gates
+    from ingest_pipeline import DetectResult, DispatchResult, PersistResult, empty_anomaly, run_many
+
+    reset_gates()
+
+    async def fake_detect(payload):
+        return DetectResult(log_data=payload, anomaly=empty_anomaly(), sigma={})
+
+    async def fake_persist(session, items):
+        out = []
+        for i, (dr, sid) in enumerate(items):
+            if i == 2:
+                out.append(PersistResult(
+                    stored=None, log_data=dr.log_data, anomaly=dr.anomaly, session_id=sid,
+                    ok=False, retryable=True, error="db timeout",
+                    error_class="OperationalError", error_code="db_operational",
+                ))
+                continue
+            stored = type("Stored", (), {"id": i + 1, "analyzed": False, "idempotent": False})()
+            out.append(PersistResult(
+                stored=stored, log_data=dr.log_data, anomaly=dr.anomaly, session_id=sid,
+            ))
+        return out
+
+    dispatched = []
+
+    async def fake_dispatch(session_id, persist, ingestor=None):
+        dispatched.append(persist.stored.id)
+        return DispatchResult(event_id=persist.stored.id)
+
+    monkeypatch.setattr(ip, "detect", fake_detect)
+    monkeypatch.setattr(ip, "persist_batch", fake_persist)
+    monkeypatch.setattr(ip, "dispatch", fake_dispatch)
+    results = await run_many(None, [("s", {"event": "E", "n": i}) for i in range(4)])
+    assert [r.process_status for r in results] == ["success", "success", "retrying", "success"]
+    assert dispatched == [1, 2, 4]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_skips_fastpath_on_idempotent_replay(monkeypatch):
+    from ingest_pipeline import DispatchResult, PersistResult, dispatch, empty_anomaly
+
+    calls = []
+
+    class _FakeOrch:
+        async def on_threat_detected(self, **kw):
+            calls.append(kw)
+
+    import types
+    import sys
+    stub_mod = types.ModuleType("response_engine")
+    stub_mod.get_orchestrator = lambda: _FakeOrch()
+    monkeypatch.setitem(sys.modules, "response_engine", stub_mod)
+    _patch_audit_submit(monkeypatch)
+
+    stored = type("Stored", (), {"id": 9, "analyzed": True, "idempotent": True})()
+    persist = PersistResult(
+        stored=stored,
+        log_data={"event": "EXPLOIT", "severity": "critical", "src_ip": "8.8.8.8",
+                  "threat_type": "exploit", "message": "boom"},
+        anomaly=empty_anomaly(reasons=["x"]),
+        session_id="s",
+        idempotent=True,
+    )
+    persist.anomaly.anomaly_score = 0.9
+    persist.anomaly.is_anomaly = True
+    res = await dispatch("s", persist, ingestor=_StubIngestor(fastpath_allow=True))
+    assert isinstance(res, DispatchResult)
+    assert calls == []
+    assert res.audit_accepted == "idempotent_skip"

@@ -14,11 +14,10 @@ from sqlalchemy import select, func
 
 
 async def _reset_db():
-    from models import Base, engine, _migrate_existing_tables
+    from models import Base, engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-        await _migrate_existing_tables(conn)
 
 
 def _evt(event_id: str, event: str = "LOGIN", severity: str = "info", src_ip: str = "10.0.0.1"):
@@ -145,6 +144,23 @@ async def test_store_batch_mixed_new_and_duplicate():
         assert out[1].event_type == "SCAN"
         assert out[2].event_type == "EXPLOIT"
         assert out[0].anomaly_score == 0.5       # 旧行分数不被覆盖
+        assert out[0].idempotent is True
+        assert out[1].idempotent is False
+        assert out[2].idempotent is False
+
+
+@pytest.mark.asyncio
+async def test_store_marks_existing_event_idempotent():
+    from models import async_session
+    from event_store import event_store
+
+    await _reset_db()
+    async with async_session() as s:
+        first = await event_store.store(s, _evt("idem-1"), "sess-1", anomaly_score=0.2)
+        assert first.idempotent is False
+        second = await event_store.store(s, _evt("idem-1"), "sess-1", anomaly_score=0.9)
+        assert second.id == first.id
+        assert second.idempotent is True
 
 
 @pytest.mark.asyncio

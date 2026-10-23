@@ -38,9 +38,6 @@ async def _reset_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-        # 应用增量迁移 (event_id 唯一索引)
-        from models import _migrate_existing_tables
-        await _migrate_existing_tables(conn)
 
 
 def _run(coro):
