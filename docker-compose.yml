@@ -20,6 +20,10 @@ x-flink-taskmanager: &flink-taskmanager
       metrics.reporter.prom.port: 9250
     KAFKA_BOOTSTRAP: kafka:9092
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+    # 数据源 API Key 白名单 (逗号分隔, LogValidationJob 读取)。
+    # 2026-10-23: 源码内置演示密钥已删除; 此处默认值仅供本地/开发演示,
+    # 生产必须经 .env 覆盖 (prod overlay 强制要求显式配置)。
+    VALID_API_KEYS: ${VALID_API_KEYS:-***REMOVED-LEAKED-SECRET***}
   volumes:
     # 与 JobManager 共享持久化状态卷 (checkpoint 可见性)
     - flink_state:/var/flink-state
@@ -221,6 +225,10 @@ services:
       KAFKA_BOOTSTRAP: kafka:9092
       # 每事件 OTel span 导出端点 (TraceUtil 读取)
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      # 数据源 API Key 白名单 (逗号分隔, LogValidationJob 静态读取)。
+      # 2026-10-23: 源码内置演示密钥已删除; 此处默认值仅供本地/开发演示,
+      # 生产必须经 .env 覆盖 (prod overlay 强制要求显式配置)。
+      VALID_API_KEYS: ${VALID_API_KEYS:-***REMOVED-LEAKED-SECRET***}
     ports:
       # 生产不映射; 仅开发时可通过 frontend:3002 认证反代访问
       - "127.0.0.1:9250:9250"
@@ -299,8 +307,8 @@ services:
       SHARED_MEMORY_LLM_BASE_URL: ${SHARED_MEMORY_LLM_BASE_URL:-https://api.xiaomimimo.com/v1}
       SHARED_MEMORY_LLM_MODEL: ${SHARED_MEMORY_LLM_MODEL:-mimo-v2.5}
       # LLM 成本控制 (日预算 / 输入输出单价, 单位 ¥/千tokens; 0=不估算费用)
-      SHARED_MEMORY_LLM_DAILY_BUDGET_TOKENS: ${SHARED_MEMORY_LLM_DAILY_BUDGET_TOKENS:-0}      # 0=无上限(默认: LLM审计永不因预算降级); =0 表示无限/设正数则显式上限
-      SHARED_MEMORY_LLM_BUDGET_UNLIMITED: ${SHARED_MEMORY_LLM_BUDGET_UNLIMITED:-true}       # true=预算只记账不关(审计/模块); false=硬门禁(回退)
+      SHARED_MEMORY_LLM_DAILY_BUDGET_TOKENS: ${SHARED_MEMORY_LLM_DAILY_BUDGET_TOKENS:-5000000}  # 日 token 预算(2026-10-23 起默认 5M 有界; 0=无上限)
+      SHARED_MEMORY_LLM_BUDGET_UNLIMITED: ${SHARED_MEMORY_LLM_BUDGET_UNLIMITED:-false}       # false=硬门禁(超限低优降级, P0 有预留); true=只记账不关(成本无界)
       SHARED_MEMORY_LLM_PRICE_INPUT_PER_1K_TOKENS: ${SHARED_MEMORY_LLM_PRICE_INPUT_PER_1K_TOKENS:-0.001}
       SHARED_MEMORY_LLM_PRICE_OUTPUT_PER_1K_TOKENS: ${SHARED_MEMORY_LLM_PRICE_OUTPUT_PER_1K_TOKENS:-0.002}
       SHARED_MEMORY_EMBEDDING_API_KEY: ${SHARED_MEMORY_EMBEDDING_API_KEY:?EMBEDDING_API_KEY_REQUIRED}
@@ -329,6 +337,17 @@ services:
       # Kafka 消息总线
       SHARED_MEMORY_KAFKA_ENABLED: ${SHARED_MEMORY_KAFKA_ENABLED:-true}
       SHARED_MEMORY_KAFKA_BOOTSTRAP: kafka:9092
+      # 数据源认证 (JSON: api_key → 源名)。2026-10-23: 源码内置演示密钥已删除,
+      # 默认空 = 无预置来源 (fail-closed)。演示值写入 .env (见 .env.example);
+      # 生产必须替换为私有密钥 (prod overlay 强制要求显式配置)。
+      SHARED_MEMORY_SOURCE_API_KEYS: ${SHARED_MEMORY_SOURCE_API_KEYS:-}
+      # 启动自动执行 alembic 迁移 (fail-closed: 迁移失败阻止启动)
+      SHARED_MEMORY_AUTO_MIGRATE: ${SHARED_MEMORY_AUTO_MIGRATE:-true}
+      # 控制面审批 HMAC 独立密钥。dev 可空 (回退 jwt_secret 并告警);
+      # prod 必填且必须与 JWT_SECRET 不同 (security_crypto fail-closed)
+      SHARED_MEMORY_CONTROL_HMAC_KEY: ${SHARED_MEMORY_CONTROL_HMAC_KEY:-}
+      # 结构化日志: ""=按 env 自动 (prod=json, 其余=text); 可显式 "json"|"text"
+      SHARED_MEMORY_LOG_FORMAT: ${SHARED_MEMORY_LOG_FORMAT:-}
       # Qdrant 向量数据库 (RAG 检索; 容器间走 Docker 内网, 端口仅绑 127.0.0.1)
       SHARED_MEMORY_QDRANT_URL: ${SHARED_MEMORY_QDRANT_URL:-http://qdrant:6333}
       SHARED_MEMORY_QDRANT_COLLECTION: ${SHARED_MEMORY_QDRANT_COLLECTION:-soc_knowledge_chunks}
@@ -630,6 +649,7 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"   # 仅本机调试

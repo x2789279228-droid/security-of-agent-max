@@ -11,6 +11,9 @@ services:
   # ── 自建应用服务: 强制使用 GHCR 预构建镜像 ──
   flink-jobmanager:
     image: ghcr.io/x2789279228-droid/soc-flink:${IMAGE_TAG:?IMAGE_TAG 必填 (如 main/sha-xxxxxx/1.2.3)}
+    environment:
+      # 生产 fail-closed: 数据源白名单必须显式配置 (源码/compose 不再内置演示密钥)
+      VALID_API_KEYS: "${VALID_API_KEYS:?VALID_API_KEYS 必填, 逗号分隔的数据源 API Key}"
 
   # 3 副本 TaskManager (与 base compose 的 flink-taskmanager-1/2/3 对齐)
   flink-taskmanager-1:
@@ -33,6 +36,18 @@ services:
       # 生产强制 Kafka 模式 (Flink 唯一流处理事实源):
       # 关闭 HTTP 直连双路径, 避免 Python 侧重复校验/去重/异常评分
       SHARED_MEMORY_KAFKA_ENABLED: "true"
+      # 响应执行默认 dry_run；真实执行必须显式覆盖该变量（失败关闭）
+      SHARED_MEMORY_EXECUTION_MODE: "${SHARED_MEMORY_EXECUTION_MODE:-dry_run}"
+      SHARED_MEMORY_ENV_NAME: "prod"
+      # ── 生产 fail-closed 必填项 (2026-10-23 第一阶段止血) ──
+      # 数据源密钥: 源码/默认值已不再内置, 生产必须显式配置
+      SHARED_MEMORY_SOURCE_API_KEYS: "${SHARED_MEMORY_SOURCE_API_KEYS:?SOURCE_API_KEYS 必填, JSON 格式 api_key 到源名映射, 与 VALID_API_KEYS 一致}"
+      # 审批 HMAC 独立密钥: prod 拒绝回退 jwt_secret (security_crypto fail-closed)
+      SHARED_MEMORY_CONTROL_HMAC_KEY: "${SHARED_MEMORY_CONTROL_HMAC_KEY:?CONTROL_HMAC_KEY 必填, 且与 JWT_SECRET 取不同值}"
+      # 启动自动迁移 (fail-closed: 失败阻止启动, 不允许未迁移 schema 进流量)
+      SHARED_MEMORY_AUTO_MIGRATE: "true"
+      # 生产 JSON 结构化日志
+      SHARED_MEMORY_LOG_FORMAT: "json"
 
   frontend:
     image: ghcr.io/x2789279228-droid/soc-frontend:${IMAGE_TAG:?IMAGE_TAG 必填 (如 main/sha-xxxxxx/1.2.3)}
