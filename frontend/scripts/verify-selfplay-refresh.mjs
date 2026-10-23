@@ -10,7 +10,11 @@ const BASE = process.env.MONITOR_URL || 'http://127.0.0.1:5173'
 const PORT = 9345
 const USER_DATA = path.join(process.env.TEMP || '/tmp', 'chrome-selfplay-refresh')
 const USER = process.env.ADMIN_USER || 'admin'
-const PASS = process.env.ADMIN_PASS || '***REMOVED-LEAKED-SECRET***'
+const PASS = process.env.ADMIN_PASS // 2026-10-23: 硬编码回退已删除(泄漏门禁), 必须经环境变量提供
+if (!PASS) {
+  console.error('[verify] ADMIN_PASS env var required (no hardcoded fallback).')
+  process.exit(1)
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 

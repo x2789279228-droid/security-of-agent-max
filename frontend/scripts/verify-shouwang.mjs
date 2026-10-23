@@ -126,7 +126,11 @@ async function main() {
     if (!/待处理|进入控制台/.test(homeBody)) fail.push('home missing KPI/CTA')
 
     const USER = process.env.ADMIN_USER || 'admin'
-    const PASS = process.env.ADMIN_PASS || '***REMOVED-LEAKED-SECRET***'
+    const PASS = process.env.ADMIN_PASS // 2026-10-23: 硬编码回退已删除(泄漏门禁), 必须经环境变量提供
+    if (!PASS) {
+      console.error('[verify] ADMIN_PASS env var required (no hardcoded fallback).')
+      process.exit(1)
+    }
     await cdp.send('Runtime.evaluate', {
       awaitPromise: true,
       expression: `(async () => {

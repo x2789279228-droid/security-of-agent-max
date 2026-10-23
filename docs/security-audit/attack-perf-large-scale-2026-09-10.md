@@ -65,7 +65,7 @@ docker exec kali-pentest bash -c 'hydra -l admin -P /tmp/pwd.txt -t 4 -w 3 -f ss
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8001/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"***REMOVED-LEAKED-SECRET***"}' | jq -r .access_token)
+  -d '{"username":"admin","password":"<ADMIN_PASSWORD-已脱敏-2026-10-23>"}' | jq -r .access_token)
 ```
 
 **事件分布**(同 9/2 8 策略口径 × 实际发送量):
