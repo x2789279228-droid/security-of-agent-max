@@ -17,7 +17,7 @@ import ipaddress
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from datetime import datetime, timezone
 
 from config import settings
 
@@ -78,11 +78,16 @@ class IocMatcher:
 
     async def _load_from_db(self, session):
         """从 threat_iocs 表加载活跃 IOC"""
-        from sqlalchemy import select
+        from sqlalchemy import select, or_
         from models import ThreatIoc
 
+        # 过期 IOC 不得继续参与匹配；NULL 视为长期有效。
+        now = datetime.now(timezone.utc)
         result = await session.execute(
-            select(ThreatIoc).where(ThreatIoc.is_active == True)
+            select(ThreatIoc).where(
+                ThreatIoc.is_active == True,
+                or_(ThreatIoc.expires_at.is_(None), ThreatIoc.expires_at > now),
+            )
         )
         iocs = result.scalars().all()
 

@@ -20,8 +20,18 @@ from models import get_session, SecurityEvent, Memory
 from auth import get_current_user, RequireRole, UserInfo
 from audit_trail import log_from_request
 from log_ingestion import log_ingestor
+from event_identity import ensure_identity, get_event_id
+from event_store import event_store
 from source_registry import source_registry
 from vector_store import vector_store
+
+
+def _ingest_metric(result: str, *, source: str = "http", reason: str = "", n: int = 1) -> None:
+    try:
+        from core_metrics import record_ingest
+        record_ingest(source, result, reason=reason, n=n)
+    except Exception:
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +69,34 @@ def _peek_source(api_key: str) -> str:
             return src.name
     return "http-admin"
 
+def _stamp_ingest_events(events: list) -> list[dict]:
+    """入口盖章：已有 eventId 保留，缺失时生成一次。"""
+    stamped = []
+    for ev in events:
+        body = ev if isinstance(ev, dict) else {}
+        stamped.append(ensure_identity(body, producer="backend.http_ingest"))
+    return stamped
+
+
 async def _enqueue_ingest(session_id: str, api_key: str, events: list) -> int:
     from kafka_producer import kafka_producer as _kp
-    messages = [{
-        "uuid": uuid.uuid4().hex,
-        "type": "security_event",
-        "session_id": session_id,
-        "source_id": _peek_source(api_key),
-        "source_key": api_key or "",
-        "_ts": round(__import__("time").time(), 3),
-        "body": ev,
-    } for ev in events]
+    messages = []
+    for ev in events:
+        body = ensure_identity(ev if isinstance(ev, dict) else {}, producer="backend.http_ingest")
+        if isinstance(ev, dict):
+            ev.update(body)
+        eid = get_event_id(body)
+        messages.append({
+            "uuid": eid,
+            "eventId": eid,
+            "correlationId": body.get("correlationId") or eid,
+            "type": "security_event",
+            "session_id": session_id,
+            "source_id": _peek_source(api_key),
+            "source_key": api_key or "",
+            "_ts": round(__import__("time").time(), 3),
+            "body": body,
+        })
     return await _kp.produce_raw_batch(
         messages, topic=settings.kafka_topic_ingest_process, key_field="uuid")
 
@@ -82,6 +109,44 @@ def _sanitize_value(v):
 
 def _queued_status_code() -> int:
     return int(getattr(settings, "ingest_http_queued_status", 202) or 202)
+
+
+def _overload_response(reason: str, **extra):
+    from capacity import overload_retry_after, overload_status
+    retry_after = overload_retry_after()
+    body = {"status": "overloaded", "reason": reason, "retry_after": retry_after}
+    body.update(extra)
+    return JSONResponse(
+        status_code=overload_status(),
+        content=body,
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+def _reject_if_body_too_large(request: Request) -> None:
+    from capacity import body_too_large
+    raw = request.headers.get("content-length")
+    if raw and str(raw).isdigit() and body_too_large(int(raw)):
+        _ingest_metric("rejected", reason="too_large")
+        raise HTTPException(413, "Request body exceeds configured limit")
+
+
+def _reject_if_batch_forbidden(count: int) -> None:
+    from capacity import BatchRejected, ensure_batch_allowed
+    try:
+        ensure_batch_allowed(count)
+    except BatchRejected as exc:
+        _ingest_metric("rejected", reason="batch_too_large", n=max(1, int(exc.count or count or 1)))
+        raise HTTPException(413, f"Batch size {exc.count} exceeds limit of {exc.limit}") from exc
+
+
+async def _admit(direct: bool):
+    from capacity import AdmissionDenied, admit_http
+    try:
+        await admit_http(direct=direct)
+    except AdmissionDenied as exc:
+        return _overload_response(exc.reason)
+    return None
 
 
 async def _session_unless_queued():
@@ -112,25 +177,61 @@ async def ingest_log(
     if api_key:
         source = source_registry.authenticate(api_key)
         if not source:
+            _ingest_metric("rejected", reason="auth")
             raise HTTPException(403, "Invalid or revoked API key")
     elif settings.kafka_enabled:
         logger.warning("[Security] HTTP ingest without API key in Kafka mode — should use Kafka pipeline")
+
+    from drain import drain
+    if not drain.accepting:
+        _ingest_metric("rejected", reason="draining")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "draining", "detail": "服务正在关闭，不再接受新任务"},
+        )
+    _reject_if_body_too_large(request)
+    denied = await _admit(direct=not _ingest_producer_active())
+    if denied is not None:
+        _ingest_metric("rejected", reason="overloaded")
+        return denied
 
     session_id = req.session_id or str(uuid.uuid4())
     log_data = req.message if isinstance(req.message, dict) else json.loads(req.message)
     # 输入 sanitization: 移除 message 字段中的 HTML 标签
     if isinstance(log_data.get("message"), str):
         log_data["message"] = _sanitize_value(log_data["message"])
+    log_data = ensure_identity(log_data, producer="backend.http_ingest")
     if _ingest_producer_active():
         produced = await _enqueue_ingest(session_id, api_key, [log_data])
+        if produced != 1:
+            _ingest_metric("rejected", reason="not_durable")
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "session_id": session_id,
+                    "status": "not_durable",
+                    "produced": produced,
+                    "count": 1,
+                    "eventId": get_event_id(log_data),
+                    "detail": "Kafka 未确认这条日志，未接受",
+                },
+            )
+        _ingest_metric("queued")
         return JSONResponse(
             status_code=_queued_status_code(),
             content={"session_id": session_id, "status": "queued", "produced": produced,
+                     "eventId": get_event_id(log_data),
                      "event_type": _peek_type(log_data),
                      "severity": log_data.get("severity", "info")},
         )
 
-    result = await log_ingestor.ingest(session, session_id, log_data)
+    from capacity import GateTimeout
+    try:
+        result = await log_ingestor.ingest(session, session_id, log_data)
+    except GateTimeout as exc:
+        _ingest_metric("rejected", reason="overloaded")
+        return _overload_response(exc.gate)
+    _ingest_metric("accepted")
     return {"session_id": session_id, **result}
 
 @router.post("/logs/ingest/batch")
@@ -140,8 +241,19 @@ async def ingest_log_batch(
     session: AsyncSession = Depends(_session_unless_queued)
 ):
     """Fast Path: 批量接入安全日志"""
-    if len(req.logs) > 1000:
-        raise HTTPException(413, "Batch size exceeds limit of 1000")
+    from drain import drain
+    if not drain.accepting:
+        _ingest_metric("rejected", reason="draining", n=max(1, len(req.logs)))
+        return JSONResponse(
+            status_code=503,
+            content={"status": "draining", "detail": "服务正在关闭，不再接受新任务"},
+        )
+    _reject_if_body_too_large(request)
+    _reject_if_batch_forbidden(len(req.logs))
+    denied = await _admit(direct=not _ingest_producer_active())
+    if denied is not None:
+        _ingest_metric("rejected", reason="overloaded", n=max(1, len(req.logs)))
+        return denied
     api_key = request.headers.get("X-API-Key", "")
     session_id = req.session_id or str(uuid.uuid4())
     parsed = [d if isinstance(d, dict) else json.loads(d) for d in req.logs]
@@ -149,15 +261,57 @@ async def ingest_log_batch(
     for d in parsed:
         if isinstance(d.get("message"), str):
             d["message"] = _sanitize_value(d["message"])
+    parsed = _stamp_ingest_events(parsed)
     if _ingest_producer_active():
         produced = await _enqueue_ingest(session_id, api_key, parsed)
+        event_ids = [get_event_id(d) for d in parsed]
+        if produced <= 0:
+            _ingest_metric("rejected", reason="not_durable", n=max(1, len(parsed)))
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "session_id": session_id,
+                    "status": "not_durable",
+                    "produced": produced,
+                    "count": len(parsed),
+                    "event_ids": event_ids,
+                    "detail": "Kafka 未确认任何日志，未接受",
+                },
+            )
+        if produced != len(parsed):
+            failed = len(parsed) - produced
+            _ingest_metric("queued", n=produced)
+            _ingest_metric("rejected", reason="not_durable", n=max(1, failed))
+            return JSONResponse(
+                status_code=207,
+                content={
+                    "session_id": session_id,
+                    "status": "partial",
+                    "produced": produced,
+                    "failed": failed,
+                    "count": len(parsed),
+                    "event_ids": event_ids,
+                    "detail": "Kafka 只确认了部分日志，已确认的不必整批重放",
+                },
+            )
+        _ingest_metric("queued", n=len(parsed))
         return JSONResponse(
             status_code=_queued_status_code(),
             content={"session_id": session_id, "status": "queued",
-                     "produced": produced, "count": len(parsed)},
+                     "produced": produced, "count": len(parsed),
+                     "event_ids": event_ids},
         )
 
-    result = await log_ingestor.ingest_batch(session, session_id, parsed)
+    from capacity import GateTimeout, IngestCapacityError
+    try:
+        result = await log_ingestor.ingest_batch(session, session_id, parsed)
+    except IngestCapacityError as exc:
+        _ingest_metric("rejected", reason="overloaded", n=max(1, len(parsed)))
+        return _overload_response(exc.reason, accepted=exc.accepted, count=exc.total)
+    except GateTimeout as exc:
+        _ingest_metric("rejected", reason="overloaded", n=max(1, len(parsed)))
+        return _overload_response(exc.gate)
+    _ingest_metric("accepted", n=len(parsed))
     return {"session_id": session_id, **result}
 
 @router.post("/logs/analyze")
@@ -165,7 +319,28 @@ async def trigger_analysis(
     session_id: str = Query(..., description="会话ID"),
 ):
     """手动触发未分析日志的批量分析"""
-    asyncio.create_task(log_ingestor._run_batch_analysis(session_id))
+    from drain import drain
+    from capacity import batch_fanout_gate
+    if not drain.accepting:
+        raise HTTPException(503, "服务正在关闭，不再接受新任务")
+    denied = await _admit(direct=True)
+    if denied is not None:
+        return denied
+    gate = batch_fanout_gate()
+    if not await gate.try_acquire():
+        return _overload_response("analysis_saturated")
+
+    async def _run():
+        try:
+            await log_ingestor._run_batch_analysis(session_id)
+        finally:
+            await gate.release()
+
+    try:
+        asyncio.create_task(_run())
+    except Exception:
+        await gate.release()
+        raise
     return {"status": "analysis_triggered", "session_id": session_id}
 
 @router.get("/logs/status")
@@ -263,6 +438,7 @@ async def reset_stuck(
     result = await session.execute(stmt)
     rows = result.scalars().all()
     count = 0
+    reset_ids = []
     for e in rows:
         e.analyzed = True
         raw = dict(e.raw_data or {})
@@ -273,8 +449,9 @@ async def reset_stuck(
         audit["note"] = "stuck event reset by admin/scheduler"
         raw["_audit_llm"] = audit
         e.raw_data = raw
+        reset_ids.append(e.id)
         count += 1
-    await session.commit()
+    await event_store.commit_then_invalidate(session, *reset_ids)
     await log_from_request(
         session, request, user, action="logs.reset_stuck",
         target_type="security_event", target_id="*",
@@ -288,10 +465,22 @@ async def list_events(
     session_id: str = Query("", description="会话ID"),
     severity: str = Query("", description="按严重度筛选"),
     limit: int = 50, offset: int = 0,
+    after_id: int = Query(0, ge=0, description="只返回 id 大于该值的事件，按 id 升序，供断线补查"),
     session: AsyncSession = Depends(get_session)
 ):
-    """查询已接入的安全事件"""
-    stmt = select(SecurityEvent).order_by(desc(SecurityEvent.created_at))
+    """查询已接入的安全事件。
+
+    after_id > 0 时按主键升序返回更晚的行，这是 SSE 断线补查的同一游标。
+    不带 after_id 时仍按创建时间倒序，避免打乱现有日志列表。
+    """
+    if after_id > 0:
+        stmt = (
+            select(SecurityEvent)
+            .where(SecurityEvent.id > after_id)
+            .order_by(SecurityEvent.id.asc())
+        )
+    else:
+        stmt = select(SecurityEvent).order_by(desc(SecurityEvent.created_at))
     if session_id:
         stmt = stmt.where(SecurityEvent.session_id == session_id)
     if severity:

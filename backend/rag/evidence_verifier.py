@@ -20,7 +20,7 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .retriever import Retriever, RetrievalResult
+from .retriever import Retriever
 from .context_builder import rag_context_builder
 from summary_compression import summary
 

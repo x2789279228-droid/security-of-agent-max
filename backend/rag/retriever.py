@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from sqlalchemy import select, and_, or_, func as sql_func, text
+from sqlalchemy import select, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -459,7 +459,7 @@ class Retriever:
         from ops_loop import kb_chunk_is_fresh
         allowed = {did for did, st, _vu in rows if kb_is_retrievable(st or "")}
         freshness = {did: vu for did, _st, vu in rows}
-        status_map = {did: st for did, st, _vu in rows}
+        {did: st for did, st, _vu in rows}
         kept = []
         for c in result.chunks:
             did = c.get("doc_id")
@@ -536,14 +536,14 @@ class Retriever:
 
         # ── 兜底: pgvector 向量检索 ──
         distance_expr = KnowledgeChunk.embedding.cosine_distance(embedding)
-        stmt = select(
+        select(
             KnowledgeChunk,
             distance_expr.label("distance"),
         ).order_by(distance_expr)
 
         # pgvector 原生距离算子 `<=>` 做数据库端排序（最高性能）
         from models import KnowledgeChunk
-        from sqlalchemy import text as sa_text, bindparam
+        from sqlalchemy import text as sa_text
 
         # 构造过滤条件
         filter_clauses = ["TRUE"]

@@ -2,9 +2,9 @@
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -190,6 +190,43 @@ async def observability_active_pipelines(
     return {"pipelines": pipelines, "count": len(pipelines)}
 
 
+#: 运维监控页思维链允许出现的状态词表（§十一.2：状态词表保持一致）
+CHAIN_STATUSES = ("running", "completed", "failed", "fallback", "unknown")
+
+#: 审计已抵达终态的值 —— 这些直接透传给监控页
+_TERMINAL_AUDIT_STATUSES = ("completed", "failed", "fallback")
+
+
+def _derive_chain_status(evt, audit: dict, raw: dict) -> str:
+    """推导监控页展示的思维链状态。
+
+    修复前这里是 `status = "running"` 无条件默认 + 三个 if，
+    三者都不命中就保持 "running" 且永不收敛。
+
+    缺口：`evt.analyzed=True` 但 `raw_data` 里没有 `_audit_llm` 时，
+    三个分支全不命中 —— 分析早已终结，监控页却一直显示「分析进行中」。
+    这不是假设：`_mark_analyzed` 只在 `if db_evt and not db_evt.analyzed`
+    时才写 `_audit_llm`（log_ingestion.py:648），对**已分析过**的事件是空操作；
+    于是「重复处理 / 载荷写入失败」都会留下 analyzed=True + 无载荷 的组合。
+    `_audit_llm: {}` 走同一条路径（`audit or {}` 把空字典也归一掉）。
+
+    「永远停在 running」比报错更糟：运维会一直等一个早已结束的审核。
+
+    既有语义原样保留（审计载荷存在但状态非终态时仍归 completed），
+    只把「已终结却无状态可依」这一支从 running 改为 unknown ——
+    running 只留给确实尚未标记 analyzed 的事件。
+    """
+    st = (audit or {}).get("status") or ""
+    if st in _TERMINAL_AUDIT_STATUSES:
+        return st
+    analyzed = bool(getattr(evt, "analyzed", False))
+    if analyzed and audit:
+        return "completed"
+    if raw.get("_audit_llm_error"):
+        return "failed"
+    return "unknown" if analyzed else "running"
+
+
 @router.get("/observability/thought-chain/{event_id}")
 async def observability_thought_chain(
     event_id: int,
@@ -203,25 +240,20 @@ async def observability_thought_chain(
     evt = await event_store.get_by_id(session, event_id, prefer_db=True)
     audit = None
     cad = None
-    status = "running"
     session_id = ""
     if evt:
         raw = evt.raw_data or {}
         audit = raw.get("_audit_llm") or {}
         cad = raw.get("_cad_audit") or None
         session_id = getattr(evt, "session_id", "") or ""
-        st = (audit or {}).get("status") or ""
-        if st in ("completed", "failed", "fallback"):
-            status = st
-        elif getattr(evt, "analyzed", False) and audit:
-            status = "completed"
-        elif raw.get("_audit_llm_error"):
-            status = "failed"
-    elif not snapshot(event_id):
-        raise HTTPException(404, "Event not found")
+    else:
+        raw = {}
+        if not snapshot(event_id):
+            raise HTTPException(404, "Event not found")
 
     return assemble_thought_chain(
-        event_id, audit=audit, cad=cad, session_id=session_id, status=status,
+        event_id, audit=audit, cad=cad, session_id=session_id,
+        status=_derive_chain_status(evt, audit, raw),
     )
 
 
@@ -315,7 +347,6 @@ async def observability_trace_detail(
 ):
     """按 W3C trace_id 拉全链路: Tempo 完整 span 树 + pipeline_spans + 关联事件"""
     import httpx
-    from observability.pipeline_tracer import pipeline_tracer
 
     # 1) 标准事实源: Tempo 完整 span 树 (Flink + Python)
     tempo_spans: list[dict] = []
@@ -352,7 +383,7 @@ async def observability_trace_detail(
         logger.warning(f"[Traces] Tempo 详情查询失败: {e}")
 
     # 2) pipeline_spans (LLM 审计链路)
-    from models import PipelineSpan, SecurityEvent, async_session as db_session
+    from models import PipelineSpan, async_session as db_session
     async with db_session() as session:
         stmt = (
             select(PipelineSpan)
@@ -1184,6 +1215,42 @@ async def list_anomalies(
         for evt in events
     ]
 
+def _chain_payload(c) -> dict:
+    """攻击链 → API 载荷。
+
+    抽成独立函数是为了让「载荷可复现」这条性质**可测**
+    （整改方案 §9.59）：端点本身要 DB 会话，守卫测不了；
+    把载荷构造独立出来，守卫就能直接调用它，比对两个不同
+    PYTHONHASHSEED 进程的结果。
+
+    集合型字段（src_ips/dst_ips）必须**排序** —— 链里的 IP 是
+    集合，直接 list() 的顺序随进程哈希种子变，于是同一批事件在
+    不同进程里给出逐字节不同的 API 响应，客户端无法对响应做
+    去重/比对。
+    """
+    return {
+        "chain_id": c.chain_id,
+        "pattern_name": c.pattern_name,
+        "confidence": c.confidence,
+        "event_ids": [e["id"] for e in c.events],
+        "events": [{"id": e["id"], "event_type": e.get("event_type")} for e in c.events],
+        "src_ips": sorted(c.src_ips),
+        "dst_ips": sorted(c.dst_ips),
+        # 行为体标签。src_ips 为空时链不是「没有来源」，而是来源
+        # 不是 IP（备用身份 / 无法归因）—— 这个字段说明它是谁。
+        # getattr 兜底：测试替身/历史对象可能没有这个新字段。
+        "actor": getattr(c, "actor", ""),
+        "time_span_minutes": c.time_span_minutes,
+        "alert": c.alert,
+        # 共享事件标记（整改方案 §八「下游不得把同一事件算成两份证据」）。
+        # 引擎已经算好了这两个字段，但此前**没有出现在响应里** ——
+        # 于是「不能按链累加」这件事对下游是不可见的。
+        # getattr 兜底：测试替身/历史对象可能没有这些字段。
+        "shared_event_ids": list(getattr(c, "shared_event_ids", []) or []),
+        "overlaps_other_chain": bool(getattr(c, "overlaps_other_chain", False)),
+    }
+
+
 @router.get("/security/chains")
 async def list_chains(
     session_id: str = Query(..., description="会话ID"),
@@ -1193,20 +1260,7 @@ async def list_chains(
     result = await correlation_engine.analyze(
         session, session_id, time_window_minutes=1440
     )
-    chains = [
-        {
-            "chain_id": c.chain_id,
-            "pattern_name": c.pattern_name,
-            "confidence": c.confidence,
-            "event_ids": [e["id"] for e in c.events],
-            "events": [{"id": e["id"], "event_type": e.get("event_type")} for e in c.events],
-            "src_ips": list(c.src_ips),
-            "dst_ips": list(c.dst_ips),
-            "time_span_minutes": c.time_span_minutes,
-            "alert": c.alert,
-        }
-        for c in result.chains
-    ]
+    chains = [_chain_payload(c) for c in result.chains]
     causal_graph = None
     try:
         from causal_chain.store import latest_graph
@@ -1227,6 +1281,13 @@ async def list_chains(
         "session_id": session_id,
         "causal_graph": causal_graph,
         "chains": chains,
+        # §十一.1「关联链匹配数、被拒绝的链及原因」必须真的到运维眼前。
+        # 修复前本响应不含 observability —— `chains: []` 在界面上与
+        # 「CEP 模式退化到永远匹配不上」完全同形，正是 CorrelationResult
+        # .observability 存在的理由（见 correlation_engine.py:334-337）。
+        # 直接复用属性而非手工拼字段：后者会在 observability 增删字段时
+        # 悄悄落后，那恰恰是本缺陷的成因。
+        "observability": result.observability,
         "temporal_groups": [
             {
                 "src_ip": g["src_ip"],

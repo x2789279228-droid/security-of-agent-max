@@ -58,7 +58,6 @@ def test_normalize_is_non_mutating(exec_agent):
 # ── _extract_events(含 normalize 接线) ──
 
 def test_extract_events_keeps_ids_from_query(exec_agent):
-    from agents.agent_executor import ToolResult
     results = [
         ToolResult(
             call_id="c1", task_id="t1", tool="event_store.query", success=True,
@@ -74,7 +73,6 @@ def test_extract_events_keeps_ids_from_query(exec_agent):
 
 
 def test_extract_events_drops_idless(exec_agent):
-    from agents.agent_executor import ToolResult
     results = [
         ToolResult(
             call_id="c1", task_id="t1", tool="event_store.query", success=True,

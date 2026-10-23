@@ -130,6 +130,9 @@ class ClaimGroundingReport:
     # 补默认值后回归正常路径；正确值会在 _verify_single_claim 中被显式覆盖。
     grounding_score: float = 1.0  # 加权综合得分 0-1
     verdict: str = "ungrounded"   # "grounded" | "partially_grounded" | "ungrounded"
+    # P0-C-1: 硬性否决原因。硬性条件命中时 verdict 直接判 ungrounded，
+    # 不允许其余权重的满分项把"证据本身是假的"这一事实加权抵消掉。
+    hard_fail_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -333,8 +336,56 @@ class GroundingVerifier:
         )
         grounding_score = round(min(max(grounding_score, 0.0), 1.0), 4)
 
+        # ── P0-C-1: 硬性条件与加权评分分离 ──
+        # 加权分回答的是"这条断言有多少维度站得住"，但它无法表达
+        # "证据本身是伪造的"：伪造引用会把 Layer 2 打到 0，但其余 0.60 权重的
+        # 满分项（空引用记 1.0、单事件链完整性记 1.0 …）足以把总分抬到 0.5，
+        # 于是 verdict = partially_grounded → 进入投票集。
+        # 实测：quote 100% 伪造 → 0.5000 → partially_grounded → 被放行。
+        #
+        # 以下四类是"事实层面的造假"，不允许被任何加权补偿：
+        #   1. 引用了本块中不存在的事件 ID      —— 凭空造证据
+        #   2. 有引用文本但一段都溯源不到        —— 引文全假
+        #   3. 断言提到的事件中不存在的 IP       —— 幻影实体
+        #   4. 引用事件之间存在跨源字段矛盾      —— 证据自相冲突
+        #
+        # P3 标定补充第 5 类：**完全没有证据**。
+        # 这与上面四类是不同的失效模式 —— 上面是"证据是假的"，这里是"没有证据"。
+        # P0-C-1 之前只覆盖了前者，于是零证据断言靠五个维度的空真拿到满分：
+        #   Layer1 空 evidence_ids → id_validity 记 1.0（不扣分）
+        #   Layer2 空 quotes       → grounding_ratio 记 1.0（空真）
+        #   Layer3 无实体可验       → entity_consistency 记 1.0
+        #   Layer5 无证据可判过期   → freshness 记 1.0
+        #   Layer7 引用数 < 2       → chain_integrity 记 1.0
+        #   仅 Layer4（无知识库）失分 → 总分 0.9000 = grounded
+        # 实测：eval_datasets 标定集里 "数据库已被完全控制，全部客户数据被加密后
+        # 外传至境外"（零 ID 零引文）得 0.9000，与逐字可溯源的干净断言**同分**，
+        # 且不触发任何其他硬否决 —— 审计结论里没有一条证据，却和有证据的一样可信。
+        #
+        # 阈值扫描进一步确认这不是标定问题：现有全部 (grounded_t, partial_t)
+        # 组合都无法让该样本判对 —— 没有一个阈值能把 0.90 判成 ungrounded。
+        # 所以它只能是硬性条件。
+        hard_fail_reasons: list[str] = []
+        if not evidence_ids:
+            hard_fail_reasons.append("no_evidence:evidence_ids 为空")
+        if missing_ids:
+            hard_fail_reasons.append(
+                f"fabricated_evidence_ids:{missing_ids[:5]}"
+            )
+        if total_quotes > 0 and grounded_count == 0:
+            hard_fail_reasons.append(
+                f"all_quotes_ungrounded:{len(ungrounded)}/{total_quotes}"
+            )
+        if phantom_ips:
+            hard_fail_reasons.append(f"phantom_entities:{phantom_ips[:3]}")
+        if conflicts:
+            hard_fail_reasons.append(f"cross_source_conflicts:{conflicts[:2]}")
+
         # 判定档位
-        if grounding_score >= _VERDICT_GROUNDED_THRESHOLD:
+        if hard_fail_reasons:
+            # 硬性否决：分数仅作参考记录，不再参与档位判定
+            verdict = "ungrounded"
+        elif grounding_score >= _VERDICT_GROUNDED_THRESHOLD:
             verdict = "grounded"
         elif grounding_score >= _VERDICT_PARTIAL_THRESHOLD:
             verdict = "partially_grounded"
@@ -371,6 +422,7 @@ class GroundingVerifier:
             chain_integrity=round(chain_integrity, 4),
             grounding_score=grounding_score,
             verdict=verdict,
+            hard_fail_reasons=hard_fail_reasons,
         )
 
     # ───────────────────────────────────────
@@ -820,6 +872,14 @@ class GroundingVerifier:
             indicators.append(
                 f"{prefix}: {len(report.ungrounded_quotes)}/{report.total_quotes} "
                 f"条引用文本无法在事件原文中找到: {sample_str}{suffix}"
+            )
+
+        # P3 警告：完全没有证据（此前该情形连告警都没有，
+        # 因为下面那条要求 report.evidence_ids 非空）
+        if not report.evidence_ids:
+            indicators.append(
+                f"{prefix}: 未引用任何事件 ID，"
+                f"该断言没有任何可核验证据"
             )
 
         # Layer 2 警告：完全缺少引用文本

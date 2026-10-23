@@ -6,7 +6,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -18,7 +18,6 @@ from response_engine import (
     get_orchestrator, get_response_logger,
     response_executor,
     approval_queue, policy_engine, response_registry,
-    ApprovalStatus, ssh_transport,
 )
 
 logger = logging.getLogger(__name__)
@@ -175,6 +174,12 @@ async def list_response_policies(user: UserInfo = Depends(get_current_user)):
             "actions": p.actions,
             "min_confidence": p.min_confidence,
             "min_severity": p.min_severity,
+            "match": {
+                "threat_type": p.threat_type,
+                "min_confidence": p.min_confidence,
+                "min_severity": p.min_severity,
+                **({"category": p.category} if p.category else {}),
+            },
             "auto_execute": p.auto_execute,
             "require_approval": p.require_approval,
             "cooldown_minutes": p.cooldown_minutes,
@@ -194,6 +199,12 @@ async def list_response_policies(user: UserInfo = Depends(get_current_user)):
             "actions": unc.actions,
             "min_confidence": unc.min_confidence,
             "min_severity": unc.min_severity,
+            "match": {
+                "threat_type": unc.threat_type,
+                "min_confidence": unc.min_confidence,
+                "min_severity": unc.min_severity,
+                **({"category": unc.category} if unc.category else {}),
+            },
             "auto_execute": unc.auto_execute,
             "require_approval": unc.require_approval,
             "cooldown_minutes": unc.cooldown_minutes,
@@ -207,6 +218,7 @@ async def list_response_policies(user: UserInfo = Depends(get_current_user)):
 
 
 class PolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str
     auto_execute: bool | None = None
     require_approval: bool | None = None
@@ -215,6 +227,7 @@ class PolicyUpdateRequest(BaseModel):
     min_severity: str | None = None
     threat_type: str | None = None
     category: str | None = None
+    match: dict | None = None
     actions: list[dict] | None = None
     priority: int | None = None
     description: str | None = None
@@ -292,7 +305,14 @@ async def update_response_policy(
         target_type="response_policy", target_id=req.name,
         before=before, after=after_pol.to_dict() if after_pol else content,
     )
-    return {"status": "updated", "name": req.name, **{k: result[k] for k in ("rule_id",) if k in result}}
+    return {
+        "status": "updated",
+        "success": True,
+        "name": req.name,
+        "rule_id": result.get("rule_id", req.name),
+        "change_summary": result.get("change_summary", req.change_summary or ""),
+        "version_data": result.get("version_data") or {},
+    }
 
 
 @router.delete("/response/policies/{name}")
@@ -323,15 +343,21 @@ async def reload_response_policies(
 ):
     """手动热加载 YAML 策略"""
     count = policy_engine.reload()
+    # 2026-10-20 修复（整改报告 §9.56）：**文件级**加载失败必须一起返回 ——
+    # 「重载成功、但少了几条策略」正是运维最容易漏掉的情况。
+    load_errors = list(getattr(policy_engine, "_load_errors", []) or [])
     await _audit(
         session, request, user, action="response.policy_reload",
         target_type="response_policy", target_id="*",
-        after={"count": count, "source": getattr(policy_engine, "_load_source", "")},
+        after={"count": count, "source": getattr(policy_engine, "_load_source", ""),
+               "failed": len(load_errors)},
     )
     return {
         "status": "reloaded",
         "count": count,
         "source": getattr(policy_engine, "_load_source", ""),
+        "failed": len(load_errors),
+        "load_errors": load_errors[:20],
     }
 
 @router.get("/response/actions")
@@ -381,10 +407,13 @@ async def execute_response(
     action_def = response_registry.get_action(action_name)
     if not action_def:
         raise HTTPException(404, f"Unknown action: {action_name}")
-    if action_def.severity == "critical":
+    # 2026-10-21：HIGH 与 CRITICAL 都不允许手动直执行。
+    # 此前只拦 critical，block_ip(high) 可被 operator 绕过审批直接下真实 iptables DROP。
+    if response_registry.needs_approval(action_name):
         raise HTTPException(
             403,
-            f"CRITICAL action '{action_name}' 不允许手动直接执行，请提交审批工单",
+            f"{action_def.severity.upper()} action '{action_name}' 不允许手动直接执行，"
+            "请提交审批工单并由 admin 审批",
         )
 
     body_params: dict = {}
@@ -592,13 +621,19 @@ async def query_response_logs(
     user: UserInfo = Depends(get_current_user),
 ):
     """查询响应日志"""
-    logs = await response_logger.query_logs(
-        session,
-        session_id=session_id,
-        threat_type=threat_type,
-        src_ip=src_ip,
-        limit=limit,
-    )
+    try:
+        logs = await response_logger.query_logs(
+            session,
+            session_id=session_id,
+            threat_type=threat_type,
+            src_ip=src_ip,
+            limit=limit,
+        )
+    except Exception as e:
+        # 2026-10-20 修复（整改报告 §9.55）：查询失败**不得**返回空列表 ——
+        # 运维看到空列表会以为「没有响应动作」，而真相是「查不出来」。
+        logger.error(f"[Response] 响应动作审计查询失败: {e}")
+        raise HTTPException(503, f"响应动作审计查询失败: {e}") from e
     return [log.to_dict() for log in logs]
 
 @router.post("/response/clear-cooldowns")

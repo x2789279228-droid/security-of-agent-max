@@ -66,6 +66,17 @@ class TestPolicyUpdateAudit:
             from models import AuditTrail
             from response_engine import policy_engine
 
+            # 2026-10-03 修正：本测试原先**没有**显式设置前置状态，而是假定
+            # 「C2通信自动封禁」策略的 auto_execute 已经是 True。
+            # 该假定只在策略从【代码兜底】加载时成立 —— 而 conftest 修复 .env 隔离后
+            # （见 conftest.py 的 SHARED_MEMORY_SKIP_DOTENV），真实 YAML 生效，
+            # 其中 POL-C2-BEACON.yml 写的是 auto_execute: false，
+            # 于是 before["auto_execute"] 为 False，断言失败。
+            # 显式声明前置条件，本测试便不再依赖任何继承来的全局状态。
+            pol = policy_engine.get_policy("C2通信自动封禁")
+            assert pol is not None, "未加载到 C2通信自动封禁 策略"
+            pol.auto_execute = True
+
             req = PolicyUpdateRequest(name="C2通信自动封禁", auto_execute=False)
             fake_req = _FakeRequest()
             async with async_session() as s:
@@ -85,7 +96,7 @@ class TestPolicyUpdateAudit:
                 assert row.before["auto_execute"] is True
 
             # 还原全局单例策略，避免污染其它测试
-            policy_engine.get_policy("C2通信自动封禁").auto_execute = True
+            pol.auto_execute = False
         _run(t())
 
 

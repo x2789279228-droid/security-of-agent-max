@@ -129,7 +129,26 @@ def test_medium_severity_uncertain_only_alerts():
 
 
 def test_natural_language_name_hits_c2_policy():
-    """自然语言事件名兜底推断: "C2 通信" → C2_BEACON → 命中 C2 专属封禁策略。"""
+    """自然语言事件名兜底推断: "C2 通信" → C2_BEACON → 命中 C2 专属封禁策略。
+
+    2026-10-03 修正断言。
+      原断言是 `calls[0][0] == "block_ip"`，即"策略命中后立即自动执行封禁"。
+      之所以一直通过，是因为 conftest 此前**没有**固定 RESPONSE_POLICIES_DIR，
+      而开发者 `.env` 里该变量指向 /data/response_policies（Linux 容器路径），
+      导致 YAML 策略加载失败、回退到**代码内置兜底策略**——那条策略没有审批要求，
+      于是 block_ip 被"自动执行"。
+
+      也就是说：**这条测试一直在验证降级路径，从未验证真实策略。**
+
+      指针向仓库内真实 policies 目录后，YAML 策略 POL-C2-BEACON 生效，而
+      response_registry.needs_approval() 对 block_ip 这类破坏性动作一律返回 True，
+      因此真实行为是"生成审批工单、人工确认后才执行"，而不是自动封禁。
+
+      注意策略文件自身是矛盾的：name 叫「C2通信自动封禁」，但同时写着
+      `auto_execute: false` 与 `require_approval: false`。若确实期望自动封禁，
+      需要给 needs_approval() 增加策略级豁免，而不是靠回退到兜底策略。
+      见 docs/AUDIT-2026-10-03-非安全类优化点.md。
+    """
     async def t():
         await _reset()
         security_guard.reset()
@@ -144,9 +163,15 @@ def test_natural_language_name_hits_c2_policy():
             })
         finally:
             restore()
+        # 1) 自然语言兜底推断能命中 C2 专属策略（这部分原断言是对的，予以保留）
         assert result["matched"]
         assert result["match_status"] == "matched"
         assert result["policy_name"] == "C2通信自动封禁", \
             "推断出的 C2_BEACON 应命中专属策略而非 Uncertain"
-        assert calls[0][0] == "block_ip", "C2 策略首选动作是自动封禁"
+        # 2) 真实策略下，破坏性动作走审批而非直接执行
+        assert calls == [], \
+            "含 block_ip 的策略不应在无审批时直接执行（needs_approval 恒为 True）"
+        ticket = approval_queue.get_ticket(result["approval_ticket_id"])
+        assert ticket is not None, "应生成审批工单"
+        assert ticket.status == ApprovalStatus.PENDING
     _run(t())

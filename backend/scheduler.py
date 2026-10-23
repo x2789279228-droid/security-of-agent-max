@@ -13,13 +13,12 @@ import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from anomaly_detector import anomaly_detector, EntityBaseline
-from event_store import event_store, EventFilter
+from event_store import event_store
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,30 @@ FP_ANALYTICS_INTERVAL = 3600   # 误报统计间隔（1小时）
 KPI_DAILY_INTERVAL = 86400    # KPI 日快照间隔（24小时,默认凌晨触发）
 EMBED_BACKFILL_INTERVAL = 300  # embedding 回填巡检间隔（5分钟; 漏跑自愈）
 STUCK_AUDIT_REAP_INTERVAL = 120  # r6: 卡住未分析事件收口间隔（2分钟）
+INTEL_FEED_POLL_INTERVAL = 60    # 情报源轮询检查间隔（秒；按 feed 自身 interval 决定是否拉取）
 # PQ drain 间隔由 settings.audit_pq_drain_interval_s 控制
+
+
+def _baseline_snapshot_payload(bl) -> dict:
+    """实体基线 → 落库快照的载荷（整改方案 §9.59）。
+
+    抽成独立函数是为了让「快照可复现」这条性质**可测**：
+    `_snapshot_baselines` 要 DB 会话，守卫测不了；把载荷构造
+    独立出来，守卫就能直接调用它，比对两个不同 PYTHONHASHSEED
+    进程的结果。
+
+    `event_types` 是**集合**，不排序的话同一份基线在不同进程里
+    落出逐字节不同的 JSON —— 快照就失去了「逐字节比对」的能力，
+    趋势比对无从谈起。
+    """
+    return {
+        "hourly_counts": bl.hourly_counts,
+        "daily_count": bl.daily_count,
+        "total_count": bl.total_count,
+        "last_seen": bl.last_seen,
+        "event_types": sorted(bl.event_types),
+        "first_seen": bl.first_seen,
+    }
 
 
 class Scheduler:
@@ -68,6 +90,7 @@ class Scheduler:
             asyncio.create_task(self._audit_pq_drain_loop()),
             asyncio.create_task(self._selfplay_review_loop()),
             asyncio.create_task(self._audit_trail_flush_loop(db_session_factory)),
+            asyncio.create_task(self._dlq_retention_loop(db_session_factory)),
             asyncio.create_task(self._tool_call_log_flush_loop(db_session_factory)),
             asyncio.create_task(self._causal_learn_loop(db_session_factory)),
             asyncio.create_task(self._demo_traffic_loop(db_session_factory)),
@@ -83,10 +106,46 @@ class Scheduler:
             _learn_enabled = True
         if _learn_enabled:
             self._tasks.append(asyncio.create_task(self._learn_loop(db_session_factory)))
+        # 威胁情报源轮询：仅在 intel_enabled 时启动，避免无源时空转。
+        try:
+            from config import settings as _intel_cfg
+            if bool(getattr(_intel_cfg, "intel_enabled", False)):
+                self._tasks.append(asyncio.create_task(
+                    self._intel_feed_poll_loop(db_session_factory)))
+        except Exception as e:
+            logger.warning("Intel feed poll loop not started: %s", e)
         logger.info("Scheduler started: snapshot=%ds, long_chain=%ds, cad_ctx=%ds, watchdog=%ds, sla=%ds, fp=%ds, kpi=%ds, embed_backfill=%ds",
                      SNAPSHOT_INTERVAL, LONG_CHAIN_INTERVAL, 3600, WATCHDOG_INTERVAL,
                      SLA_CHECK_INTERVAL, FP_ANALYTICS_INTERVAL, KPI_DAILY_INTERVAL,
                      EMBED_BACKFILL_INTERVAL)
+
+    async def _dlq_retention_loop(self, db_factory):
+        """按保留期删除 DLQ 索引。审计只记删除条数，不记负载。"""
+        while self._running:
+            try:
+                await asyncio.sleep(6 * 3600)
+                if not self._running:
+                    return
+                from audit_trail import log_action
+                from dlq_store import purge_expired
+
+                async with db_factory() as session:
+                    removed = await purge_expired(session)
+                    if removed:
+                        await log_action(
+                            session,
+                            actor="scheduler",
+                            actor_role="system",
+                            action="dlq.purge",
+                            target_type="dlq",
+                            target_id="retention",
+                            after={"removed": removed},
+                            reason="retention",
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("DLQ retention purge failed: %s", type(exc).__name__)
 
     async def stop(self):
         """停止所有后台任务"""
@@ -98,6 +157,60 @@ class Scheduler:
         logger.info("Scheduler stopped")
 
     # ── 1. 基线快照 ──
+
+    async def _intel_feed_poll_loop(self, db_factory):
+        """按各 feed 的 poll_interval_min 轮询并落库 IOC。"""
+        while self._running:
+            try:
+                async with db_factory() as session:
+                    await self._poll_due_feeds(session)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("[Intel] feed poll loop error: %s", e)
+            await asyncio.sleep(INTEL_FEED_POLL_INTERVAL)
+
+    async def _poll_due_feeds(self, session: AsyncSession) -> int:
+        """拉取到期的启用情报源；返回实际轮询的 feed 数。"""
+        from models import ThreatIntelFeed
+        from threat_intel.ioc_ingest import poll_feed_and_store
+        from threat_intel.ioc_matcher import ioc_matcher
+
+        now = datetime.now(timezone.utc)
+        feeds = (await session.execute(
+            select(ThreatIntelFeed).where(ThreatIntelFeed.enabled == True)
+        )).scalars().all()
+        polled = 0
+        for feed in feeds:
+            interval_s = max(1, int(feed.poll_interval_min or 60)) * 60
+            last = feed.last_poll_at
+            if last is not None and last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            if last is not None and (now - last).total_seconds() < interval_s:
+                continue
+            cfg = {
+                "feed_type": feed.feed_type, "url": feed.url,
+                "api_key": feed.api_key, "collection": feed.collection,
+                "name": feed.name,
+            }
+            try:
+                stats = await poll_feed_and_store(session, cfg)
+                feed.last_poll_status = "success"
+                feed.last_poll_count = int(stats.get("inserted", 0)) + int(stats.get("updated", 0))
+                logger.info(
+                    "[Intel] polled feed=%s inserted=%s updated=%s",
+                    feed.name, stats.get("inserted"), stats.get("updated"),
+                )
+            except Exception as e:
+                feed.last_poll_status = "error"
+                feed.last_poll_count = 0
+                logger.warning("[Intel] feed=%s poll failed: %s", feed.name, e)
+            feed.last_poll_at = now
+            await session.commit()
+            polled += 1
+        if polled:
+            await ioc_matcher.refresh_cache(session)
+        return polled
 
     async def _baseline_snapshot_loop(self, db_factory):
         """定时快照异常检测基线到 PostgreSQL"""
@@ -145,14 +258,7 @@ class Scheduler:
                     {
                         "type": entity_type,
                         "key": key,
-                        "snapshot": json.dumps({
-                            "hourly_counts": bl.hourly_counts,
-                            "daily_count": bl.daily_count,
-                            "total_count": bl.total_count,
-                            "last_seen": bl.last_seen,
-                            "event_types": list(bl.event_types),
-                            "first_seen": bl.first_seen,
-                        }),
+                        "snapshot": json.dumps(_baseline_snapshot_payload(bl)),
                         "now": now,
                     }
                 )
@@ -204,7 +310,6 @@ class Scheduler:
 
             for evt in events:
                 hour = evt.created_at.hour
-                raw = evt.raw_data or {}
                 event_type = evt.event_type
                 src_ip = evt.src_ip or ""
                 dst_ip = evt.dst_ip or ""
@@ -850,12 +955,10 @@ class Scheduler:
             raw["_audit_llm"] = audit
             e.raw_data = raw
             n += 1
-            try:
-                event_store.invalidate(e.id, broadcast=True)
-            except Exception:
-                pass
         if n:
-            await session.commit()
+            await event_store.commit_then_invalidate(
+                session, *[e.id for e in rows]
+            )
             # 归还可能泄漏的 in-flight 计数(粗略校正)
             try:
                 from temporal.client import inflight_release

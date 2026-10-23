@@ -13,7 +13,6 @@
 失败时构造 feedback_to_llm（中文），供 Agent 重试时附给 LLM 修正。
 完全自包含，无外部依赖。
 """
-from typing import Optional
 
 from stabilizer.json_repair import JsonRepair
 from stabilizer.tool_resolver import ToolResolver, ALL_TOOLS

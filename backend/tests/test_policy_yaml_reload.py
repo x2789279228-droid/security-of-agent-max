@@ -120,6 +120,104 @@ def test_disable_policy_falls_to_uncertain():
         assert am2.match_status == MatchStatus.UNCERTAIN
 
 
+def test_update_policy_merges_nested_match():
+    """部分更新 match.min_confidence 不得丢掉原 threat_type，响应必须带回 match。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        created = policy_store.create_policy(
+            {
+                "id": "POL-MATCH-MERGE",
+                "name": "匹配合并探测",
+                "threat_type": "C2_BEACON",
+                "min_confidence": 0.8,
+                "min_severity": "high",
+                "actions": [{"name": "send_alert", "params": {}}],
+                "auto_execute": False,
+                "priority": 90,
+            },
+            policies_dir=tmp,
+        )
+        assert created["success"], created
+        result = policy_store.update_policy(
+            "匹配合并探测",
+            {"match": {"min_confidence": 0.9}},
+            change_summary="提高置信度阈值",
+            policies_dir=tmp,
+        )
+        assert result["success"], result
+        content = result["version_data"]["content"]
+        assert content["match"]["min_confidence"] == 0.9
+        assert content["match"]["threat_type"] == "C2_BEACON"
+        assert content["match"]["min_severity"] == "high"
+
+
+def test_policy_update_request_forbids_unknown_fields():
+    from pydantic import ValidationError
+    from routers.response import PolicyUpdateRequest
+
+    PolicyUpdateRequest(name="C2通信自动封禁", min_confidence=0.9)
+    try:
+        PolicyUpdateRequest(name="C2通信自动封禁", confidence=0.9)  # type: ignore[call-arg]
+        raise AssertionError("未知字段应被拒绝")
+    except ValidationError as exc:
+        assert "confidence" in str(exc)
+
+
+def test_update_policy_rejects_unknown_keys():
+    """拼错字段名必须失败，不能 success=True 却静默丢弃。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        created = policy_store.create_policy(
+            {
+                "id": "POL-UNKNOWN-KEY",
+                "name": "未知字段探测",
+                "threat_type": "C2_BEACON",
+                "min_confidence": 0.8,
+                "min_severity": "high",
+                "actions": [{"name": "send_alert", "params": {}}],
+                "auto_execute": False,
+                "priority": 90,
+            },
+            policies_dir=tmp,
+        )
+        assert created["success"], created
+        result = policy_store.update_policy(
+            "未知字段探测",
+            {"confidence": 0.9},
+            change_summary="错误字段名",
+            policies_dir=tmp,
+        )
+        assert result["success"] is False
+        assert "不支持的字段" in result["error"]
+        assert "confidence" in result["error"]
+        loaded = policy_store.get_policy("未知字段探测", policies_dir=tmp)
+        assert loaded["min_confidence"] == 0.8
+
+
+def test_update_policy_accepts_full_yaml_rollback_payload():
+    """回滚把 to_yaml_dict 整份写回，字段都在 schema 内。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        created = policy_store.create_policy(
+            {
+                "id": "POL-ROLLBACK-OK",
+                "name": "回滚探测",
+                "threat_type": "C2_BEACON",
+                "min_confidence": 0.8,
+                "min_severity": "high",
+                "actions": [{"name": "send_alert", "params": {}}],
+                "auto_execute": False,
+                "priority": 90,
+            },
+            policies_dir=tmp,
+        )
+        content = dict(created["version_data"]["content"])
+        content["match"] = dict(content["match"])
+        content["match"]["min_confidence"] = 0.7
+        result = policy_store.apply_content_to_file(
+            "回滚探测", content, policies_dir=tmp,
+        )
+        assert result["success"], result
+        assert result["version_data"]["content"]["match"]["min_confidence"] == 0.7
+
+
 def test_mtime_hot_reload_on_match():
     with tempfile.TemporaryDirectory() as tmp:
         engine = PolicyEngine()

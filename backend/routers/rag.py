@@ -4,17 +4,16 @@ RAG 知识库域路由 — 检索、文档管理、断言验证、MITRE/CAPEC �
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import get_session
 from auth import get_current_user, RequireRole, UserInfo
-from summary_compression import embedder
+from summary_compression import embedder, is_degraded_vector
 from rag import (
     kb_manager, retriever, security_chunker, seed_knowledge_base,
-    evidence_verifier, RAGContextBuilder,
-    import_enterprise_attack, import_capec,
+    evidence_verifier, import_enterprise_attack, import_capec,
     get_import_status, set_import_status, ImportStatus,
 )
 
@@ -45,7 +44,8 @@ class RAGSearchRequest(BaseModel):
 @router.post("/rag/search")
 async def rag_search(
     req: RAGSearchRequest,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(get_current_user),
 ):
     """检索安全知识库"""
     result = await retriever.retrieve(
@@ -73,9 +73,10 @@ async def rag_search(
 async def rag_list_documents(
     threat_type: str = Query(""),
     source: str = Query(""),
-    limit: int = Query(20),
-    offset: int = Query(0),
-    session: AsyncSession = Depends(get_session)
+    limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=100_000),
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(get_current_user),
 ):
     """列出知识库文档"""
     docs = await kb_manager.search_documents(
@@ -90,7 +91,8 @@ async def rag_list_documents(
 @router.get("/rag/documents/{doc_id}")
 async def rag_get_document(
     doc_id: int,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(get_current_user),
 ):
     """获取单个知识文档"""
     doc = await kb_manager.get_document(session, doc_id)
@@ -137,6 +139,15 @@ async def _materialize_doc_chunks(session, doc: dict) -> int:
     qdrant_batch = []
     for chunk_data in chunks:
         vec = await embedder.embed(chunk_data["content"][:1000])
+        if is_degraded_vector(vec):
+            # 2026-10-20 修复（整改报告 §9.50）：embedding 失败时客户端返回
+            # **全零向量**（维度正确、内容为空）—— 与真实向量不可区分。
+            # 不写向量（内容仍入库，词法检索照常可用），但别让向量库里
+            # 多一条「看起来正常、实际无信息」的点。
+            logger.warning(
+                "[RAG] chunk %s 的 embedding 是降级产物(全零向量) → 不写向量, "
+                "仅保留词法可检索的内容", chunk_data["chunk_id"])
+            vec = None
         from rag.lexical import build_search_lex
         chunk = KnowledgeChunk(
             doc_id=chunk_data["doc_id"],
@@ -153,11 +164,12 @@ async def _materialize_doc_chunks(session, doc: dict) -> int:
         )
         session.add(chunk)
         total_chunks += 1
-        qdrant_batch.append({
-            "chunk_id": chunk_data["chunk_id"],
-            "doc_id": chunk_data["doc_id"],
-            "vector": vec,
-        })
+        if vec is not None:
+            qdrant_batch.append({
+                "chunk_id": chunk_data["chunk_id"],
+                "doc_id": chunk_data["doc_id"],
+                "vector": vec,
+            })
     await session.commit()
     try:
         from qdrant_store import qdrant_store
@@ -262,7 +274,8 @@ class RAGVerifyRequest(BaseModel):
 @router.post("/rag/verify")
 async def rag_verify_claim(
     req: RAGVerifyRequest,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(get_current_user),
 ):
     """验证断言是否被知识库支撑（减少幻觉的核心功能）"""
     claim = req.claim
@@ -286,7 +299,8 @@ async def rag_verify_claim(
 
 @router.get("/rag/stats")
 async def rag_stats(
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(get_current_user),
 ):
     """知识库统计"""
     stats = await kb_manager.get_stats(session)
@@ -294,14 +308,17 @@ async def rag_stats(
 
 @router.post("/rag/reseed")
 async def rag_reseed(
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
 ):
-    """重新播种知识库"""
+    """重新播种知识库（写操作：重建知识库内容，限 admin）"""
     await seed_knowledge_base(session)
     return {"status": "reseeded"}
 
 @router.get("/rag/import/status")
-async def rag_import_status():
+async def rag_import_status(
+    user: UserInfo = Depends(get_current_user),
+):
     """查询当前导入进度"""
     status = get_import_status()
     if not status:
@@ -310,8 +327,9 @@ async def rag_import_status():
 
 @router.post("/rag/import/mitre")
 async def rag_import_mitre(
-    limit: int = Query(0, description="最大导入数(0=全部)"),
+    limit: int = Query(0, ge=0, le=10000, description="最大导入数(0=全部)"),
     session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
 ):
     """从 MITRE ATT&CK 官方数据源导入完整攻击技术库"""
     s = ImportStatus()
@@ -327,8 +345,9 @@ async def rag_import_mitre(
 
 @router.post("/rag/import/capec")
 async def rag_import_capec(
-    limit: int = Query(0, description="最大导入数(0=全部)"),
+    limit: int = Query(0, ge=0, le=10000, description="最大导入数(0=全部)"),
     session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
 ):
     """从 MITRE CAPEC 官方数据源导入完整攻击模式库"""
     s = ImportStatus()
@@ -345,8 +364,9 @@ async def rag_import_capec(
 @router.post("/rag/import/all")
 async def rag_import_all(
     session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
 ):
-    """导入所有 MITRE 知识库 (ATT&CK + CAPEC + 预置知识)"""
+    """导入所有 MITRE 知识库 (ATT&CK + CAPEC + 预置知识) — 写操作，限 admin"""
     s = ImportStatus()
     s.start("all")
     set_import_status(s)

@@ -120,11 +120,9 @@ class WatchdogAgent:
 
         # 有异常 → 触发诊断
         worst_stage = ""
-        worst_reasons = []
         for stage_name, stage_health in snapshot.stages.items():
             if stage_health.status == "red":
                 worst_stage = stage_name
-                worst_reasons = [stage_health.message]
                 break
 
         return await self.diagnose(
@@ -285,7 +283,6 @@ class WatchdogAgent:
         recommendations = []
 
         # 找出最差的阶段
-        worst_stage = trigger_stage
         worst_info = stage_stats.get(trigger_stage, {})
         if isinstance(worst_info, dict):
             if worst_info.get("error_rate", 0) > 0.3:

@@ -134,65 +134,71 @@ _PLATFORM_TOOLS = [
 
 # ============================================================
 # Mock 执行器（模拟工具执行，返回结构化结果）
+#
+# ⚠ 这些执行器**什么都不做** —— 所以它们**不许**报 `status="success"`。
+# 修复前它们报 success + 「已封禁 …」/「扫描完成 … 发现0个漏洞」，
+# 而这条路径是活的（`POST /api/audit/guard/call`），
+# 于是调用方与审计记录都以为动作真的执行了。详见 §9.46。
 # ============================================================
+def _simulated(action: str, detail: str, device: str) -> dict:
+    """模拟执行器的**诚实**返回值。
+
+    修复前这些执行器返回 `status="success"` + 「已封禁 …」/「扫描完成 … 发现0个漏洞」，
+    而它们**什么都不做** —— 于是：
+
+    * `POST /api/audit/guard/call` 的调用方收到「已封禁 1.2.3.4」；
+    * 审计记录里 `exec_status="success"`；
+    * 能力看板显示「封禁成功」。
+
+    而 `vulnerability_scan` 那种最恶劣：它声称**做了一次安全扫描**
+    并给出「**发现 0 个漏洞**」的结论 —— 一个从没跑过的扫描。
+
+    模拟就是模拟，**不许报成功**（整改方案 §十三「全量回归」行与
+    §二「执行失败 / 部分成功必须可区分」的精神）。
+    """
+    return {
+        "status": "simulated",
+        "executed": False,
+        "simulated": True,
+        "action": action,
+        "detail": f"[模拟] {detail}（**未实际下发**）",
+        "device": device,
+    }
+
+
 def _exec_block_ip(ip: str, duration: int = 3600, **kw) -> dict:
     """模拟防火墙封禁IP。"""
-    return {
-        "status": "success",
-        "action": "block_ip",
-        "detail": f"已封禁 {ip}，时长 {duration} 秒",
-        "device": "firewall",
-    }
+    return _simulated(
+        "block_ip", f"封禁 {ip}，时长 {duration} 秒", "firewall")
 
 
 def _exec_isolate_host(host: str, isolation_type: str = "network", **kw) -> dict:
     """模拟EDR主机隔离。"""
-    return {
-        "status": "success",
-        "action": "isolate_host",
-        "detail": f"已隔离主机 {host}，隔离类型={isolation_type}",
-        "device": "edr",
-    }
+    return _simulated(
+        "isolate_host", f"隔离主机 {host}，隔离类型={isolation_type}", "edr")
 
 
 def _exec_rate_limit(ip: str, rate: int = 100, **kw) -> dict:
     """模拟速率限制。"""
-    return {
-        "status": "success",
-        "action": "rate_limit",
-        "detail": f"已对 {ip} 设置速率限制: {rate} req/s",
-        "device": "firewall",
-    }
+    return _simulated(
+        "rate_limit", f"对 {ip} 设置速率限制: {rate} req/s", "firewall")
 
 
 def _exec_terminate_process(pid: int = 0, **kw) -> dict:
     """模拟终止进程。"""
-    return {
-        "status": "success",
-        "action": "terminate_process",
-        "detail": f"已终止进程 PID={pid}",
-        "device": "edr",
-    }
+    return _simulated("terminate_process", f"终止进程 PID={pid}", "edr")
 
 
 def _exec_alert_only(message: str = "", **kw) -> dict:
     """模拟发送告警。"""
-    return {
-        "status": "success",
-        "action": "alert_only",
-        "detail": f"告警已发送: {message}",
-        "device": "siem",
-    }
+    return _simulated("alert_only", f"发送告警: {message}", "siem")
 
 
 def _exec_vulnerability_scan(target: str = "", scan_type: str = "fast", **kw) -> dict:
     """模拟漏洞扫描。"""
-    return {
-        "status": "success",
-        "action": "vulnerability_scan",
-        "detail": f"扫描完成: 目标={target}, 类型={scan_type}, 发现0个漏洞",
-        "device": "scanner",
-    }
+    return _simulated(
+        "vulnerability_scan",
+        f"漏洞扫描: 目标={target}, 类型={scan_type}", "scanner")
 
 
 # 工具名 -> 执行函数 映射

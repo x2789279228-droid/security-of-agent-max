@@ -6,6 +6,9 @@ global:
   external_labels:
     source: soc
 
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   - job_name: soc-backend
     metrics_path: /metrics

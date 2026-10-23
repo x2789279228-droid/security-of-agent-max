@@ -45,7 +45,7 @@ async def migrate_memories(limit: int = 0):
             if not getattr(r, "embedding", None):
                 skipped += 1
                 continue
-            ok = await vector_store._upsert_qdrant(r)
+            await vector_store._upsert_qdrant(r)
             # _upsert_qdrant 内部对 Qdrant 不可用会降级(空返回), 这里无法区分成功与否,
             # 统一计入 done, 由 qdrant count 佐证实际同步量。
             done += 1

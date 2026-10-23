@@ -18,10 +18,10 @@ traffic_profiler.py — 主机/子网流量画像
 import logging
 import math
 import time
+from typing import Optional
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -180,9 +180,6 @@ class TrafficProfiler:
     def profile_count(self) -> int:
         return len(self._profiles)
 
-
-# 需要导入 Optional
-from typing import Optional
 
 # ── 全局单例 ──
 traffic_profiler = TrafficProfiler()

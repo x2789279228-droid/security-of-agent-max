@@ -125,6 +125,14 @@ class ParamCoercer:
             return params, []
 
         schema = PARAM_SCHEMAS[tool_name]
+        if not schema:
+            # 空 schema = **没有声明任何字段** —— 不能据此判定
+            # 别的字段都是「未知」。否则第三步会把**所有**参数剥光，
+            # 而必填校验对空 schema 又不做任何检查 ⇒ 工具**静默地**
+            # 以空参被调用（§9.46.9）。
+            #
+            # 处理与「工具未注册」一致：原样返回，不动它。
+            return dict(params) if params else {}, []
         result = dict(params) if params else {}
         changes: List[tuple] = []
 

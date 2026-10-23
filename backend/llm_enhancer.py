@@ -29,8 +29,8 @@ import hashlib
 import json
 import logging
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Callable, Awaitable
+from datetime import datetime, timezone
+from typing import Optional, Awaitable
 
 from config import settings
 
@@ -128,7 +128,7 @@ def get_module_budget_status() -> dict:
 
 def _biz_cache_key(module: str, raw_key: str) -> str:
     """业务缓存键:拼接 module 防止跨模块撞车."""
-    return f"{module}:{hashlib.md5(raw_key.encode('utf-8')).hexdigest()}"
+    return f"{module}:{hashlib.md5(raw_key.encode('utf-8'), usedforsecurity=False).hexdigest()}"
 
 
 def _biz_cache_get(key: str) -> Optional[dict]:

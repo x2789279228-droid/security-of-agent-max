@@ -53,10 +53,13 @@ def _make_traceparent(event_id: str) -> str:
 
 
 def _trace_headers(event_id: str) -> list:
-    """Kafka headers: 标准 traceparent + 兼容旧 trace_id"""
+    """Kafka headers: 稳定 event_id + correlation_id + W3C trace。"""
+    eid = str(event_id or "")
     return [
-        ("traceparent", _make_traceparent(event_id).encode("utf-8")),
-        ("trace_id", event_id.encode("utf-8")),
+        ("event_id", eid.encode("utf-8")),
+        ("correlation_id", eid.encode("utf-8")),
+        ("traceparent", _make_traceparent(eid).encode("utf-8")),
+        ("trace_id", eid.encode("utf-8")),
     ]
 
 # ── SASL_SSL 可选参数 (main() 中按 CLI 入参填充, 供 create_kafka_producer 读取) ──

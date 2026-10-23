@@ -1,0 +1,173 @@
+{
+  "title": "守望核心运营指标",
+  "uid": "soc-core-ops",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["soc", "sre", "core"],
+  "timezone": "browser",
+  "editable": true,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "接入吞吐量",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(rate(soc_ingest_received_total[5m]))", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "接入拒绝",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "sum(rate(soc_ingest_rejected_total[5m]))", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "校验失败",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "sum(rate(soc_ingest_validation_failed_total[5m]))", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "DLQ 积压",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "soc_dlq_depth", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 50 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Kafka Consumer Lag",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [{ "expr": "soc_kafka_consumer_lag", "legendFormat": "{{topic}}", "refId": "A" }]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "最老积压消息年龄",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [{ "expr": "soc_kafka_oldest_lag_seconds", "legendFormat": "{{topic}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "流水线端到端延迟 p95",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, result) (rate(soc_pipeline_e2e_seconds_bucket[5m])))", "legendFormat": "{{result}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "各阶段耗时 p95",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(soc_pipeline_stage_seconds_bucket[5m])))", "legendFormat": "{{stage}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "流水线失败率",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [{ "expr": "sum by (stage) (rate(soc_pipeline_results_total{result=~\"fail|dlq|dropped|rejected\"}[5m])) / clamp_min(sum by (stage) (rate(soc_pipeline_results_total[5m])), 1e-9)", "legendFormat": "{{stage}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "DLQ 写入与等待",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        { "expr": "rate(soc_dlq_messages_total[5m])", "legendFormat": "writes {{reason}}", "refId": "A" },
+        { "expr": "soc_dlq_oldest_wait_seconds", "legendFormat": "oldest wait", "refId": "B" }
+      ]
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "SSE 队列深度 / 丢弃 / 补查",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        { "expr": "soc_eventbus_queue_depth", "legendFormat": "depth {{lane}}", "refId": "A" },
+        { "expr": "rate(soc_eventbus_drops_total[5m])", "legendFormat": "drop {{lane}}", "refId": "B" },
+        { "expr": "rate(soc_eventbus_catchup_events_total[5m])", "legendFormat": "catchup", "refId": "C" },
+        { "expr": "rate(soc_eventbus_disconnects_total[5m])", "legendFormat": "disconnect", "refId": "D" }
+      ]
+    },
+    {
+      "id": 50,
+      "type": "timeseries",
+      "title": "缓存命中 / 过期 / 失效失败",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [
+        { "expr": "sum by (cache, result) (rate(soc_cache_requests_total[5m]))", "legendFormat": "{{cache}} {{result}}", "refId": "A" },
+        { "expr": "rate(soc_cache_invalidate_failures_total[5m])", "legendFormat": "invalidate fail {{cache}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 60,
+      "type": "stat",
+      "title": "关闭遗留任务",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 36 },
+      "targets": [{ "expr": "sum(soc_lifecycle_leftover_tasks)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 61,
+      "type": "stat",
+      "title": "非预期丢弃",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 36 },
+      "targets": [{ "expr": "sum(increase(soc_unexpected_drops_total[1h]))", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 62,
+      "type": "stat",
+      "title": "核心告警 firing",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 36 },
+      "targets": [{ "expr": "sum(soc_core_alerts_active)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] }
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "Kafka 消费循环存活",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "targets": [{ "expr": "soc_kafka_consumer_alive", "legendFormat": "{{loop}}", "refId": "A" }]
+    },
+    {
+      "id": 64,
+      "type": "timeseries",
+      "title": "Kafka 消费循环重启",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "targets": [{ "expr": "rate(soc_kafka_consumer_restarts_total[5m])", "legendFormat": "{{loop}}", "refId": "A" }]
+    }
+  ]
+}

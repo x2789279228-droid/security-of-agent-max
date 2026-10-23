@@ -17,7 +17,7 @@
 """
 import ipaddress
 import logging
-from typing import Callable, Coroutine, Optional
+from typing import Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 

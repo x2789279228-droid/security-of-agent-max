@@ -166,12 +166,63 @@
 | `audit_worker.submit` | 360 | sync | 轻（仅入堆） | `audit_workers` PriorityQueue |
 | `event_bus.publish("security_event")` | 378-387 | sync | 轻 | SSE + Redis bridge |
 
-**异常检测维度**（`anomaly_detector.py:283-391`）：
-- 统计偏离度（`src_ip` 当前小时 vs 其他 23h 均值，泊松近似 σ）权重 0.35
-- 事件类型罕见度（全局类型分布的反比）权重 0.20
-- 时序异常（凌晨 0-5h 0.4 / 22-23h 0.2）权重 0.15
-- 严重度（critical=1.0, high=0.6, medium=0.3, low=0, info=-0.05）权重 0.25
-- `is_anomaly = score > 0.6 or max_sigma > 3`
+**异常检测维度**（`anomaly_detector.py`，整改后口径）：
+
+维度分两类 —— **证据维度**由基线算出独立异常证据，**上下文维度**只放大已有证据。
+两者不能互换，这是整改的核心。
+
+| 类别 | 维度 | 权重 | 说明 |
+|---|---|---|---|
+| 证据 | `statistical_deviation` | 0.35 | `src_ip` 当前小时 vs 其他小时均值，泊松近似 σ |
+| 证据 | `rarity` | 0.20 | 事件类型在全局分布中的反比 |
+| 证据 | `target_concentration` | 0.15 | 近一小时流量高度集中到同一 `dst_ip` |
+| 上下文 | `temporal` | 0.15 | 非活跃时段（按**事件时间 + 配置时区**判定，与服务器时钟无关） |
+| 上下文 | `severity_prior` | 0.15 | 上游 `severity`（critical=1.0 / high=0.6 / medium=0.3 / low=0 / info=-0.05） |
+
+打分公式（**不是**权重和为 1 的线性加权）：
+
+```
+EVIDENCE_TOTAL = 0.70   # 恒定，不随可用维度变化
+CONTEXT_TOTAL  = 0.30
+
+有证据维度时：
+  evidence_score = Σ(w_i × v_i) / EVIDENCE_TOTAL
+  anomaly_score  = clamp(evidence_score + Σ(上下文加成), 0, 1)
+  status = detected if anomaly_score > ANOMALY_SCORE_THRESHOLD else not_detected
+无任何证据维度时：
+  anomaly_score = min(Σ(上下文加成), COLD_START_SCORE_CAP)
+  status = inconclusive                    # 永不告警
+```
+
+⚠️ **证据维度的分母恒为 `EVIDENCE_TOTAL`，不是「当前可用维度之和」。**
+早期实现按可用维度重新归一，导致一个新实体只剩 `severity_prior` 可用时
+被归一成 1.0 分直接越过阈值 —— 那是冷启动误报，不是检测。
+同理，`severity` 是**上下文**而非独立证据：单独一条 `severity=critical`
+的普通事件不应该告警。
+
+常量口径（数值以 `anomaly_detector.py` 为准）：
+
+| 常量 | 值 | 作用 |
+|---|---|---|
+| `ANOMALY_SCORE_THRESHOLD` | 0.60 | 判定阈值 |
+| `SIGMA_EQUIVALENT_THRESHOLD` | 3.0 | 统计偏离度的等效 σ 阈值 |
+| `COLD_START_SCORE_CAP` | 0.59 | 冷启动分数上界，**刻意低于阈值** |
+| `COLD_START_MIN_SAMPLES` | 5 | 低于此基线样本数时统计维度判 inconclusive |
+| `RARITY_MIN_SAMPLES` | 10 | 低于此全局样本量时罕见度维度判 inconclusive |
+
+判定式：
+
+- `is_anomaly = anomaly_score > ANOMALY_SCORE_THRESHOLD or deviation_sigma > SIGMA_EQUIVALENT_THRESHOLD`
+  —— 分数与 σ 是**两个独立条件**，任一成立即告警
+- 同一 `event_id` 重放**幂等**（打分先读基线、之后才更新基线），重放结果可复现
+- 无证据时状态为 `inconclusive` 并记录 `inconclusive_dimensions`，
+  **不得**当成 `not_detected` 计数 —— 否则准确率失去意义
+
+上述常量名与权重由 `tests/test_docs_match_implementation.py` 与实现逐条比对，
+改代码必须同步改本文档（该测试会变红提示）。
+
+回归见 `tests/test_review_anomaly.py`（16 例）与
+`tests/test_p3_detection_calibration.py`（量化标定）。
 
 ### 2.2 持久化层
 

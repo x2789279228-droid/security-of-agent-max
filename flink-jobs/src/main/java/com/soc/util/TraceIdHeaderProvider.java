@@ -15,9 +15,12 @@ import java.util.UUID;
  *
  * 配合 KafkaRecordSerializationSchema.builder().setHeaderProvider(...) 使用:
  * 值序列化保持 JSON (SimpleStringSchema), 同时写入:
- *   - traceparent: W3C 标准格式 (00-traceid-spanid-flags), 供 OTel/Tempo 体系消费
- *   - trace_id:    旧版兼容头 (traceid 原文)
- * 使下游 (Python kafka_consumer 等) 能按统一约定提取 trace, 贯穿 Flink→Python→PG/LLM。
+ *   - event_id:        稳定业务事件 ID（与 JSON eventId 一致，重试不得更换）
+ *   - correlation_id:  同一项业务处理的关联标识
+ *   - parent_event_id: 派生事件的来源 event_id（若有）
+ *   - traceparent:     W3C 标准格式 (00-traceid-spanid-flags)
+ *   - trace_id:        旧版兼容头 (traceid 原文)
+ * 使下游 (Python kafka_consumer 等) 能按统一约定提取身份与 trace。
  */
 public class TraceIdHeaderProvider implements HeaderProvider<String> {
 
@@ -26,57 +29,86 @@ public class TraceIdHeaderProvider implements HeaderProvider<String> {
     @Override
     public Headers getHeaders(String element) {
         RecordHeaders headers = new RecordHeaders();
+        JsonNode node = parse(element);
         // 优先使用事件内已携带的标准 traceparent (Flink span 下发), 否则由 traceId 派生
-        String traceparent = extractTraceparent(element);
+        String traceparent = extractTraceparent(node);
         String traceId = "";
         if (traceparent.isEmpty()) {
-            traceId = extractTraceId(element);
+            traceId = firstText(node, "traceId", "trace_id");
             traceparent = buildTraceparent(traceId);
         } else {
-            traceId = traceparent.split("-")[1];
+            String[] parts = traceparent.split("-");
+            if (parts.length >= 2) {
+                traceId = parts[1];
+            }
+        }
+        String eventId = firstText(node, "eventId", "event_id", "alertId");
+        String correlationId = firstText(node, "correlationId", "correlation_id");
+        if (correlationId.isEmpty()) {
+            correlationId = eventId;
+        }
+        String parentEventId = firstText(node, "parentEventId", "parent_event_id");
+        if (!eventId.isEmpty()) {
+            headers.add("event_id", eventId.getBytes(StandardCharsets.UTF_8));
+        }
+        if (!correlationId.isEmpty()) {
+            headers.add("correlation_id", correlationId.getBytes(StandardCharsets.UTF_8));
+        }
+        if (!parentEventId.isEmpty()) {
+            headers.add("parent_event_id", parentEventId.getBytes(StandardCharsets.UTF_8));
         }
         headers.add("trace_id", traceId.getBytes(StandardCharsets.UTF_8));
         headers.add("traceparent", traceparent.getBytes(StandardCharsets.UTF_8));
         return headers;
     }
 
-    /** 从事件 JSON 提取上游 traceparent (rawData._traceparent 或顶层 traceparent) */
-    private String extractTraceparent(String element) {
+    private JsonNode parse(String element) {
         try {
             if (mapper == null) {
                 mapper = new ObjectMapper();
             }
-            JsonNode node = mapper.readTree(element);
-            if (node == null) {
-                return "";
-            }
-            if (node.hasNonNull("traceparent")) {
-                return node.get("traceparent").asText();
-            }
-            if (node.hasNonNull("rawData") && node.get("rawData").hasNonNull("_traceparent")) {
-                return node.get("rawData").get("_traceparent").asText();
-            }
+            return mapper.readTree(element);
         } catch (Exception ignored) {
-            // 解析失败不影响主流程
+            return null;
+        }
+    }
+
+    private String firstText(JsonNode node, String... fields) {
+        if (node == null || !node.isObject()) {
+            return "";
+        }
+        for (String field : fields) {
+            if (node.hasNonNull(field)) {
+                String value = node.get(field).asText("");
+                if (value != null && !value.trim().isEmpty()) {
+                    return value;
+                }
+            }
+        }
+        if (node.has("payload") && node.get("payload").isObject()) {
+            JsonNode payload = node.get("payload");
+            for (String field : fields) {
+                if (payload.hasNonNull(field)) {
+                    String value = payload.get(field).asText("");
+                    if (value != null && !value.trim().isEmpty()) {
+                        return value;
+                    }
+                }
+            }
         }
         return "";
     }
 
-    /** 从事件 JSON 提取 traceId (优先 traceId, 回退 trace_id) */
-    private String extractTraceId(String element) {
-        try {
-            if (mapper == null) {
-                mapper = new ObjectMapper();
-            }
-            JsonNode node = mapper.readTree(element);
-            if (node != null && node.hasNonNull("traceId")) {
-                return node.get("traceId").asText();
-            }
-            if (node != null && node.hasNonNull("trace_id")) {
-                return node.get("trace_id").asText();
-            }
-        } catch (Exception ignored) {
-            // 解析失败不影响主流程
+    /** 从事件 JSON 提取上游 traceparent (rawData._traceparent 或顶层 traceparent) */
+    private String extractTraceparent(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return "";
+        }
+        if (node.hasNonNull("traceparent")) {
+            return node.get("traceparent").asText();
+        }
+        if (node.hasNonNull("rawData") && node.get("rawData").hasNonNull("_traceparent")) {
+            return node.get("rawData").get("_traceparent").asText();
         }
         return "";
     }

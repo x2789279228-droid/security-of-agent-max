@@ -120,10 +120,13 @@ class WorkOrderService:
         self, session: AsyncSession, order_id: int, approved_by: str = "admin"
     ) -> dict:
         """审批通过"""
+        from core_metrics import record_work_order_approve
         order = await session.get(WorkOrder, order_id)
         if not order:
+            record_work_order_approve("skipped")
             return {"success": False, "error": "工单不存在"}
         if order.approval_status != "pending":
+            record_work_order_approve("skipped")
             return {"success": False, "error": f"工单已审批: {order.approval_status}"}
 
         before_snapshot = {
@@ -137,9 +140,13 @@ class WorkOrderService:
         order.updated_at = datetime.now(timezone.utc)
         await session.commit()
 
-        # 审批通过后自动执行关联的响应动作
+        # 审批通过后的**工单侧**推进（真正的响应动作执行在另一条路径上，
+        # 见 `_execute_approved_actions` 的 docstring）。
         if order.case_id:
-            await self._execute_approved_actions(session, order)
+            ok = await self._execute_approved_actions(session, order)
+            record_work_order_approve("approved" if ok else "failed")
+        else:
+            record_work_order_approve("approved")
 
         # P0.H 操作审计
         try:
@@ -259,19 +266,45 @@ class WorkOrderService:
 
         return breached
 
-    async def _execute_approved_actions(self, session: AsyncSession, order: WorkOrder):
-        """审批通过后执行响应动作"""
+    async def _execute_approved_actions(self, session: AsyncSession,
+                                        order: WorkOrder) -> bool:
+        """审批通过后的**工单侧**推进：把案例推到 `responding`。
+
+        ⚠ **它不执行任何响应动作。**
+
+        修复前这个函数叫 `_execute_approved_actions`、docstring 写着
+        「审批通过后执行响应动作」，而函数体里只做两件事：
+        ① 取一个 `get_orchestrator()` **却从头到尾没用过**（死代码）；
+        ② 把案例状态改成 `responding`。
+
+        真正的响应动作执行在**另一条路径**上：
+        `response_orchestrator.on_threat_detected` → 内存态
+        `approval_queue.submit` → `_poll_approval` 轮询到 APPROVED →
+        `response_executor.execute_actions`。
+
+        于是系统里有**两套并行的审批机制**：
+        * 内存态审批票（`human_approval.approval_queue`）—— 进程重启即丢，
+          但通过后**真的**执行动作；
+        * 数据库态工单审批（`WorkOrder.approval_status`）—— 持久、
+          运维实际操作的是它，但通过后**不执行**任何动作。
+
+        「工单审批通过后到底要不要执行响应动作」属**产品语义决策**
+        （接上就可能与内存票路径重复执行）→ 登记为待决项 25，本轮不擅自接。
+
+        本轮只做安全的三件事：删死代码、改正 docstring、给失败加计数。
+        返回 True/False 供调用方记账（此前无返回值，失败不可见）。
+        """
         try:
-            from response_engine import get_orchestrator
-            orch = get_orchestrator()
             case = await session.get(SecurityCase, order.case_id)
             if case and case.event_ids:
                 # 更新案例状态
                 case.status = "responding"
                 case.updated_at = datetime.now(timezone.utc)
                 await session.commit()
+            return True
         except Exception as e:
             logger.warning(f"[WorkOrder] Auto-execute failed: {e}")
+            return False
 
     @staticmethod
     def _gen_order_number() -> str:

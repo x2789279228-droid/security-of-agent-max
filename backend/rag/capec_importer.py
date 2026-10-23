@@ -11,10 +11,8 @@ and Classification) 攻击模式，导入到本地知识库供 RAG 检索使用�
   - 所有 attack-pattern (攻击模式)
   - 包含描述、前提条件、严重度、缓解措施、示例
 """
-import json
 import logging
 import re
-from typing import Optional
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,7 +81,7 @@ def _extract_capec_id(stix_obj: dict) -> str:
 def _get_category(stix_obj: dict) -> str:
     """获取攻击模式分类"""
     labels = stix_obj.get("labels", [])
-    categories = [l for l in labels if l != "attack-pattern"]
+    categories = [x for x in labels if x != "attack-pattern"]
     return categories[0] if categories else "unknown"
 
 

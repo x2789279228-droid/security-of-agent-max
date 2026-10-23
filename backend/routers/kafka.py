@@ -1,7 +1,7 @@
 """Kafka 消息总线与 CEP 攻击链管理路由"""
 import logging
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -15,6 +15,23 @@ from schema_registry import schema_registry
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["kafka"])
+
+
+def _schema_registry_status() -> dict:
+    return {
+        "configured": bool(schema_registry._registry_base),
+        "schemas": list(schema_registry._schemas.keys()),
+        "register": [
+            {
+                "subject": item.subject,
+                "ok": item.ok,
+                "idempotent": item.idempotent,
+                "status_code": item.status_code,
+                "reason": item.reason,
+            }
+            for item in getattr(schema_registry, "last_register", [])
+        ],
+    }
 
 # ── CEP 模式管理（热更新 + 灰度）──
 
@@ -103,10 +120,7 @@ async def kafka_status():
         "consumer_stats": kafka_consumer_manager.stats(),
         "producer_active": kafka_producer.is_active,
         "flink": await _flink_overview(),
-        "schema_registry": {
-            "configured": bool(schema_registry._registry_base),
-            "schemas": list(schema_registry._schemas.keys()),
-        },
+        "schema_registry": _schema_registry_status(),
     }
 
 
@@ -141,10 +155,7 @@ async def pipeline_status():
         "flink": await _flink_overview(),
         "kafka_consumers": kafka_consumer_manager.stats(),
         "kafka_rejections": kafka_consumer_manager.rejection_stats(),
-        "schema_registry": {
-            "configured": bool(schema_registry._registry_base),
-            "schemas": list(schema_registry._schemas.keys()),
-        },
+        "schema_registry": _schema_registry_status(),
         "tracing": await _trace_backend_health(),
     }
 

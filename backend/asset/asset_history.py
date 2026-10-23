@@ -6,7 +6,6 @@
   - 合规取证
 """
 import logging
-from typing import Optional
 
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -35,7 +35,7 @@ async def save_match_start(cfg: dict, match_id: str) -> None:
 
 
 async def save_round(match_id: str, payload: dict) -> None:
-    from models import SelfPlayMatch, SelfPlayRound, async_session
+    from models import SelfPlayRound, async_session
     async with async_session() as session:
         session.add(SelfPlayRound(
             match_id=match_id,
@@ -80,7 +80,7 @@ async def save_learned_rules(match_id: str, round_num: int, rules: list[dict]) -
 
 
 async def save_match_end(match_id: str, *, status: str, winner: str, metrics: dict) -> None:
-    from models import SelfPlayMatch, async_session
+    from models import async_session
     async with async_session() as session:
         row = await _get_match(session, match_id)
         if row is None:
@@ -108,7 +108,7 @@ async def load_candidate_rules(limit: int = 200) -> list[dict]:
 
 
 async def get_match(match_id: str) -> Optional[dict]:
-    from models import SelfPlayMatch, SelfPlayRound, async_session
+    from models import SelfPlayRound, async_session
     from sqlalchemy import select
     async with async_session() as session:
         row = await _get_match(session, match_id)
@@ -200,7 +200,8 @@ async def aggregate_metrics() -> dict:
             nov.append(float(m.get("novelty") or 0))
         if "compounding" in m:
             comp.append(float(m.get("compounding") or 0))
-    avg = (lambda xs: sum(xs) / len(xs) if xs else 0.0)
+    def avg(xs):
+        return sum(xs) / len(xs) if xs else 0.0
     return {
         "matches": len(rows),
         "winners": winners,

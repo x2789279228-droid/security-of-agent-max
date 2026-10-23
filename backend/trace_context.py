@@ -9,7 +9,6 @@ trace_context.py — W3C Trace Context (traceparent) 工具
 本项目 trace_id (eventId UUID) 直接映射为 W3C trace-id (去横线后为 32 hex),
 使自研链路与标准 OTel/Tempo 体系无缝互通。
 """
-import os
 import re
 import uuid
 
@@ -17,7 +16,6 @@ _TRACEPARENT_RE = re.compile(
     r"^(?P<version>[0-9a-f]{2})-(?P<trace_id>[0-9a-f]{32})-(?P<span_id>[0-9a-f]{16})-(?P<flags>[0-9a-f]{2})$"
 )
 _TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
-_SPAN_ID_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
 def normalize_trace_id(trace_id: str) -> str:
@@ -32,7 +30,7 @@ def normalize_trace_id(trace_id: str) -> str:
         return cleaned
     # 非 32 hex: 用 MD5/确定性补齐为 32 hex
     import hashlib
-    return hashlib.md5(trace_id.encode("utf-8")).hexdigest()
+    return hashlib.md5(trace_id.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def generate_span_id() -> str:
@@ -69,8 +67,3 @@ def parse_traceparent(tp: str) -> dict | None:
         "flags": m.group("flags"),
         "sampled": m.group("flags")[-1] in ("1", "3", "5", "7", "9", "b", "d", "f"),
     }
-
-
-def span_id_to_bytes(span_id: str) -> bytes:
-    """16 hex → 8 字节"""
-    return bytes.fromhex(span_id) if _SPAN_ID_RE.match(span_id) else os.urandom(8)

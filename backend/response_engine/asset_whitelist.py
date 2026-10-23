@@ -5,7 +5,8 @@
 当 block_ip / isolate_host 等动作的目标 IP 命中白名单时，直接拒绝执行。
 
 白名单来源（优先级从高到低）:
-  1. 内置默认保护（平台自身组件的 IP/网段）
+  1. 内置默认保护 —— ⚠ 实测**只有 loopback 一条**
+     （docstring 原先写「平台自身组件的 IP/网段」，与实现不符，§9.54）
   2. 环境变量 SHARED_MEMORY_PROTECTED_ASSETS（逗号分隔 IP/CIDR）
   3. 运行时动态添加（API / 管理接口）
 
@@ -15,7 +16,7 @@
 """
 import ipaddress
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +29,23 @@ class ProtectedAsset:
     source: str = "builtin"  # builtin | env | runtime
 
 
-# 内置保护列表 — 平台自身组件和关键基础设施的常见网段
-# 实际 IP 通过环境变量覆盖/扩展
+# 内置保护列表。
+#
+# ⚠ 2026-10-20 修正（整改报告 §9.54）：原先这里还有一条
+#   ("0.0.0.0/0", "default-route-placeholder", "builtin")，
+#   注释写着「仅用于占位，check 中特殊处理」——
+#   但 `initialize` 会**直接跳过**它，而 `check()` 里**从来没有**任何
+#   0.0.0.0/0 的特殊处理 → 那条注释在**撒谎**（而它正是维护者
+#   判断「check 里有没有处理」的唯一依据）。
+#   该占位符已删除（死代码）。
+#
+# ⚠ **实测**：内置默认保护**只有 loopback 一条**。
+#   模块 docstring 原先声称这里是「平台自身组件的 IP/网段」——
+#   实际并没有（平台自己的 DB/缓存/Kafka 不在保护范围内）→
+#   文档承诺落空，登记为**待决项 36**（要不要把平台自身网段加进内置清单）。
+#   业务资产靠环境变量 SHARED_MEMORY_PROTECTED_ASSETS 配置。
 _BUILTIN_PROTECTED = [
     ("127.0.0.0/8", "loopback", "builtin"),
-    ("0.0.0.0/0", "default-route-placeholder", "builtin"),  # 仅用于占位，check 中特殊处理
 ]
 
 

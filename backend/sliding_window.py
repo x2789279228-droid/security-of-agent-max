@@ -89,6 +89,17 @@ class RedisBackend(StorageBackend):
     async def dbsize(self):
         return await self.redis.dbsize()
 
+    async def close(self):
+        client = self.redis
+        self.redis = None
+        if client is None:
+            return
+        closer = getattr(client, "aclose", None) or getattr(client, "close", None)
+        if closer is not None:
+            result = closer()
+            if hasattr(result, "__await__"):
+                await result
+
 class DequeBackend(StorageBackend):
     def __init__(self):
         self._lists: dict[str, deque] = {}
@@ -119,9 +130,9 @@ class DequeBackend(StorageBackend):
 
     async def lrange(self, key, start, stop):
         d = self._lists.get(key, deque())
-        l = len(d)
-        if stop == -1 or stop >= l:
-            stop = l
+        n = len(d)
+        if stop == -1 or stop >= n:
+            stop = n
         return list(d)[start:stop]
 
     async def delete(self, key):
@@ -275,6 +286,12 @@ class SlidingWindow:
         if isinstance(self.backend, RedisBackend):
             return self.backend.redis
         return None
+
+    async def close(self):
+        backend = self.backend
+        self.backend = None
+        if backend is not None and hasattr(backend, "close"):
+            await backend.close()
 
     async def dbsize(self):
         return await self.backend.dbsize()

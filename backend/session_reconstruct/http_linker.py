@@ -14,7 +14,6 @@ http_linker.py — HTTP 请求-响应配对与事务链
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

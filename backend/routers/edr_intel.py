@@ -1,6 +1,7 @@
 """EDR 融合 / 威胁情报 / 沙箱检测 — 路由模块"""
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, desc
@@ -163,6 +164,97 @@ async def intel_match(
     return {"hits": [h.to_dict() for h in hits], "count": len(hits)}
 
 
+@router.post("/intel/iocs")
+async def intel_upsert_iocs(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
+):
+    """手工/脚本导入 IOC（写 `threat_iocs` 的唯一生产入口之一）。"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "请求体必须是 JSON")
+    entries = body.get("iocs") if isinstance(body, dict) else body
+    if not isinstance(entries, list):
+        raise HTTPException(400, "需要 iocs 数组")
+    source = str(body.get("source") or "manual") if isinstance(body, dict) else "manual"
+    from threat_intel.ioc_ingest import store_iocs
+    from threat_intel.ioc_matcher import ioc_matcher
+
+    stats = await store_iocs(session, entries, source=source)
+    await session.commit()
+    await ioc_matcher.refresh_cache(session)
+    return {"status": "ok", **stats}
+
+
+@router.post("/intel/feeds")
+async def intel_create_feed(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
+):
+    """创建情报源配置（TAXII / MISP / CSV / STIX Bundle）。"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "请求体必须是 JSON")
+    feed_type = str(body.get("feed_type") or "").strip().lower()
+    if feed_type not in ("taxii", "misp", "csv", "stix_bundle"):
+        raise HTTPException(400, "feed_type 必须是 taxii|misp|csv|stix_bundle")
+    from models import ThreatIntelFeed
+
+    feed = ThreatIntelFeed(
+        name=str(body.get("name") or feed_type)[:200],
+        feed_type=feed_type,
+        url=str(body.get("url") or "")[:1000],
+        api_key=str(body.get("api_key") or "")[:500],
+        collection=str(body.get("collection") or "")[:200],
+        poll_interval_min=max(1, int(body.get("poll_interval_min") or 60)),
+        enabled=bool(body.get("enabled", True)),
+        config=dict(body.get("config") or {}),
+    )
+    session.add(feed)
+    await session.commit()
+    return {"status": "ok", "id": feed.id}
+
+
+@router.post("/intel/feeds/{feed_id}/poll")
+async def intel_poll_feed(
+    feed_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
+):
+    """拉取一个情报源并落库；成功后立即刷新 IOC 匹配缓存。"""
+    from models import ThreatIntelFeed
+    feed = await session.get(ThreatIntelFeed, feed_id)
+    if not feed:
+        raise HTTPException(404, "情报源不存在")
+    cfg = {
+        "feed_type": feed.feed_type,
+        "url": feed.url,
+        "api_key": feed.api_key,
+        "collection": feed.collection,
+        "name": feed.name,
+    }
+    try:
+        from threat_intel.ioc_ingest import poll_feed_and_store
+        from threat_intel.ioc_matcher import ioc_matcher
+        stats = await poll_feed_and_store(session, cfg)
+        feed.last_poll_at = datetime.now(timezone.utc)
+        feed.last_poll_status = "success"
+        feed.last_poll_count = int(stats.get("inserted", 0)) + int(stats.get("updated", 0))
+        await session.commit()
+        await ioc_matcher.refresh_cache(session)
+        return {"status": "ok", **stats}
+    except Exception as e:
+        feed.last_poll_at = datetime.now(timezone.utc)
+        feed.last_poll_status = "error"
+        await session.commit()
+        logger.error("[Intel] poll feed %s failed: %s", feed_id, e)
+        raise HTTPException(502, f"情报源拉取失败: {e}")
+
+
 # ════════════════════════════════════════════
 # 沙箱检测
 # ════════════════════════════════════════════
@@ -215,15 +307,29 @@ async def sandbox_submit(
     if not url:
         raise HTTPException(400, "需要提供 url 参数")
     from zeroday_detect.sandbox_connector import sandbox
-    task_id = await sandbox.submit_url(url, priority=body.get("priority", 1))
-    if not task_id:
-        raise HTTPException(503, "沙箱不可用或未启用")
+    # 用 outcome 版本：它带着**样本指纹**（整改方案 §十.1），
+    # 旧的 submit_url() 只回传 task_id，指纹就丢了。
+    outcome = await sandbox.submit_url_outcome(
+        url, priority=body.get("priority", 1))
+    if not outcome.task_id:
+        raise HTTPException(
+            503,
+            "沙箱不可用或未启用"
+            f"（{outcome.error_code or 'no_task_id'}）",
+        )
     # 记录到数据库
     from models import SandboxTask
     record = SandboxTask(
-        task_id=task_id, sample_name=url, sample_type="url",
+        task_id=outcome.task_id, sample_name=url, sample_type="url",
+        # 样本指纹：文档 §十.1「用 SHA-256 的真实样本标识关联沙箱任务」
+        # —— 修复前这一列**永远是空的**（URL 路径压根没算指纹）。
+        sample_hash=outcome.sample_hash,
         source="manual", status="pending", sandbox_type=settings.sandbox_type,
     )
     session.add(record)
     await session.commit()
-    return {"task_id": task_id, "status": "submitted"}
+    return {
+        "task_id": outcome.task_id,
+        "status": "submitted",
+        "sample_hash": outcome.sample_hash,
+    }

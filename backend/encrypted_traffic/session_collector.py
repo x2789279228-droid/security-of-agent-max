@@ -25,7 +25,8 @@ class TlsSessionCollector:
     def __init__(self):
         self._pending: dict[tuple, dict] = {}
         self._last_sweep = 0.0
-        self._stats = {"sessions": 0, "expired": 0}
+        # `evicted` = 因挂起缓冲区溢出被提前收走的会话数
+        self._stats = {"sessions": 0, "expired": 0, "evicted": 0}
 
     @property
     def stats(self) -> dict:
@@ -49,7 +50,7 @@ class TlsSessionCollector:
                 # 上一条握手尚未收齐即开始新握手 → 先 flush 旧会话
                 await self._flush(key)
             if len(self._pending) >= _MAX_PENDING:
-                self._evict_oldest()
+                await self._evict_oldest()
             entry = {"client": msg, "server": None, "cert": None, "first_seen": now}
             self._pending[key] = entry
             return
@@ -71,12 +72,36 @@ class TlsSessionCollector:
             self._stats["expired"] += 1
             await self._flush(key)  # 仅有 ClientHello 也落库（SNI/JA3 仍有价值）
 
-    def _evict_oldest(self):
+    async def _evict_oldest(self) -> None:
+        """挂起缓冲区满 → 驱逐最旧的一条（**照样落库**）。
+
+        修复前这里是 `self._pending.pop(oldest, None)` —— **直接丢掉**：
+        不落库、不计数、不打日志。于是流量高峰时（> `_MAX_PENDING`
+        个并发挂起握手），TLS 会话**静默消失**：不进 `tls_sessions`、
+        不评分、不触发 LLM 语义判定，而 `stats()` 里**看不出**有任何
+        东西被丢 —— 且它恰好发生在**攻击最可能出现**的时候。
+
+        现在与**超时**路径（`_sweep_expired`）保持一致：
+        ① 被驱逐的那一条**照样 flush 落库**（SNI/JA3 仍有价值）；
+        ② **计数**（`stats["evicted"]` + `soc_tls_session_evicted_total`）。
+
+        **不会造成写放大**：被驱逐的会话本来也会在 `_SESSION_TIMEOUT`
+        之后被 flush，驱逐只是把 flush **提前**，落库总数不变。
+        """
         try:
             oldest = min(self._pending.items(), key=lambda kv: kv[1]["first_seen"])[0]
-            self._pending.pop(oldest, None)
         except ValueError:
+            return
+        self._stats["evicted"] += 1
+        try:
+            from core_metrics import record_tls_session_evicted
+            record_tls_session_evicted()
+        except Exception:  # pragma: no cover —— 指标失败不该拖垮采集
             pass
+        try:
+            await self._flush(oldest)
+        except Exception as e:
+            logger.warning("TLS 会话驱逐落库失败: %s", e)
 
     async def _flush(self, key: tuple):
         entry = self._pending.pop(key, None)

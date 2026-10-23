@@ -17,13 +17,12 @@ Sigma 检测规则 + 响应策略的 CRUD、版本管理、沙箱测试。
 import logging
 import time
 from dataclasses import asdict
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import RuleVersion, SecurityEvent, FeedbackRecord
+from models import RuleVersion, SecurityEvent
 
 logger = logging.getLogger(__name__)
 
@@ -227,10 +226,19 @@ class RuleManager:
                     "change_summary": change_summary,
                     "version_data": result.get("version_data", {}),
                 }
+            unknown = policy_store.unknown_policy_patch_keys(content or {})
+            if unknown:
+                return {
+                    "success": False,
+                    "error": f"不支持的字段: {', '.join(unknown)}",
+                }
+            if "不存在" not in str(result.get("error") or ""):
+                return result
             # YAML 缺失时回退内存改写（测试 / 无文件场景）
             policy = policy_engine.get_policy(rule_id)
             if not policy:
                 return result
+            nested = content.get("match") if isinstance(content.get("match"), dict) else {}
             for key in [
                 "min_confidence", "min_severity", "auto_execute",
                 "require_approval", "cooldown_minutes", "priority",
@@ -238,6 +246,9 @@ class RuleManager:
             ]:
                 if key in content:
                     setattr(policy, key, content[key])
+            for key in ("threat_type", "category", "min_confidence", "min_severity"):
+                if key in nested:
+                    setattr(policy, key, nested[key])
             return {
                 "success": True,
                 "rule_id": rule_id,
@@ -387,10 +398,34 @@ class RuleManager:
         """
         沙箱测试: 用历史事件回放测试新规则
 
+        P3-6: event_ids / limit 必须先过界。修复前本函数与审计工具的
+        _event_store_query 是同一个缺陷形状 —— event_ids 分支写成
+        ``select(...).where(SecurityEvent.id.in_(event_ids))`` 之后直接
+        ``.scalars().all()``，**不套 limit**，上界形同虚设。
+        这里比审计工具更贵一档：取回的每一行还要跑一次完整的
+        Sigma ``detector.detect()``。
+
+        为什么是拒绝而不是截断：截断后算出的 hit_rate / fp_rate
+        是「前 500 条里的命中率」，而调用方会把它当成这条规则的真实
+        命中率去做调优 —— 那是一个比越界查询更难发现的错误结论。
+
         Returns:
             {hit_count, total_tested, hit_rate, false_positive_count, fp_rate, hits[]}
         """
+        from capacity import check_query_bounds
         from sigma_detector import SigmaDetector, SigmaRule
+
+        violation = check_query_bounds(limit=limit, event_ids=event_ids)
+        if violation is not None:
+            field, value, bound = violation
+            logger.warning(
+                f"[Sandbox] 拒绝测试请求: {field}={value!r} 超过上界 {bound}"
+            )
+            return {
+                "success": False,
+                "error": f"{field}={value!r} 超过上界 {bound}",
+                "field": field, "value": value, "limit": bound,
+            }
 
         # 构建临时规则
         test_rule = SigmaRule(

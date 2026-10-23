@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from http_guards import (  # noqa: E402
     RATE_LIMIT_FORCED,
+    RATE_LIMIT_FORCED_NESTED,
     RATE_LIMIT_WHITELIST,
     is_rate_limit_whitelisted,
     rate_limit_decision,
@@ -136,6 +137,31 @@ def test_no_forced_entry_is_inside_another_whitelist_prefix_by_accident():
     for prefix in RATE_LIMIT_FORCED:
         top = "/" + "/".join([p for p in prefix.split("/") if p][:2])
         assert is_rate_limit_whitelisted(top), f"{prefix} 的顶级前缀 {top} 未豁免,规则冗余"
+    for prefix, _tail, _methods, _ns in RATE_LIMIT_FORCED_NESTED:
+        top = "/" + "/".join([p for p in prefix.split("/") if p][:2])
+        assert is_rate_limit_whitelisted(top), f"nested {prefix} 的顶级前缀 {top} 未豁免,规则冗余"
+
+
+def test_dlq_routes_are_classified():
+    """DLQ 查询豁免；dry-run 进 crit；replay 进更严的 strict。不得落 std 共桶。"""
+    assert "/api/dlq" in RATE_LIMIT_WHITELIST
+    assert rate_limit_decision("/api/dlq", "GET") == (False, None)
+    assert rate_limit_decision("/api/dlq/12", "GET") == (False, None)
+    assert rate_limit_decision("/api/dlq/12/dry-run", "POST") == (True, "crit")
+    assert rate_limit_decision("/api/dlq/12/replay", "POST") == (True, "strict")
+    # 负向：宽前缀不得误伤其他 API；GET 不得被 POST 规则带走
+    assert rate_limit_decision("/api/dlqazine", "GET") == (True, "std")
+    assert rate_limit_decision("/api/dlq/12/replay", "GET") == (False, None)
+    assert rate_limit_decision("/api/cep/replay", "POST") == (True, "crit")
+
+
+def test_nested_forced_entries_are_actually_reachable():
+    live_paths = {p for p, _m, _ep in _iter_routes()}
+    for prefix, tail, _methods, _ns in RATE_LIMIT_FORCED_NESTED:
+        assert any(
+            p.startswith(prefix + "/") and p.endswith("/" + tail)
+            for p in live_paths
+        ), f"{prefix}/{{id}}/{tail} 已无对应端点"
 
 
 def test_operations_center_domains_listed_in_whitelist():

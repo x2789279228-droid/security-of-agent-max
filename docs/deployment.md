@@ -74,7 +74,7 @@ IMAGE_TAG=1.2.3 docker compose -f docker-compose.yml -f docker-compose.prod.yml 
 | 去重 | Flink (60s keyed state) | Python Redis 24h 去重已移除 |
 | 异常评分 | Flink (Welford 动态基线) | Python 不再重算, 直接消费评分 |
 | 幂等兜底 | PostgreSQL `security_events.event_id` 唯一索引 | 跨重放/双路径扇出只落库一次 |
-| Schema 契约 | `backend/schemas/*.json` ↔ `flink-jobs/schemas/*.avsc` | 消费侧校验, 不合规走 DLQ |
+| Schema 契约 | `backend/schemas/*.schema.json`（权威）↔ Avro / Java | 生产前校验 + 解密后校验；CI `tools/check-schema-compat.py` 对齐并拦不兼容变更。Registry HTTP 409 仅在内容相同时幂等成功 |
 
 **生产级可靠性配置** (Flink, 见 `docker-compose.yml`):
 

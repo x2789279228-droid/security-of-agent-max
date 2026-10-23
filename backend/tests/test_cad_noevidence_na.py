@@ -57,7 +57,7 @@ def test_nonexistent_evidence_is_true_hallucination():
 
 def test_record_na_does_not_accumulate_zero_completeness_trend():
     cb = CircuitBreaker()
-    cb.reset()
+    cb.reset_sync()
     for _ in range(13):
         cb.record_na(notes="isolated-single-source")
     st = cb.get_status()
@@ -68,10 +68,10 @@ def test_record_na_does_not_accumulate_zero_completeness_trend():
 
 def test_real_hallucination_still_trips_via_trend():
     cb = CircuitBreaker()
-    cb.reset()
+    cb.reset_sync()
     # 连续真幻觉(risk=1.0 可透断言) 应在预热(10)后触发
     for _ in range(13):
-        cb.record_audit_result(
+        cb.record_audit_result_sync(
             hallucination_risk=1.0, evidence_completeness=0.0, anomaly_detected=True
         )
     assert cb.get_status()["tripped"] is True

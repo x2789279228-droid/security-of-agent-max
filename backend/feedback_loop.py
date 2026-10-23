@@ -19,7 +19,7 @@ from typing import Optional
 from sqlalchemy import select, func, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import FeedbackRecord, SecurityEvent, SecurityCase
+from models import FeedbackRecord, SecurityEvent
 
 logger = logging.getLogger(__name__)
 

@@ -3,11 +3,21 @@
 .env.eval-bak
 backend/.env
 frontend/.env
+# 2026-10-03 审计补充: 覆盖所有 .env 派生副本(除 *.example 模板外)
+.env.*
+!.env.example
+!.env.demo.example
 
 # TLS/SSL 证书（由 tools/gen-kafka-certs.sh 生成）
 certs/
+# 2026-10-03 审计补充: keystore / truststore / 其口令文件
+# (这些曾随 shared-memory-platform.zip 一同分发)
+*.p12
+*.jks
+*-creds
+*.pfx
 
-# Nginx Basic Auth 凭证（由 tools/gen-htpasswd.sh 生成, 含密码哈希）
+# Nginx Basic Auth 凭证（由 tools/gen-htpasswd.sh 生成, 含口令哈希）
 config/nginx/flink.htpasswd
 config/nginx/flink-credentials.txt
 

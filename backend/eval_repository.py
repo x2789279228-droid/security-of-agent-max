@@ -4,7 +4,7 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import select, func, case as sa_case, desc
 

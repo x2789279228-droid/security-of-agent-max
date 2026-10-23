@@ -33,7 +33,9 @@ async def run_worker():
 
     # v6: 接入 Redis,使 save_result/cad_verify 的:
     #   - event_store.invalidate(broadcast) 能通知 backend 丢弃热缓存
-    #   - event_bus.publish(audit_complete) 能到达 backend SSE
+    #   - event_bus.publish(audit_complete) 提醒 backend SSE。
+    #     Pub/Sub 是 at-most-once。审计正文在 SecurityEvent 行里，
+    #     SSE 收到提醒后按 event_id 回源，不把这条消息当成唯一副本。
     try:
         import redis.asyncio as aioredis
         from event_store import event_store

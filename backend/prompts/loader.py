@@ -20,6 +20,7 @@ prompts.loader — Jinja2 LLM 提示词统一加载/渲染器
 """
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from jinja2 import ChainableUndefined, Environment, FileSystemLoader, StrictUndefined, TemplateNotFound
 
@@ -34,10 +35,45 @@ _env = Environment(
     lstrip_blocks=True,        # 去掉控制块行的缩进, 保证模板正文干净
     undefined=ChainableUndefined,
 )
+if TYPE_CHECKING:  # 仅注解引用, 运行时不需要
+    from jinja2 import Template
+
 _cache: dict[str, "Template"] = {}
 
 # 模板相对路径 → 变量说明 的注册表(供文档/审计/校验)
 REGISTRY: dict[str, dict] = {}
+
+# P2-E-5: 生产路径的严格变量开关。**默认开启**。
+# 理由：实测全部字面量 render() 调用点（57 个）零缺失，
+# 宽松模式换来的只是「静默的空提示词」。
+# 确需临时退回用 SHARED_MEMORY_PROMPT_PERMISSIVE=1。
+_RENDER_STRICT = os.environ.get(
+    "SHARED_MEMORY_PROMPT_PERMISSIVE", ""
+) not in ("1", "true", "yes")
+
+
+class MissingTemplateVars(Exception):
+    """P2-E-5: 调用点漏传模板变量。
+
+    独立异常类型，使调用方能区分「提示词不完整」与「模板不存在」。
+    """
+
+    def __init__(self, name: str, missing: list):
+        super().__init__(f"template {name} missing vars: {missing}")
+        self.template = name
+        self.missing = list(missing)
+
+
+def set_strict_render(enabled: bool) -> bool:
+    """开关严格渲染，返回切换前的状态（便于测试还原）。"""
+    global _RENDER_STRICT
+    prev = _RENDER_STRICT
+    _RENDER_STRICT = bool(enabled)
+    return prev
+
+
+def render_is_strict() -> bool:
+    return _RENDER_STRICT
 
 
 def load(name: str):
@@ -52,8 +88,66 @@ def load(name: str):
     return tpl
 
 
+def template_variables(name: str) -> set:
+    """返回模板源码里引用到的**顶层**变量名集合。
+
+    P2-E-5: 用来建立「模板需要什么」的权威口径。
+    修复前的完整性检查靠一张手工维护的 mock 上下文表 ——
+    表里写了什么就只校验什么，模板新增变量而表没跟上时
+    校验会静默通过（ChainableUndefined 渲染成空串）。
+
+    实现要点：直接用 Jinja2 解析 AST，不做正则猜测。
+    只取顶层 `name` / `name.attr` 的根名字；
+    for/if 内部引入的循环变量（如 item）不算契约。
+    """
+    from jinja2 import nodes as jnodes
+
+    try:
+        source, _fn, _up = _env.loader.get_source(_env, f"{name}.j2")
+    except Exception:
+        return set()
+
+    try:
+        ast = _env.parse(source)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("template %s parse failed: %s", name, e)
+        return set()
+
+    declared = set()
+    for node in ast.find_all(jnodes.Name):
+        if node.ctx == "load":
+            declared.add(node.name)
+    # 宏/导入等引入的名字不算调用方需要提供
+    return declared - _template_local_names(ast)
+
+
+def _template_local_names(ast) -> set:
+    """模板内部自己定义的变量（for target / 宏 / set 块）。"""
+    from jinja2 import nodes as jnodes
+
+    local: set = set()
+    for node in ast.find_all(jnodes.Name):
+        if node.ctx in ("store", "param"):
+            local.add(node.name)
+    for node in ast.find_all(jnodes.Assign):
+        for t in node.targets:
+            if isinstance(t, jnodes.Name):
+                local.add(t.name)
+    return local
+
+
 def render(name: str, **ctx) -> str:
-    """渲染模板。缺省变量以空替代(ChainableUndefined), 利于渐进迁移。"""
+    """渲染模板。缺省变量以空替代(ChainableUndefined), 利于渐进迁移。
+
+    P2-E-5: 新增 ``_RENDER_STRICT`` 开关 —— 生产调用点缺变量时**抛错**。
+    缺省变量渲染成空串意味着：模板里 ``{{ evidence }}`` 在调用点漏传时
+    变成一个空洞的提示词，模型照常给出「看起来正常」的结论，
+    而没有任何日志表明这条提示词是不完整的。
+    """
+    if _RENDER_STRICT:
+        missing = template_variables(name) - set(ctx)
+        if missing:
+            raise MissingTemplateVars(name, sorted(missing))
     return load(name).render(**ctx)
 
 

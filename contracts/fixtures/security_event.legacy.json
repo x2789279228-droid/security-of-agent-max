@@ -1,0 +1,14 @@
+{
+  "eventId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  "sourceId": "soc-syslog",
+  "apiKey": "soc-syslog-2024",
+  "eventType": "PORT_SCAN",
+  "severity": "medium",
+  "srcIp": "192.0.2.15",
+  "dstIp": "198.51.100.20",
+  "protocol": "tcp",
+  "message": "port scan detected",
+  "confidence": 50.0,
+  "timestamp": 1750000001000,
+  "traceId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+}

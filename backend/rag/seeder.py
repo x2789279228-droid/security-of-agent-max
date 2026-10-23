@@ -9,9 +9,7 @@
   - 漏洞分类与处置指南
 """
 import asyncio
-import json
 import logging
-from datetime import datetime, timezone
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1090,7 +1088,7 @@ async def _backfill_runner(scope: str = "chunks"):
     """独立 session 下做 embedding 回填(含缺失与全零占位)。"""
     from models import Memory, async_session  # noqa: F401 (model 选择用)
     from models import KnowledgeChunk
-    from summary_compression import embedder
+    from summary_compression import embedder, is_degraded_vector
     from config import settings
 
     if scope not in ("chunks", "memories"):
@@ -1122,7 +1120,8 @@ async def _backfill_runner(scope: str = "chunks"):
                         raw = getattr(ch, "content", None) or " "
                         vec = await embedder.embed(str(raw)[:1000])
                         vec = list(vec or [])
-                        if not vec or len(vec) < max(target_dim - 8, 8) or max((abs(x) for x in vec), default=1.0) <= _ZERO_EPS:
+                        if (not vec or len(vec) < max(target_dim - 8, 8)
+                                or is_degraded_vector(vec, eps=_ZERO_EPS)):
                             # API 失败或返回零向量(降级产物) → 视为失败, 不存脏数据
                             degraded_now += 1
                             attempts[ch.id] = attempts.get(ch.id, 0) + 1

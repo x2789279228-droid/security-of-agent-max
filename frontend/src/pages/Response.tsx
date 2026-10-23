@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageTransition } from '../components/common/PageTransition'
+import { ConfirmDialog, type ConfirmRequest } from '../components/ui/ConfirmDialog'
 import { api } from '../lib/api'
 
 type Tab = 'threats' | 'policies' | 'approvals' | 'logs'
@@ -87,6 +88,35 @@ export default function Response() {
 
   useEffect(() => { loadPolicies() }, [loadPolicies])
 
+  // ── 破坏性动作二次确认（2026-10-03 新增）──
+  // 修复前：威胁模拟预设是 <button onClick={() => simulateThreat(...)}>，单击直达
+  // 后端 /api/response/simulate；该端点允许注入任意 src_ip/severity 触发真实响应
+  // （审计 P0-3）。若命中含 auto_execute 的策略，真实 IP 会被封。
+  // 现在所有作用于生产的动作都先经过确认弹窗，且弹窗复述影响面。
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null)
+  const [confirmBusy, setConfirmBusy] = useState(false)
+  const runAfterConfirm = useRef<(() => Promise<void>) | null>(null)
+
+  const askConfirm = (req: ConfirmRequest, action: () => Promise<void>) => {
+    runAfterConfirm.current = action
+    setConfirmReq(req)
+  }
+  const closeConfirm = () => {
+    runAfterConfirm.current = null
+    setConfirmReq(null)
+  }
+  const acceptConfirm = async () => {
+    const fn = runAfterConfirm.current
+    if (!fn) { closeConfirm(); return }
+    setConfirmBusy(true)
+    try {
+      await fn()
+    } finally {
+      setConfirmBusy(false)
+      closeConfirm()
+    }
+  }
+
   const simulateThreat = async (threat: any) => {
     setLoading(true); setError(''); setResult(null)
     try {
@@ -96,6 +126,27 @@ export default function Response() {
     } catch (e: any) { setError(e.message) }
     finally { setLoading(false) }
   }
+
+  /** 威胁模拟入口：先确认，再执行。 */
+  const requestSimulate = (threat: any, label?: string) =>
+    askConfirm(
+      {
+        title: '注入模拟威胁到生产管线？',
+        danger: true,
+        confirmLabel: '注入',
+        body: (
+          <>
+            将向审计管线注入一条 <b className="text-ink">{threat?.severity ?? '—'}</b> 级
+            事件（{label ?? threat?.threat_type ?? '自定义'}），目标{' '}
+            <b className="text-ink">{threat?.src_ip ?? '未指定'}</b>。
+            <br />
+            该事件会走完整响应链路；命中的策略若含 <code>auto_execute</code>，
+            将对目标产生<b className="text-alert">真实响应动作</b>（封禁 / 隔离 / 终止会话）。
+          </>
+        ),
+      },
+      () => simulateThreat(threat),
+    )
 
   const handleExecResponse = async () => {
     const needsIp = ['block_ip', 'isolate_host', 'rate_limit', 'kill_session'].includes(execAction)
@@ -117,6 +168,26 @@ export default function Response() {
     finally { setLoading(false) }
   }
 
+  /** 手动执行响应：先确认影响面。 */
+  const requestExecResponse = () =>
+    askConfirm(
+      {
+        title: '确认真实执行响应动作？',
+        danger: true,
+        confirmLabel: '执行',
+        body: (
+          <>
+            即将对{' '}
+            <b className="text-ink">{execTarget || '（按动作参数）'}</b> 执行{' '}
+            <b className="text-ink">{execAction}</b>。
+            <br />
+            该动作作用于生产网络；执行后需凭回滚令牌撤销。
+          </>
+        ),
+      },
+      handleExecResponse,
+    )
+
   const handleRollback = async () => {
     if (!rollbackToken) { setError('没有回滚令牌'); return }
     setLoading(true); setError(''); setResult(null)
@@ -126,6 +197,24 @@ export default function Response() {
     } catch (e: any) { setError(e.message) }
     finally { setLoading(false) }
   }
+
+  /** 响应回滚：解除正在生效的遏制，同样需确认。 */
+  const requestRollback = () =>
+    askConfirm(
+      {
+        title: '确认回滚响应动作？',
+        danger: true,
+        confirmLabel: '回滚',
+        body: (
+          <>
+            将撤销由令牌 <code className="text-ink">{rollbackToken}</code> 执行的动作。
+            <br />
+            解除遏制后，被封禁主机将<b className="text-alert">立即恢复网络访问</b>。
+          </>
+        ),
+      },
+      handleRollback,
+    )
 
   const severityColor = (sev: string) => {
     switch (sev) {
@@ -176,7 +265,7 @@ export default function Response() {
               <label className="text-xs font-sans font-medium text-ink-faint mb-2 block">快速选择威胁场景</label>
               <div className="flex flex-wrap gap-2">
                 {THREAT_PRESETS.map(p => (
-                  <button key={p.label} onClick={() => simulateThreat(p.value)}
+                  <button key={p.label} onClick={() => requestSimulate(p.value, p.label)}
                     className="px-3 py-1.5 text-xs font-sans rounded-none border border-line hover:bg-gray-50 transition-colors">
                     {p.label}
                   </button>
@@ -208,11 +297,11 @@ export default function Response() {
                 </select>
                 <input type="text" placeholder="Session ID (可选)" value={sessionId} onChange={e => setSessionId(e.target.value)}
                   className="flex-1 px-3 py-2 text-xs font-sans border border-line rounded-none focus:outline-none focus:ring-1 focus:ring-accent" />
-                <button onClick={async () => {
+                <button onClick={() => {
                   const type = (document.getElementById('threat-type-select') as HTMLSelectElement)?.value || 'C2_BEACON'
                   const ip = (document.getElementById('threat-ip-input') as HTMLInputElement)?.value || '192.168.1.100'
                   const sev = (document.getElementById('threat-severity-select') as HTMLSelectElement)?.value || 'high'
-                  await simulateThreat({ threat_type: type, confidence: 0.8, severity: sev, src_ip: ip, message: `模拟${type}事件` })
+                  requestSimulate({ threat_type: type, confidence: 0.8, severity: sev, src_ip: ip, message: `模拟${type}事件` }, '自定义')
                 }} disabled={loading}
                   className="border border-[#0e1a26] bg-[#0e1a26] px-5 py-2 font-mono text-[11px] tracking-[0.18em] uppercase text-[#f1e8d6] hover:bg-[#182838] transition-colors disabled:opacity-50">
                   {loading ? '执行中 …' : '模拟威胁'}
@@ -232,7 +321,7 @@ export default function Response() {
                 </select>
                 <input type="text" placeholder="目标IP / 主机" value={execTarget} onChange={e => setExecTarget(e.target.value)}
                   className="flex-1 px-3 py-2 text-xs font-sans border border-line rounded-none focus:outline-none focus:ring-1 focus:ring-accent" />
-                <button onClick={handleExecResponse} disabled={loading}
+                <button onClick={requestExecResponse} disabled={loading}
                   className="border border-alert bg-alert px-4 py-2 font-mono text-[11px] tracking-[0.18em] uppercase text-paper hover:opacity-90 disabled:opacity-50">
                   执行
                 </button>
@@ -259,7 +348,7 @@ export default function Response() {
               <div className="flex items-center gap-3">
                 <input type="text" placeholder="回滚令牌" value={rollbackToken} onChange={e => setRollbackToken(e.target.value)}
                   className="flex-1 px-3 py-2 text-xs font-sans border border-line rounded-none focus:outline-none focus:ring-1 focus:ring-accent" />
-                <button onClick={handleRollback} disabled={loading || !rollbackToken}
+                <button onClick={requestRollback} disabled={loading || !rollbackToken}
                   className="px-4 py-2 text-xs font-sans font-medium bg-orange-500 text-white rounded-none hover:opacity-90 disabled:opacity-50">
                   回滚
                 </button>
@@ -403,6 +492,14 @@ export default function Response() {
             className="px-3 py-1.5 text-xs font-sans font-medium bg-gray-100 rounded-none hover:bg-gray-200">刷新响应引擎状态</button>
         </div>
       </div>
+
+      {/* 破坏性动作二次确认（2026-10-03 新增）*/}
+      <ConfirmDialog
+        request={confirmReq}
+        onConfirm={acceptConfirm}
+        onCancel={closeConfirm}
+        busy={confirmBusy}
+      />
     </PageTransition>
   )
 }

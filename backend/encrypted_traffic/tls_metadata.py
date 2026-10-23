@@ -18,7 +18,6 @@ tls_metadata.py — TLS 会话元数据聚合与综合风险评分
 """
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 from config import settings
 from encrypted_traffic.ja3_fingerprint import ja3_engine

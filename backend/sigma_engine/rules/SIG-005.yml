@@ -1,7 +1,12 @@
 title: 敏感数据下载
 id: aaaaaaaa-0001-0000-0000-000000000005
 status: test
-description: 检测对下载接口的可疑访问
+description: >
+  检测对下载接口的可疑访问。2026-10-18 标定：移除过宽的 `/export`。
+  该子串会命中一切导出类 URL（量化评估 SIG-N-02 实测 BI 按日期
+  `/export` 报表被误判为 data_exfiltration）；而「访问了某个导出接口」
+  本身不构成外泄证据。真正的外泄仍由 `sel_event`
+  （DATA_EXFIL / DATA_DOWNLOAD / 数据外泄）与两个具体下载接口覆盖。
 date: 2026/08/24
 author: SOC Platform
 license: SOC-Internal
@@ -13,7 +18,6 @@ detection:
     url|contains:
       - /api/download
       - /file/download
-      - /export
   sel_event:
     event|contains:
       - DATA_EXFIL

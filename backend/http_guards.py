@@ -87,6 +87,7 @@ RATE_LIMIT_WHITELIST = (
     "/api/kafka",
     "/api/cep",
     "/api/pipeline",
+    "/api/dlq",
     "/api/assets",
     # 检测域
     "/api/ndr",
@@ -148,7 +149,17 @@ RATE_LIMIT_FORCED = {
     # 数据源注册/吊销(安全面)
     "/api/sources/register": ("POST",),
     "/api/sources/revoke": ("POST",),
+    # 死信：GET 查询豁免；任意 POST 至少进 crit，避免新写接口漏进共桶。
+    # replay 再由 RATE_LIMIT_FORCED_NESTED 升到 strict（更低配额）。
+    "/api/dlq": ("POST",),
 }
+
+# 路径中间带资源 id 的写动作：prefix/{id}/tail。比父前缀更具体，命中后覆盖命名空间。
+# methods=None 表示所有方法。namespace 仅允许低基数标签：crit / strict。
+RATE_LIMIT_FORCED_NESTED = (
+    ("/api/dlq", "dry-run", ("POST",), "crit"),
+    ("/api/dlq", "replay", ("POST",), "strict"),
+)
 
 # 追加白名单的解析缓存(按原始串缓存,避免每请求 split)
 _EXTRA_WHITELIST_CACHE: tuple = ("", ())
@@ -172,9 +183,54 @@ def _match(path: str, prefixes) -> bool:
     return any(path == p or path.startswith(p + "/") for p in prefixes)
 
 
+def _nested_under(path: str, prefix: str, tail: str) -> bool:
+    """True only for prefix/tail or prefix/{one-segment}/tail.
+
+    不用 startswith(prefix) 的宽前缀，避免 /api/dlq 误伤 /api/dlqazine。
+    """
+    if not prefix or not tail:
+        return False
+    if path == f"{prefix}/{tail}":
+        return True
+    if not path.startswith(prefix + "/"):
+        return False
+    rest = path[len(prefix) + 1:]
+    marker = "/" + tail
+    if not rest.endswith(marker):
+        return False
+    mid = rest[: -len(marker)]
+    return bool(mid) and "/" not in mid
+
+
 def is_rate_limit_whitelisted(path: str) -> bool:
     """True if path is exempt from the global 60s HTTP sliding-window limiter."""
     return _match(path, RATE_LIMIT_WHITELIST) or _match(path, _extra_whitelist())
+
+
+def _forced_namespace(path: str, method: str) -> Optional[str]:
+    """命中强制限流时返回桶命名空间(crit/strict)，否则 None。
+
+    嵌套规则(prefix/{id}/tail)优先于父前缀，避免 /api/dlq 的 POST 把 replay
+    和 dry-run 压进同一个配额。
+    """
+    m = (method or "").upper()
+    best_len = -1
+    namespace = None
+    for prefix, tail, methods, ns in RATE_LIMIT_FORCED_NESTED:
+        if methods is not None and m not in methods:
+            continue
+        if not _nested_under(path, prefix, tail):
+            continue
+        score = len(prefix) + 1 + len(tail) + 16
+        if score > best_len:
+            best_len, namespace = score, ns
+    for prefix, methods in RATE_LIMIT_FORCED.items():
+        if path == prefix or path.startswith(prefix + "/"):
+            if methods is not None and m not in methods:
+                continue
+            if len(prefix) > best_len:
+                best_len, namespace = len(prefix), "crit"
+    return namespace
 
 
 def is_rate_limit_forced(path: str, method: str) -> bool:
@@ -183,28 +239,28 @@ def is_rate_limit_forced(path: str, method: str) -> bool:
     RATE_LIMIT_FORCED 是"精确前缀 → 允许的方法集(None=所有方法)"的表;
     取最长匹配,避免 /api/response/policies 的放宽覆盖 /api/response/execute。
     """
-    m = (method or "").upper()
-    best_len = -1
-    forced = False
-    for prefix, methods in RATE_LIMIT_FORCED.items():
-        if path == prefix or path.startswith(prefix + "/"):
-            if methods is not None and m not in methods:
-                continue
-            if len(prefix) > best_len:
-                best_len, forced = len(prefix), True
-    return forced
+    return _forced_namespace(path, method) is not None
 
 
 def rate_limit_decision(path: str, method: str) -> tuple:
     """限流判定:(是否计入全局限流, 桶命名空间)。
 
-    优先级: 强制限流(crit) > 豁免(None) > 全局默认。
+    优先级: 强制限流(crit/strict) > 豁免(None) > 全局默认(std)。
     """
-    if is_rate_limit_forced(path, method):
-        return True, "crit"
+    ns = _forced_namespace(path, method)
+    if ns:
+        return True, ns
     if is_rate_limit_whitelisted(path):
         return False, None
     return True, "std"
+
+
+def rate_limit_quota(namespace: str) -> int:
+    """命名空间对应的每分钟配额。strict 低于 crit/std。"""
+    settings = _settings()
+    if namespace == "strict":
+        return int(getattr(settings, "rate_limit_strict_per_minute", 10) or 10)
+    return int(getattr(settings, "rate_limit_per_minute", 120) or 120)
 
 
 def _settings():

@@ -1,0 +1,170 @@
+# 能力登记表 —— Capabilities 页面的唯一事实源
+#
+# status 只允许三档：
+#   verified     —— 有测试/演练证据，可在演示中作为“已工作”展示
+#   experimental —— 代码存在且可运行，但缺少真实环境/质量评估证据
+#   disabled     —— 默认关闭，或依赖外部组件尚未验证
+#
+# 每一项的 evidence 必须指向可复现的测试/报告；没有证据就不要写 verified。
+version: "1.0"
+updated_at: "2026-10-21"
+capabilities:
+  - id: ingest_kafka
+    name: 日志接入 / Kafka 消费
+    status: verified
+    runtime_setting: kafka_enabled
+    metric_prefix: soc_kafka_consumer_
+    evidence: docs/upgrade/evidence/M1-response-safety.md
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "连续水位提交、DLQ 两阶段确认、Schema 校验。"
+
+  - id: flink_validation
+    name: Flink 校验 / Sigma 聚合
+    status: experimental
+    runtime_setting: kafka_enabled
+    metric_prefix: ""
+    evidence: docs/AUDIT-2026-10-21-全量代码审计报告.md
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "跨语言 op 语义与 AT_LEAST_ONCE 告警 Sink 待修。"
+
+  - id: audit_pipeline
+    name: 多智能体审计
+    status: experimental
+    runtime_setting: ""
+    metric_prefix: soc_audit_complete_
+    evidence: docs/upgrade/UPGRADE-PLAN-2026-10-21.md
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "4 阶段链路已跑通；缺少 50 条人工标注审计基准。"
+
+  - id: response_engine
+    name: 响应处置（审批/封禁/隔离）
+    status: experimental
+    runtime_setting: ""
+    metric_prefix: soc_response_
+    evidence: docs/upgrade/evidence/M1-response-safety.md
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "已统一经 SafeExecutor；待真机 SSH + Redis TTL 演练后升 verified。"
+
+  - id: case_workorder
+    name: 案例 / 工单 / 复盘
+    status: verified
+    runtime_setting: ""
+    metric_prefix: ""
+    evidence: backend/tests/test_case_automation.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "案例状态机严格迁移；自动派单事务仍在加固。"
+
+  - id: rag
+    name: RAG 知识检索
+    status: experimental
+    runtime_setting: ""
+    metric_prefix: ""
+    evidence: docs/rag-eval-2026-09-05.md
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "混合检索链路完整；缺版本化检索质量评估。"
+
+  - id: self_play
+    name: 红蓝自博弈
+    status: experimental
+    runtime_setting: self_play_enabled
+    metric_prefix: ""
+    evidence: docs/architecture/self-play-architecture.md
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "样本注入生产隔离待修；缺一次完整对局指标导出。"
+
+  - id: mcp_guard
+    name: MCP Guard / 工具行为签名
+    status: experimental
+    runtime_setting: ""
+    metric_prefix: ""
+    evidence: backend/tests/test_p0_guard_call_authz.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "审批队列待收口；行为检测器故障仍是 fail-open。"
+
+  - id: threat_intel
+    name: 威胁情报（IOC / MISP / TAXII）
+    status: experimental
+    runtime_setting: intel_enabled
+    metric_prefix: soc_intel_ioc_
+    evidence: backend/tests/test_ioc_ingest.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "已接入 IOC 落库与情报源 poll；缺真实 MISP/TAXII 拉取演练。"
+
+  - id: ndr
+    name: NDR 流量分析
+    status: experimental
+    runtime_setting: capture_enabled
+    metric_prefix: soc_ndr_flows_
+    evidence: backend/tests/test_active_module_coverage_gap.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "保留；协议解析/PCAP 仍零覆盖，作为 lab profile 展示。"
+
+  - id: tls_fingerprint
+    name: TLS / JA3 指纹
+    status: experimental
+    runtime_setting: capture_enabled
+    metric_prefix: soc_tls_sessions_
+    evidence: backend/tests/test_active_module_coverage_gap.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "point_formats 硬编码待修；已知指纹库需随演示提供。"
+
+  - id: edr
+    name: EDR 融合（Sysmon / Windows 事件）
+    status: experimental
+    runtime_setting: edr_enabled
+    metric_prefix: soc_edr_events_
+    evidence: backend/tests/test_inc_edr.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "保留；事件时间提取与跨源关联键待修，作为 lab profile 展示。"
+
+  - id: zeroday
+    name: 0day 沙箱
+    status: disabled
+    runtime_setting: sandbox_enabled
+    metric_prefix: soc_sandbox_submissions_
+    evidence: backend/tests/test_review_sandbox_security.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "默认关闭；依赖外部 CAPE，文件大小/类型校验待补。"
+
+  - id: phishing
+    name: 反钓鱼
+    status: experimental
+    runtime_setting: ""
+    metric_prefix: soc_phishing_detections_
+    evidence: backend/tests/test_inc_phishing.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "7 个检测器；缺标定集与跨检测器融合。"
+
+  - id: observability
+    name: 可观测性 / Trace
+    status: verified
+    runtime_setting: otel_enabled
+    metric_prefix: soc_pipeline_
+    evidence: backend/tests/test_trace_otel.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "OTel + Prometheus + 10 条告警规则；缺 Alertmanager 与 SLO。"
+
+  - id: temporal
+    name: Temporal 编排
+    status: experimental
+    runtime_setting: temporal_enabled
+    metric_prefix: soc_audit_temporal_
+    evidence: backend/tests/test_m2_no_silent_loss.py
+    last_verified: "2026-10-21"
+    demo: ""
+    notes: "进程内路径为权威；Temporal 作为可选加速器，忠实度闸已 fail-closed。"

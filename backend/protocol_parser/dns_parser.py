@@ -10,7 +10,11 @@ dns_parser.py — DNS 查询/应答解析
 """
 import logging
 import struct
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:  # only for annotations; ProtocolMessage is imported lazily at runtime
+    from protocol_parser.dissector import ProtocolMessage
+
 
 logger = logging.getLogger(__name__)
 

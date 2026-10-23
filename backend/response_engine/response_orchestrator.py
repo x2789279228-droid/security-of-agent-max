@@ -29,9 +29,7 @@
       → 写入 DB (SecurityEvent.raw_data._response)
 """
 import asyncio
-import json
 import logging
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -114,6 +112,12 @@ def action_rows_from_batch(
                 "execution_mode": mode,
                 "verified": inner.get("verified"),
                 "error": item.error or inner.get("error") or "",
+                # 动作**实际收到的参数**（执行器里已脱敏）。
+                # 整改报告 §9.61：此前这里只有上面三个键 ——
+                # 「告警发到了哪个 URL」「封禁了哪台机器」在审计里查不到。
+                # 嵌套一层而不是平铺：动作参数可能自带 `error` /
+                # `execution_mode` 这类键名，平铺会覆盖审计的元字段。
+                "params": dict(item.params or {}),
             },
             "success": bool(item.success),
             "result": inner or {"error": item.error},
@@ -200,7 +204,7 @@ class ResponseOrchestrator:
         threat_info: dict,
         event_id: Optional[int] = None,
         session_id: str = "",
-        allow_blocking: bool = True,
+        allow_blocking: Optional[bool] = None,
     ) -> dict:
         """
         当威胁被检测到时调用
@@ -223,6 +227,12 @@ class ResponseOrchestrator:
                 send_alert；封禁等 Audit-LLM confirmed 后再触发。
                 FastPath 仅 severity 触发（无强非 LLM 信号）时传 False。
 
+                P1-C-5: 缺省值改为 None → 回落到 ``threat_info["allow_blocking"]``。
+                修复前默认 True，Audit-LLM 两条调用路径
+                (log_ingestion / temporal.activities) 都没显式传参，
+                于是 threat_info 里写好的 allow_blocking 被完全忽略，
+                双轨门槛在审计链路上形同不存在。
+
         Returns:
             {
                 "matched": bool,
@@ -237,6 +247,11 @@ class ResponseOrchestrator:
             threat_info["session_id"] = session_id
         if event_id and not threat_info.get("event_id"):
             threat_info["event_id"] = event_id
+        # P1-C-5: 双轨门槛接线。调用方未显式传 allow_blocking 时，
+        # 采纳 threat_info 里的决定（缺省 True 保持既有行为）。
+        if allow_blocking is None:
+            allow_blocking = bool(threat_info.get("allow_blocking", True))
+            threat_info["allow_blocking"] = allow_blocking
         # 兜底链: 显式 threat_type 枚举 → 事件名(可能是自然语言) → 按名称推断枚举
         raw_threat_name = (
             threat_info.get("threat_type")

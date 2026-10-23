@@ -6,7 +6,6 @@ import time
 import re
 from collections import defaultdict
 from datetime import date
-from typing import Optional
 
 import httpx
 
@@ -216,7 +215,7 @@ class LLMClient:
         # 缓存命中是零 token 成本路径（不扣预算），必须置于预算门禁之前——
         # 否则预算耗尽期间连免费命中也不可达，缓存"只出不进"随 TTL 枯竭（被门禁饿死）。
         digest = hashlib.md5(
-            f"{prompt_text}:{temperature}".encode("utf-8")
+            f"{prompt_text}:{temperature}".encode("utf-8"), usedforsecurity=False
         ).hexdigest()
         cache_key = f"llmcache:{digest}"
         cached = await self._cache_get(cache_key)
@@ -230,7 +229,7 @@ class LLMClient:
 
         # 成本检查：超预算时降级（仅拦真实 API 调用，上面的缓存命中不受门禁影响）
         if cost_tracker.is_over_budget():
-            logger.warning(f"[CostControl] Daily budget exhausted, returning fallback")
+            logger.warning("[CostControl] Daily budget exhausted, returning fallback")
             emit_trace(
                 status="degraded", error_type="budget_exhausted",
                 prompt_tokens=prompt_tokens,
@@ -259,7 +258,7 @@ class LLMClient:
         effort = (getattr(settings, "llm_reasoning_effort", "") or "").strip()
         if effort:
             payload["reasoning_effort"] = effort
-        from llm_limiter import LlmSlotTimeout, get_llm_limiter
+        from llm_limiter import LlmRateExceeded, LlmSlotTimeout, get_llm_limiter
         _triage = (ctx.get("log_data") or {}).get("_audit_triage") or {}
         _tier = str(_triage.get("tier") or ctx.get("tier") or "P2")
         try:
@@ -278,17 +277,83 @@ class LLMClient:
                 "error": "LLM slot timeout", "fallback": True,
                 "error_type": "llm_slot_timeout", "retryable": True,
             }, ensure_ascii=False)
+        except LlmRateExceeded as e:
+            logger.warning("LLM rate limit: %s", e)
+            emit_trace(
+                status="degraded", error_type="llm_rate_limited",
+                prompt_tokens=prompt_tokens,
+                latency_ms=(time.time() - t_start) * 1000,
+            )
+            return json.dumps({
+                "error": "LLM rate limit", "fallback": True,
+                "error_type": "llm_rate_limited", "retryable": True,
+            }, ensure_ascii=False)
+
+    @staticmethod
+    def _retry_backoff_s(attempt: int) -> float:
+        """P2-E-2: 指数退避 + 全抖动（full jitter）。
+
+        base * 2^attempt 上限，再乘 [0,1) 随机因子。
+        全抖动而非固定退避：多进程/多协程同时失败时，固定退避会让它们
+        在同一毫秒一起重试，形成同步重试风暴。
+        """
+        import random as _random
+
+        base = float(getattr(settings, "llm_retry_base_s", 0.5) or 0.5)
+        cap = float(getattr(settings, "llm_retry_max_s", 8.0) or 8.0)
+        try:
+            n = max(0, int(attempt))
+        except (TypeError, ValueError):
+            n = 0
+        ceiling = min(cap, base * (2 ** n))
+        return max(0.0, _random.uniform(0.0, ceiling))
+
+    def _note_http_request(self, actual_requests: int, retries: int) -> None:
+        """P2-E-2: 记录**实际**打到上游的请求数。
+
+        修复前 llm_rate_per_minute 统计的是「逻辑调用」——
+        llm_limiter 在进 slot 时扣一次，而重试发生在 slot 内部。
+        于是重试放大时，限流器看到的是 1 次，实际是 3 次。
+        真实请求数在这里单独可观测，不改限流器的计费语义。
+        """
+        n = max(0, int(actual_requests or 0))
+        if n <= 0:
+            return
+        self._http_requests_total = getattr(self, "_http_requests_total", 0) + n
+        self._http_retries_total = getattr(self, "_http_retries_total", 0) + max(
+            0, int(retries or 0)
+        )
+        if n > 1:
+            logger.warning(
+                f"LLM logical call became {n} upstream requests "
+                f"(retries={retries}) — rate limiting sees 1, upstream sees {n}"
+            )
+
+    def http_request_stats(self) -> dict:
+        """实际 HTTP 请求统计（与逻辑调用分开）。"""
+        return {
+            "http_requests_total": getattr(self, "_http_requests_total", 0),
+            "http_retries_total": getattr(self, "_http_retries_total", 0),
+        }
 
     async def _chat_http(self, payload, prompt_tokens, t_start, event_id, cache_key) -> str:
+
         from trace_hook import emit_trace
         last_error = None
         retries = 0
         _no_reasoning_split = False
+        # P2-E-2: 实际发出的 HTTP 请求数。修复前只有「逻辑调用」计数：
+        # llm_limiter 在**进 slot 时**扣一次额度，而重试发生在 slot 内部，
+        # 于是 llm_rate_per_minute 统计的是逻辑调用而非真实打到
+        # 上游的请求数 —— 限流器在重试放大时看不到真实压力。
+        actual_requests = 0
         for attempt in range(3):
             try:
                 req_payload = dict(payload)
                 if _no_reasoning_split:
                     req_payload.pop("reasoning_split", None)
+                req_timeout = float(getattr(settings, "llm_request_timeout_s", 90) or 90)
+                actual_requests += 1
                 resp = await self.client.post(
                     f"{self.base_url}/chat/completions",
                     headers={
@@ -296,6 +361,16 @@ class LLMClient:
                         "Content-Type": "application/json",
                     },
                     json=req_payload,
+                    # P2-E-3: 单值 Timeout 会把 connect/read/write/pool
+                    # 全部覆盖成同一个数 —— 原本 connect=10s 的快速失败
+                    # 被拉成 90s，一个连不上的上游要等满 90 秒。
+                    # 显式给四段：连接仍快速失败，整体仍受 req_timeout 约束。
+                    timeout=httpx.Timeout(
+                        connect=float(getattr(settings, "llm_connect_timeout_s", 10.0) or 10.0),
+                        read=max(0.05, req_timeout),
+                        write=max(0.05, req_timeout),
+                        pool=max(0.05, req_timeout),
+                    ),
                 )
                 if resp.status_code == 400 and "reasoning_effort" in req_payload:
                     payload.pop("reasoning_effort", None)
@@ -335,13 +410,39 @@ class LLMClient:
                         "fallback": True,
                         "error_type": "rate_limited_429",
                         "retryable": True,
+                        "http_requests": actual_requests,
                     }, ensure_ascii=False)
+
+                # P2-E-2: 5xx 立即放弃，不重试。
+                # 修复前走 `except Exception` 无差别重发：上游 500/502/503 时
+                # 三次瞬时重连既救不回来，又把上游刚恢复的窗口重新打挂。
+                if resp.status_code >= 500:
+                    logger.error(
+                        f"LLM upstream {resp.status_code} — not retrying "
+                        f"(attempt {attempt+1})"
+                    )
+                    emit_trace(
+                        status="degraded", error_type=f"upstream_{resp.status_code}",
+                        model=self.model,
+                        prompt_tokens=prompt_tokens,
+                        latency_ms=(time.time() - t_start) * 1000,
+                        retry_count=retries,
+                    )
+                    return json.dumps({
+                        "error": f"LLM 上游错误 {resp.status_code}",
+                        "fallback": True,
+                        "error_type": f"upstream_{resp.status_code}",
+                        "retryable": False,
+                        "http_requests": actual_requests,
+                    }, ensure_ascii=False)
+
                 resp.raise_for_status()
                 data = resp.json()
                 try:
                     content = _extract_text_content(data)
                 except (ValueError, KeyError, IndexError, TypeError):
                     if req_payload.get("reasoning_split") and not _no_reasoning_split:
+
                         # reasoning_split=True 时 content 可能为空(reasoning 在
                         # 独立字段), 关闭该参数让模型把正文写回 content
                         logger.warning(
@@ -376,12 +477,35 @@ class LLMClient:
                     latency_ms=(time.time() - t_start) * 1000,
                     retry_count=retries,
                 )
+                self._note_http_request(actual_requests, retries)
                 return content
+            except httpx.TimeoutException as e:
+                logger.warning("LLM request timeout after %.1fs: %s", req_timeout, type(e).__name__)
+                emit_trace(
+                    status="degraded", error_type="llm_request_timeout",
+                    model=self.model,
+                    prompt_tokens=prompt_tokens,
+                    latency_ms=(time.time() - t_start) * 1000,
+                    retry_count=retries,
+                )
+                self._note_http_request(actual_requests, retries)
+                return json.dumps({
+                    "error": "LLM request timeout", "fallback": True,
+                    "error_type": "llm_request_timeout", "retryable": True,
+                    "http_requests": actual_requests,
+                }, ensure_ascii=False)
             except Exception as e:
                 retries += 1
                 last_error = e
                 logger.warning(f"LLM call attempt {attempt+1} failed: {e}")
+                # P2-E-2: 指数退避 + 抖动。
+                # 修复前三次重试之间**零等待**直接重发 —— 上游一抖动，
+                # 同一秒内三个请求一起砸过去，把本来能自愈的瞬时故障
+                # 变成持续过载。抖动避免多进程在同一时刻同步重试。
+                if attempt < 2:
+                    await asyncio.sleep(self._retry_backoff_s(attempt))
         logger.error(f"LLM call failed after retries: {last_error}")
+        self._note_http_request(actual_requests, retries)
         emit_trace(
             status="degraded", error_type=type(last_error).__name__ if last_error else "unknown",
             model=self.model,
@@ -389,7 +513,7 @@ class LLMClient:
             latency_ms=(time.time() - t_start) * 1000,
             retry_count=retries,
         )
-        return json.dumps({"error": f"LLM调用失败", "fallback": True}, ensure_ascii=False)
+        return json.dumps({"error": "LLM调用失败", "fallback": True}, ensure_ascii=False)
 
     async def close(self):
         if self.client:
@@ -425,6 +549,35 @@ class LLMClient:
                 await self.redis.setex(key, self._cache_ttl, content)
             except Exception:
                 pass
+
+
+def is_degraded_vector(vec, eps: float = 1e-5) -> bool:
+    """降级产物判定：None / 空 / **全零**（每个分量的绝对值都 <= eps）。
+
+    `EmbeddingClient.embed()` 在失败时（无 API key / 重试耗尽）返回
+    **维度正确但内容全零**的向量 —— 它与真实向量**不可区分**：
+    长度对得上、能过维度护栏、`bool(vec)` 为真（所以 `if v` 那种
+    「过滤失败结果」的惯例**拦不住**它）。
+
+    后果（2026-10-20 实测，整改报告 §9.50）：
+    - 存进向量库 → 一条「看起来正常、实际无信息」的脏数据；
+    - 拿它去检索 → 相似度恒为 0 → 阈值全灭 → 兜底逻辑返回
+      **任意一条**记录，被当成「相关记忆」交给 LLM。
+
+    零向量是**失败信号**，不是合法结果。
+    ⚠ 同一类的 `embed_batch()` 对同一失败返回 **None** ——
+    两个 API 对「失败」的表达原本就不一致；本函数是**唯一**的判定口
+    （`rag/seeder.py` 此前有一份**局部**实现，阈值同为 1e-5）。
+    """
+    if vec is None:
+        return True
+    try:
+        vals = [float(x) for x in vec]
+    except (TypeError, ValueError):
+        return True
+    if not vals:
+        return True
+    return not any(abs(x) > eps for x in vals)
 
 
 class EmbeddingClient:
@@ -481,7 +634,7 @@ class EmbeddingClient:
             return [0.0] * settings.embedding_dim
 
         # 缓存键包含 type，避免 db/query 互相串扰
-        cache_key = f"embed_cache:{type_}:{hashlib.md5(text.encode('utf-8')).hexdigest()}"
+        cache_key = f"embed_cache:{type_}:{hashlib.md5(text.encode('utf-8'), usedforsecurity=False).hexdigest()}"
         if self.redis:
             try:
                 cached = await self.redis.get(cache_key)
@@ -557,7 +710,9 @@ class EmbeddingClient:
         raise ValueError("Unknown embedding response keys")
 
     async def embed_batch(self, texts, type_: str = "db"):
-        import json as _json, hashlib as _hash, logging as _log
+        import json as _json
+        import hashlib as _hash
+        import logging as _log
         from trace_hook import emit_trace
         t0 = __import__("time").time()
         items = list(texts)
@@ -567,7 +722,7 @@ class EmbeddingClient:
             if not isinstance(tx, str) or not tx.strip():
                 out[i] = [0.0] * settings.embedding_dim
                 continue
-            key = f"embed_cache:{type_}:{_hash.md5(tx.encode('utf-8')).hexdigest()}"
+            key = f"embed_cache:{type_}:{_hash.md5(tx.encode('utf-8'), usedforsecurity=False).hexdigest()}"
             val = None
             if self.redis:
                 try:
@@ -606,7 +761,7 @@ class EmbeddingClient:
                 for k, i in enumerate(miss_idx):
                     emb = got[k] if k < len(got) else [0.0]*settings.embedding_dim
                     out[i] = emb
-                    key = f"embed_cache:{type_}:{_hash.md5(str(items[i]).encode('utf-8')).hexdigest()}"
+                    key = f"embed_cache:{type_}:{_hash.md5(str(items[i]).encode('utf-8'), usedforsecurity=False).hexdigest()}"
                     if self.redis:
                         try:
                             await self.redis.setex(key, settings.embedding_cache_ttl, _json.dumps(emb))

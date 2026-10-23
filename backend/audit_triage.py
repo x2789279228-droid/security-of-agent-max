@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +51,9 @@ class TriageResult:
     fastpath_demoted: bool = False
     strong_count: int = 0
     signals_summary: dict = field(default_factory=dict)
+    # ── 分析完整性 (整改方案 §二.2) ──
+    analysis_status: str = "not_detected"   # detected|not_detected|inconclusive|error|partial
+    analysis_complete: bool = True          # False → 禁止按阴性收口
 
     def to_dict(self) -> dict:
         return {
@@ -65,6 +67,8 @@ class TriageResult:
             "fastpath_demoted": self.fastpath_demoted,
             "strong_count": self.strong_count,
             "signals": self.signals_summary,
+            "analysis_status": self.analysis_status,
+            "analysis_complete": self.analysis_complete,
         }
 
 
@@ -119,6 +123,17 @@ def score_event(
     fused = _fused_confidence(log_data, anomaly_score)
     reasons: list[str] = []
 
+    # ── 分析完整性 (整改方案 §二.2) ──
+    # 修复前: 检测器故障与「真的干净」在本函数得到完全相同的 TriageResult
+    # (实测 tier=P3 / lane=rule_close / strong=0), 「未分析」被当成阴性。
+    # 现在从融合层载荷读取显式状态, 不完整时禁止噪声关闭。
+    _anom = log_data.get("_anomaly") or {}
+    analysis_status = str(_anom.get("analysis_status") or "not_detected")
+    analysis_complete = bool(_anom.get("analysis_complete", True))
+    failed_detectors = [e.get("detector") for e in (_anom.get("detector_errors") or [])
+                        if isinstance(e, dict) and e.get("detector")]
+    analysis_incomplete = (not analysis_complete)
+
     # ── 打分 ──
     priority = 20
     if severity == "critical":
@@ -168,6 +183,13 @@ def score_event(
     if fastpath_strong:
         reasons.append("fastpath_strong")
 
+    # 分析不完整 → 提优先级, 并禁止噪声关闭 (rule_close)
+    if analysis_incomplete:
+        priority += 20
+        reasons.append(f"analysis_incomplete:{analysis_status}")
+        if failed_detectors:
+            reasons.append("failed:" + ",".join(sorted(set(failed_detectors))))
+
     priority = max(0, min(100, priority))
 
     sigma_critical = sigma_hit and sigma_sev == "critical"
@@ -204,6 +226,10 @@ def score_event(
         tier, lane, depth = "P1", LANE_LLM_SINGLE, "quick"
     elif severity == "medium" or anomaly_score >= 0.3 or volumetric:
         tier, lane, depth = "P2", LANE_TOOLS_ONLY, "quick"
+    elif analysis_incomplete:
+        # 分析不完整 → 不允许 rule_close (整改方案 §二.2)
+        # 既不静默关掉, 也不因引擎故障就自动封禁
+        tier, lane, depth = "P2", LANE_TOOLS_ONLY, "quick"
     else:
         tier, lane, depth = "P3", LANE_RULE_CLOSE, "quick"
 
@@ -233,6 +259,8 @@ def score_event(
         fastpath_demoted=fastpath_demoted,
         strong_count=strong_count,
         signals_summary=signals.to_dict(),
+        analysis_status=analysis_status,
+        analysis_complete=analysis_complete,
     )
 
 
@@ -265,6 +293,11 @@ def admit(
         skip_llm=triage.skip_llm,
         force_depth=triage.force_depth,
         fastpath_demoted=triage.fastpath_demoted,
+        # 分析完整性必须原样保留：admit() 只调整车道，不能把
+        # “检测器故障/未跑完” 重新折叠成 “已排查、无威胁”。
+        strong_count=triage.strong_count,
+        analysis_status=triage.analysis_status,
+        analysis_complete=triage.analysis_complete,
         signals_summary=dict(triage.signals_summary or {}),
     )
 

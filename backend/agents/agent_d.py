@@ -21,7 +21,6 @@
   - Agent-D 看到的是"前序 Agent 的输出 + 异常报告 + 原始事件"
   - 它不需要从头审核，只需要"找不同"——前序认为安全但实际危险的事件
 """
-import json
 import logging
 from typing import Optional
 
@@ -29,7 +28,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import BaseAgent
 from event_store import event_store, EventFilter
-from anomaly_detector import anomaly_detector
 from correlation_engine import correlation_engine
 from sliding_window import sliding_window
 
@@ -59,7 +57,7 @@ class AgentD(BaseAgent):
         )
 
         # 3. 获取已审核事件的原始数据
-        analyzed_events = await event_store.query(
+        await event_store.query(
             session, EventFilter(session_id=session_id, limit=200)
         )
 
@@ -69,7 +67,7 @@ class AgentD(BaseAgent):
         # 5. 构建审查上下文
         context_parts = []
 
-        context_parts.append(f"## 待复查事件（异常标记）")
+        context_parts.append("## 待复查事件（异常标记）")
         context_parts.append(f"共 {len(anomaly_events)} 条被异常检测器标记但尚未审核的事件:")
         for evt in anomaly_events[:20]:
             context_parts.append(
@@ -119,7 +117,7 @@ class AgentD(BaseAgent):
         context_parts.append(f"报告: {prev_report[:300]}" if prev_report else "报告: (无)")
         context_parts.append("")
 
-        context_parts.append(f"## 审查指令")
+        context_parts.append("## 审查指令")
         context_parts.append(
             "请严格审查以上所有信息，回答以下问题：\n"
             "1. 前序 Agent 是否遗漏了任何应该告警的事件？\n"

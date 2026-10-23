@@ -3,7 +3,11 @@
 > 🚀 **第一次接触本项目？** 请先看 [`docs/study-guide/知识手册.md`](docs/study-guide/知识手册.md)（18 章连贯学习手册，71 KB）；速通者看 [`docs/study-guide/速查.md`](docs/study-guide/速查.md)；喜欢 PDF 排版看 [`docs/study-guide/总览-PDF风.md`](docs/study-guide/总览-PDF风.md)。
 > 📚 完整文档导航见 [`docs/INDEX.md`](docs/INDEX.md)。
 
-**全自动安全审计 Agent 平台**：从日志接入、实时异常检测、攻击链 CEP、LLM 智能审计，到响应执行、复盘沉淀，形成闭环。基于 **Kafka + Flink 1.19.3 + Java 11** 流处理主干，叠加 NDR / EDR / Threat Intel / 反钓鱼 / 红蓝自博弈 / UEBA-for-AI / 因果推断等 30+ 后端模块。
+> **2026-10-21 升级进行中**：响应执行默认 `dry_run`（真实执行需显式开启）；能力状态以
+> [`backend/capabilities.yaml`](backend/capabilities.yaml) 为准（verified / experimental / disabled）；
+> 升级计划与证据见 [`docs/upgrade/`](docs/upgrade/)。
+
+**全自动安全审计 Agent 平台**：从日志接入、实时异常检测、攻击链 CEP、LLM 智能审计，到响应执行、复盘沉淀，形成闭环。基于 **Kafka + Flink 1.20.5 + Java 11** 流处理主干，叠加 NDR / EDR / Threat Intel / 反钓鱼 / 红蓝自博弈 / UEBA-for-AI / 因果推断等后端模块。
 
 ---
 
@@ -70,7 +74,7 @@
      (self_play)            (规则挖掘+改进)         (work_order/case/post_mortem)
 ```
 
-辅助通路（横向能力）：`causal_chain` 因果推断（PC / GES / do-calculus）→ `phishing_guard` 反钓鱼 6 通道 → `mcp_guard` 4 层工具调用控制 → `security_guard` 调用安全守卫 → `tool_behavior_signature` UEBA-for-AI → `sigma_engine` 25+ 规则动态管理。
+辅助通路（横向能力）：`causal_chain` 因果推断（PC / GES-style / do-calculus）→ `phishing_guard` 反钓鱼 6 通道 → `mcp_guard` 4 层工具调用控制 → `security_guard` 调用安全守卫 → `tool_behavior_signature` UEBA-for-AI → `sigma_engine` 25+ 规则动态管理。
 
 ---
 
@@ -143,20 +147,31 @@
 | **源信誉评分 (SourceReputationFunction)** | 数据源动态信誉 + 信誉衰减 |
 | **异常检测 (anomaly_detector)** | Python 侧兼容 HTTP 模式 + 频率/严重度/时段多维评分 |
 | **攻击链关联 (correlation_engine)** | 跨事件时间窗关联 + 攻击重建 |
-| **行为异常分析 (zeroday_detect/behavior_analyzer)** | 0day 检测：变体聚类 (variant_cluster) + LLM 行为 (llm_behavior) + 沙箱对接 (sandbox_connector) |
+| **行为异常分析 (zeroday_detect/behavior_analyzer)** ⚠未接线 | 0day 检测：变体聚类 (variant_cluster ⚠能力未接线) + LLM 行为 (llm_behavior ⚠未接线) + 沙箱对接 (sandbox_connector) |
 
 ### NDR / EDR / Threat Intel / 反钓鱼
 
 | 模块 | 说明 |
 |------|------|
-| **加密流量 (encrypted_traffic/)** | TLS 元数据 (tls_metadata) + 会话采集 (session_collector) + MITM 代理 (mitm_proxy) + JA3 指纹 (ja3_fingerprint) + 证书分析 (cert_analyzer) + LLM TLS 分析 |
+| **加密流量 (encrypted_traffic/)** | TLS 元数据 (tls_metadata) + 会话采集 (session_collector) + MITM 代理 (mitm_proxy ⚠未接线) + JA3 指纹 (ja3_fingerprint) + 证书分析 (cert_analyzer) + LLM TLS 分析 |
 | **流量采集 (traffic_capture/)** | 抓包引擎 (capture_engine) + PCAP 存储 (pcap_store) + 流聚合 (flow_aggregator) |
 | **协议解析 (protocol_parser/)** | TLS / SMB / HTTP / DNS / 通用 dissector |
-| **流量基线 (traffic_baseline/)** | 时序季节性 (seasonal) + 同侪组 (peer_group) + LLM 异常 (llm_anomaly) |
-| **EDR 融合 (edr_fusion/)** | 适配器 (edr_adapter) + Sysmon/WinEvent 解析 (sysmon_parser / winevent_parser) + LLM 关联 (llm_correlation) + 跨源关联 (cross_correlator) |
-| **IDS 对接 (ids_connector/suricata_connector)** | Suricata EVE JSON 接入 |
-| **威胁情报 (threat_intel/)** | STIX/TAXII 拉取 + IOC 匹配 (ioc_matcher) + 信誉 (reputation) + 富化 (intel_enricher) + LLM 上下文 |
+| **流量基线 (traffic_baseline/)** | 时序季节性 (seasonal) + 同侪组 (peer_group ⚠未接线) + LLM 异常 (llm_anomaly) |
+| **EDR 融合 (edr_fusion/)** | 适配器 (edr_adapter) + Sysmon/WinEvent 解析 (sysmon_parser / winevent_parser) + LLM 关联 (llm_correlation ⚠未接线) + 跨源关联 (cross_correlator) |
+| **IDS 对接 (ids_connector/suricata_connector)** ⚠未接线 | Suricata EVE JSON 接入 |
+| **威胁情报 (threat_intel/)** | STIX/TAXII 拉取 (stix_taxii) + IOC 落库 (ioc_ingest) + IOC 匹配 (ioc_matcher) + 信誉 (reputation) + 富化 (intel_enricher ⚠未接线) + LLM 上下文 (llm_context ⚠未接线) |
 | **反钓鱼 (phishing_guard/)** | 6 通道：邮件 (email_detector) / BEC (bec_detector) / 网站 (web_detector) / SMS / 二维码 (qrcode_detector) / 附件 (attachment_detector) + LLM 维度 (llm_dimension) + 评分 (scoring) + 演练 (drill_manager) |
+
+> **⚠未接线** = 该模块的代码存在且有测试，但**生产代码里没有任何导入方**，
+> 即实现从未被执行过。本表里带这个标记的 **9 个模块**是这种情况
+> （`behavior_analyzer` / `llm_behavior` / `variant_cluster` 的聚类能力 /
+> `mitm_proxy` / `peer_group` / `llm_correlation` / `suricata_connector` /
+> `intel_enricher` / `llm_context`）。
+>
+> 「有测试」只说明规则写对了，**不代表它在跑**。
+> 这些模块的代码质量结论见
+> [backend/DETECTION_ENGINE_REMEDIATION_REPORT.md](backend/DETECTION_ENGINE_REMEDIATION_REPORT.md) §7.1.5，
+> 接线状态由 `tests/test_dormant_modules_guard.py` 守住 —— 接线即转红。
 
 ### 知识库与 RAG
 
@@ -184,9 +199,22 @@
 
 | 模块 | 说明 |
 |------|------|
-| **因果链 (causal_chain/)** | PC 算法 (pc) / GES 算法 (ges) / do-calculus (do_calculus) / 变量定义 (variables) / 存储 (store) / 学习 (learn) / 对比 (compare) |
+| **因果链 (causal_chain/)** | PC 算法 (pc) / **GES-style** 贪心搜索 (ges，非 Chickering 全套 CPDAG 算子，见下方适用边界) / do-calculus (do_calculus) / 变量定义 (variables) / 存储 (store) / 学习 (learn) / 对比 (compare) |
 | **会话重建 (session_reconstruct)** | 跨事件会话串联 |
 | **事件归档 (event_archive)** | 长期归档与回溯 |
+
+> **GES-style 的适用边界与未验证事项**（§十一 P2「对实验性算法标注适用边界」）
+>
+> `causal_chain/ges.py` 实现的是 **BIC 评分的贪心搜索 + v-结构判定**，
+> **不是** Chickering 论文的完整 GES（含 forward / backward / reverse 三算子与
+> CPDAG 投影）。节点 ≤ 20 时它足以作为 PC 的**对照**，
+> 两算法骨架一致的边才标 `high_confidence`。
+>
+> 未验证事项：GES 与 PC 在**真实数据**上的骨架一致率从未测过；
+> 弱信号下两者可能**同向同错**（本机合成集上出现过 PC 与 GES 一致地
+> 把 `C→B` 判反的情况），此时 `high_confidence` 会成为伪信号。
+> 因果图仅供辅助观察，**不得作为封禁依据**
+> （见 `tool_registry.py` 中「只读,不得作为封禁依据」的声明）。
 
 ### 时序工作流
 
@@ -444,7 +472,7 @@ ufw deny 9093
 | `kafka.py` | 8 | Kafka 拓扑 / 主题 / 偏移 |
 | `assets.py` | 6 | 资产 CRUD / 关联 |
 | `auth.py` | 5 | 登录 / 注册 / 刷新 |
-| `causal.py` | 4 | 因果链 / PC / GES / do-calculus |
+| `causal.py` | 4 | 因果链 / PC / GES-style / do-calculus |
 | `ndr.py` | 4 | NDR 流 / TLS / 会话 |
 | `sources.py` | 4 | 数据源 CRUD / 认证 |
 | `capabilities.py` | 1 | B 类能力开关 + Prometheus 聚合 |
@@ -536,7 +564,7 @@ ufw deny 9093
 │   ├── field_cipher.py / security_crypto.py  # 字段加密 / 国密
 │   ├── event_bus.py / context_stream.py     # 实时事件
 │   ├── otel_setup.py / trace_hook.py / trace_context.py
-│   ├── memory_guard.py / llm_limiter.py / llm_enhancer.py / hierarchical_attention.py
+│   ├── memory_guard.py / llm_limiter.py / llm_enhancer.py
 │   ├── vector_store.py / qdrant_store.py    # 向量存储
 │   ├── grounding_verifier.py / faithfulness_gate.py / veto_gates.py
 │   ├── cad.py / audit_worker.py / audit_single.py / audit_types.py / audit_triage.py / audit_pq.py / audit_cache.py / audit_trail.py / audit_schemas.py
@@ -565,7 +593,7 @@ ufw deny 9093
 │   ├── zeroday_detect/                      # 0day 检测（5 模块）
 │   ├── ids_connector/                       # Suricata 对接
 │   ├── data_security/                       # 数据安全 (LLM 分类器)
-│   ├── causal_chain/                        # 因果推断（7 模块：PC/GES/do-calculus）
+│   ├── causal_chain/                        # 因果推断（7 模块：PC/GES-style/do-calculus）
 │   ├── learn_loop/                          # 学习闭环（10 模块）
 │   ├── ops_loop.py / ops_metrics/           # KPI 跟踪
 │   ├── observability/                       # 可观测性（5 模块）

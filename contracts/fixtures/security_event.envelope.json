@@ -1,0 +1,26 @@
+{
+  "eventId": "99999999-8888-4777-8666-555555555555",
+  "eventType": "security.event",
+  "schemaVersion": "1.0.0",
+  "occurredAt": 1750000002000,
+  "producer": "contracts.fixture",
+  "correlationId": "corr-envelope-1",
+  "payload": {
+    "eventId": "99999999-8888-4777-8666-555555555555",
+    "sourceId": "soc-api",
+    "apiKey": "soc-api-2024",
+    "eventType": "C2_BEACON",
+    "severity": "critical",
+    "srcIp": "203.0.113.77",
+    "dstIp": "198.51.100.9",
+    "protocol": "https",
+    "message": "periodic beacon to known C2",
+    "confidence": 95.0,
+    "timestamp": 1750000002000,
+    "traceId": "corr-envelope-1",
+    "schemaVersion": "1.0.0",
+    "producer": "contracts.fixture",
+    "correlationId": "corr-envelope-1",
+    "occurredAt": 1750000002000
+  }
+}

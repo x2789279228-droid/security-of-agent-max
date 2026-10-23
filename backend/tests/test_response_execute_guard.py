@@ -63,20 +63,21 @@ USER_OPERATOR = SimpleNamespace(username="alice", role="operator")
 
 
 class TestExecuteResponseGuard:
-    def test_critical_action_rejected_with_403(self):
+    def test_high_and_critical_actions_rejected_with_403(self):
         async def t():
             await _reset()
-            with _raise_http() as exc_info:
-                await execute_response(
-                    request=_FakeRequest(),
-                    action_name="isolate_host",
-                    src_ip="10.0.0.66",
-                    reason="测试隔离请求",
-                    session=None,
-                    user=USER_OPERATOR,
-                )
-            assert exc_info.value is not None
-            assert exc_info.value.status_code == 403
+            for action in ("block_ip", "isolate_host", "dns_sinkhole"):
+                with _raise_http() as exc_info:
+                    await execute_response(
+                        request=_FakeRequest(),
+                        action_name=action,
+                        src_ip="10.0.0.66",
+                        reason="测试高危动作直执行",
+                        session=None,
+                        user=USER_OPERATOR,
+                    )
+                assert exc_info.value is not None, action
+                assert exc_info.value.status_code == 403, action
         _run(t())
 
     def test_manual_execute_goes_through_guard_and_leaves_trail(self):
@@ -88,20 +89,21 @@ class TestExecuteResponseGuard:
             from models import ResponseLog, AuditTrail
 
             async with async_session() as s:
+                # 用 MEDIUM 动作验证手动执行链；HIGH/CRITICAL 已被审批闸门挡住。
                 result = await execute_response(
                     request=_FakeRequest(),
-                    action_name="block_ip",
+                    action_name="rate_limit",
                     src_ip="10.0.0.77",
-                    reason="手动封禁测试来源",
+                    reason="手动限速测试来源",
                     session=s,
                     user=USER_OPERATOR,
                 )
                 assert "rollback_token" in result
-                assert result["action"] == "block_ip"
+                assert result["action"] == "rate_limit"
 
                 # ResponseLog 必须留痕（修复前该端点完全不写）
                 rows = (await s.execute(
-                    select(ResponseLog).where(ResponseLog.action_name == "block_ip")
+                    select(ResponseLog).where(ResponseLog.action_name == "rate_limit")
                 )).scalars().all()
                 assert rows, "手动执行必须写 ResponseLog"
                 assert any(r.approval_status == "manual_execute" for r in rows)

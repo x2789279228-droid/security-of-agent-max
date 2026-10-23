@@ -16,12 +16,10 @@ ChunkVerdict 新增:
   - grounding_report: 程序化 grounding 验证结果
   - evidence_quotes: 每条断言引用的原始字段值
 """
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from summary_compression import summary
 # D3: 继承 BaseAuditComponent 统一 LLM 调用入口的 trace
 from .base import BaseAuditComponent
 
@@ -57,6 +55,11 @@ class ChunkVerdict:
     schema_valid: bool = True
     schema_errors: list[str] = field(default_factory=list)
 
+    # P0-C-2: 剥离**之前**按原始断言集合算出的证据有效性快照。
+    # 剥离后 threat_claims 只剩 admitted，直接用它算分母会把被丢弃的断言
+    # 从指标里抹掉 → hallucination_risk 系统性塌到 0。保留原始快照供审计追溯。
+    raw_evidence_validation: dict = field(default_factory=dict)
+
     raw_llm_output: str = ""
 
     def to_dict(self) -> dict:
@@ -77,14 +80,21 @@ class ChunkVerdict:
             "discarded_claim_count": len(self.discarded_claims),
         }
 
-    def validate_evidence(self) -> dict:
-        """验证证据完整性（ID 存在性 + Grounding 分数）"""
+    def validate_evidence(self, claims: Optional[list[dict]] = None) -> dict:
+        """验证证据完整性（ID 存在性 + Grounding 分数）
+
+        Args:
+            claims: 计算口径的断言集合。默认用当前 ``threat_claims``。
+                    P0-C-2: 调用方应在**剥离前**传入原始 claims，
+                    否则分母只剩 admitted，被丢弃的断言不计入指标。
+        """
+        target = self.threat_claims if claims is None else claims
         chunk_ids = set(self.all_event_ids_in_chunk)
         valid = 0
         invalid = 0
         issues = []
 
-        for claim in self.threat_claims:
+        for claim in target:
             ev_ids = claim.get("evidence_ids", [])
             if not ev_ids:
                 invalid += 1
@@ -99,15 +109,15 @@ class ChunkVerdict:
                     f"（块内 ID: {sorted(chunk_ids)[:5]}...）"
                 )
             else:
-                # 进一步检查 evidence_quotes 是否存在
-                quotes = claim.get("evidence_quotes", [])
-                if not quotes:
+                # 追溯信息：ID 有效但没有任何可核验原文（Layer 2 会记 1.0 分）。
+                # 不改变 valid/invalid 计数 —— 该情形的判定权在 GroundingVerifier。
+                if not claim.get("evidence_quotes", []):
                     issues.append(
                         f"断言「{claim.get('summary','')[:50]}」有证据ID但无字段引用"
                     )
                 valid += 1
 
-        total = len(self.threat_claims)
+        total = len(target)
         self.hallucination_risk = invalid / max(total, 1)
         self.unsubstantiated = invalid > 0 and total > 0
 
@@ -256,6 +266,17 @@ class SubAuditor(BaseAuditComponent):
             raw_llm_output=raw_result,
         )
 
+        # P0-C-2: 在**剥离之前**按原始断言集合算证据有效性。
+        # 修复前 validate_evidence 在 strip_ungrounded_claims 之后调用，
+        # 此时 threat_claims 只剩 admitted → 分母 total 只统计存活断言，
+        # 被整条丢弃的断言从不计入 → hallucination_risk 系统性塌到 0，
+        # 连带 veto_gates.HALLUCINATION_EARLY_STOP=0.3 的早停与强制人审几乎永不触发。
+        # 实测：4 条断言（1 条 ID 不存在被剥离 + 1 条零引用）→ risk 仍为 0.0。
+        raw_validation = verdict.validate_evidence(claims=claims)
+        raw_hallucination_risk = verdict.hallucination_risk
+        raw_unsubstantiated = verdict.unsubstantiated
+        verdict.raw_evidence_validation = dict(raw_validation)
+
         # 程序化 Grounding 验证
         try:
             from grounding_verifier import grounding_verifier
@@ -270,6 +291,11 @@ class SubAuditor(BaseAuditComponent):
                 "partially": grounding.partially_grounded,
                 "ungrounded": grounding.ungrounded_claims,
                 "indicators": grounding.hallucination_indicators[:5],
+                # P0-C-1: 硬性否决原因（若命中，加权分不再决定档位）
+                "hard_fail_reasons": [
+                    r for rep in (grounding.claims or [])
+                    for r in (getattr(rep, "hard_fail_reasons", None) or [])
+                ][:5],
             }
             verdict.grounding_score = grounding.overall_score
 
@@ -303,7 +329,14 @@ class SubAuditor(BaseAuditComponent):
             if not admitted:
                 verdict.threat_detected = False
 
-        # ID 存在性验证
+        # 恢复原始口径的风险指标 —— 剥离不得把已发生的证据问题从指标里抹掉。
+        # 取两者较大值：既不因 grounding 层判得更严而被稀释，
+        # 也不因剥离后只剩干净断言而回落。
+        verdict.hallucination_risk = max(
+            verdict.hallucination_risk, raw_hallucination_risk
+        )
+        verdict.unsubstantiated = verdict.unsubstantiated or raw_unsubstantiated
+
         validation = verdict.validate_evidence()
         if validation["invalid_claims"] > 0:
             logger.warning(

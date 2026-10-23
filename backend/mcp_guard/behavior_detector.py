@@ -13,7 +13,7 @@ import time
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 from .behavior_signature import (
     GLOBAL_CALLER,
@@ -29,6 +29,23 @@ _HISTORY_MAX = 80
 _LEARN_DEDUP_SEC = 600
 _SEQ_MIN_FROM = 5
 DEFAULT_WEIGHTS = {"param": 0.35, "seq": 0.25, "time": 0.15, "caller": 0.25}
+
+# ── 判定里有两个「0.8」，语义**不同**，必须分别命名 ──────────────────────
+#
+# 1) STRONG_DIM_THRESHOLD —— 单维度强信号门限。
+#    ``is_anomaly = 加权分 >= warn_threshold  或  任一维度 >= STRONG_DIM_THRESHOLD``
+#    这是一条与加权分**并行**的触发路径：某个维度单独到 0.8 就足以判为异常，
+#    即使加权分被其他维度稀释得很低。
+#
+# 2) SEVERITY_HIGH_SCORE —— 事件 severity 的分档门限（看的是**加权分**）。
+#
+# 历史上这两处都写成字面量 0.8，数值又与 DEFAULT_CONFIRM=0.8 相同，
+# 于是「改 confirm 阈值」看起来像「也改了 strong 门限」——
+# 实际上 strong 门限**不跟随任何配置项**（§9.66 实测：把 confirm 调到 0.9
+# 后，单维 0.85 的样本仍被判为 is_anomaly，却因档位门限未命中而**不做任何处置**）。
+# 分名命名是为了让这件事**看得见**，不是为了改行为。
+STRONG_DIM_THRESHOLD = 0.8
+SEVERITY_HIGH_SCORE = 0.8
 _MODE_ALIASES = {
     "enforce": "confirm",
     "confirm": "confirm",
@@ -97,9 +114,79 @@ class SignatureReport:
             "trace_id": rec.trace_id,
             "event_id": rec.event_id,
             "session_id": rec.session_id,
-            "severity": "high" if (self.anomaly_score or 0) >= 0.8 else "medium",
+            "severity": "high" if (self.anomaly_score or 0) >= SEVERITY_HIGH_SCORE else "medium",
             "ts": rec.ts.isoformat() if rec.ts else "",
         }
+
+
+# ═══════════════════════════════════════════
+# 签名 → 决策升级规则（全平台唯一来源，P3-1）
+# ═══════════════════════════════════════════
+# 修复前这条规则只写在 McpGuardServer._apply_enforcement 里，
+# 于是「策略在一处配置、在两处执行」变成了「只在一处执行」：
+#   · MCP Guard 的响应侧工具走 _apply_enforcement → deny 生效
+#   · tool_registry._pre_execute_check 只把分数拼进 reason 字符串，
+#     然后无条件 passed=True → deny 完全失效
+# 实测：同一份 action="deny" 的 SignatureReport，
+#   MCP Guard 侧最终决策=deny，审计工具侧 passed=True（reason 仅「score=0.97」）。
+# 也就是说运维把 tool_signature_mode 配成 deny 之后，11 个审计工具一个都不会拦。
+#
+# 抽到这里是因为它是对 SignatureReport.action 的直接解释，
+# 两个执行点都已经依赖本模块，不必为十几行规则另开一个模块。
+
+DECISION_RANK = {"allow": 0, "require_confirmation": 1, "deny": 2}
+
+
+def _config_number(settings, name: str, default, caster):
+    """从 settings 读一个数值配置项，**保留合法的 0**。
+
+    ## 为什么不能用 `getattr(s, name, default) or default`
+
+    那个写法把 **falsy 值**（尤其是 `0`）当成「没配」⇒ 退回默认值。
+    实测（§9.67）：运维把 ``tool_signature_warn_threshold`` 配成 **0**
+    （语义 = 一切都触发），生产实际拿到的是 **0.6**；
+    四个阈值/样本数全部如此。
+
+    ⇒ 运维**改了配置却看不到效果**，且没有任何日志提示。
+    `0` 对这些字段是**合法且有意义**的取值（阈值 0 = 全部命中），
+    不能被静默吞掉。
+
+    正确的兜底条件是「**没配**」（None / 属性不存在），不是「值为 0」。
+    """
+    if settings is None:
+        return caster(default)
+    raw = getattr(settings, name, None)
+    if raw is None:
+        return caster(default)
+    try:
+        return caster(raw)
+    except (TypeError, ValueError):
+        # 配了但类型不对 —— 退回默认并**不留痕**是原来的行为；
+        # 这里显式吞掉异常以保持与原实现一致的容错度。
+        return caster(default)
+
+
+def escalate_decision(
+    current: str, report: Optional[SignatureReport]
+) -> Tuple[str, str]:
+    """把行为签名报告的 action 升级到决策档位。只升不降。
+
+    Args:
+        current: 当前决策档位
+        report: 签名报告；None 或 action="logged" 表示只记录不处置
+
+    Returns:
+        (decision, reason) —— 未升级时 decision 原样返回、reason 为空串
+    """
+    if report is None or report.action in (None, "logged"):
+        return current, ""
+
+    desired = "deny" if report.action == "deny" else "require_confirmation"
+    if DECISION_RANK.get(desired, 0) <= DECISION_RANK.get(current, 0):
+        return current, ""
+
+    detail = "; ".join(report.reasons[:3]) or f"score={report.anomaly_score}"
+    return desired, f"behavior_signature: {detail}"
 
 
 class BehaviorDetector:
@@ -160,21 +247,21 @@ class BehaviorDetector:
         if self._min_samples_override is not None:
             return int(self._min_samples_override)
         s = self._settings()
-        return int(getattr(s, "tool_signature_min_samples", 30) or 30) if s else 30
+        return _config_number(s, "tool_signature_min_samples", 30, int)
 
     def warn_threshold(self) -> float:
         if self._warn_override is not None:
             return float(self._warn_override)
         s = self._settings()
-        return float(getattr(s, "tool_signature_warn_threshold", 0.6) or 0.6) if s else 0.6
+        return _config_number(s, "tool_signature_warn_threshold", 0.6, float)
 
     def confirm_threshold(self) -> float:
         s = self._settings()
-        return float(getattr(s, "tool_signature_confirm_threshold", 0.8) or 0.8) if s else 0.8
+        return _config_number(s, "tool_signature_confirm_threshold", 0.8, float)
 
     def deny_threshold(self) -> float:
         s = self._settings()
-        return float(getattr(s, "tool_signature_deny_threshold", 0.95) or 0.95) if s else 0.95
+        return _config_number(s, "tool_signature_deny_threshold", 0.95, float)
 
     def mode(self) -> str:
         if self._mode_override is not None:
@@ -234,7 +321,7 @@ class BehaviorDetector:
     def _score_locked(self, rec: ToolCallRecord) -> SignatureReport:
         min_n = self.min_samples()
         features = extract_features(rec.arguments)
-        ts = rec.ts.timestamp() if rec.ts else time.time()
+        rec.ts.timestamp() if rec.ts else time.time()
         hour = rec.ts.astimezone(timezone.utc).hour if rec.ts else datetime.now(timezone.utc).hour
         local = self._signatures.get((rec.tool_name, rec.caller))
         glob = self._signatures.get((rec.tool_name, GLOBAL_CALLER))
@@ -284,7 +371,7 @@ class BehaviorDetector:
             denom += w
         score = (numer / denom) if denom > 0 else 0.0
         score = max(0.0, min(1.0, score))
-        strong = any(float(v) >= 0.8 for v in dims.values() if v is not None)
+        strong = any(float(v) >= STRONG_DIM_THRESHOLD for v in dims.values() if v is not None)
         is_anomaly = score >= self.warn_threshold() or strong
         action = "logged"
         mode = self.mode()

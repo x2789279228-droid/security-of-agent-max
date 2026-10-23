@@ -130,6 +130,68 @@ class TestAutoDispatch:
             assert rate <= 1.0
         _run(t())
 
+    def test_sqlite_advisory_lock_does_not_run_pg_sql(self):
+        """SQLite 不得执行 hashtext/pg_advisory_xact_lock，以免事务进入失败态。"""
+        async def t():
+            from types import SimpleNamespace
+            from case_manager import case_manager, session_dialect_name
+            executed = []
+
+            class FakeSession:
+                bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
+                async def execute(self, *a, **k):
+                    executed.append((a, k))
+
+            sess = FakeSession()
+            assert session_dialect_name(sess) == "sqlite"
+            await case_manager._lock_session_case(sess, "sess-sqlite")
+            assert executed == []
+        _run(t())
+
+    def test_postgres_advisory_lock_still_issued(self):
+        async def t():
+            from types import SimpleNamespace
+            from case_manager import case_manager
+
+            executed = []
+
+            class FakeSession:
+                bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+                async def execute(self, stmt, params=None):
+                    executed.append((str(stmt), params))
+
+            await case_manager._lock_session_case(FakeSession(), "sess-pg")
+            assert executed, "PostgreSQL 必须申请 advisory lock"
+            sql, params = executed[0]
+            assert "pg_advisory_xact_lock" in sql
+            assert "hashtext" in sql
+            assert params["sid"] == "sess-pg"
+        _run(t())
+
+    def test_postgres_lock_errors_are_not_swallowed(self):
+        async def t():
+            from types import SimpleNamespace
+            from case_manager import case_manager
+
+            class Boom(RuntimeError):
+                pass
+
+            class FakeSession:
+                bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+                async def execute(self, *a, **k):
+                    raise Boom("connection lost")
+
+            raised = False
+            try:
+                await case_manager._lock_session_case(FakeSession(), "sess-pg")
+            except Boom:
+                raised = True
+            assert raised, "PG 连接/SQL 错误必须暴露"
+        _run(t())
+
     def test_audit_pipeline_path_creates_case(self):
         """Kafka 审计入口(_audit_pipeline)现会触发 auto_create_case(此前从不)。"""
         async def t():
@@ -150,9 +212,19 @@ class TestAutoDispatch:
                 )
             finally:
                 log_ingestion.log_ingestor._audit_pipeline_inner = real_inner
-            async with async_session() as s:
-                cases = (await s.execute(select(SecurityCase))).scalars().all()
-                orders = (await s.execute(select(WorkOrder))).scalars().all()
+            # 2026-10-03 修正: auto_create_case 是 fire-and-forget 的 create_task
+            # (log_ingestion.py:283)，本测试原先在后台任务真正执行前就断言，
+            # 于是"建不出 case" —— 机器越忙越容易失败。
+            # 改为有界轮询等结果，而不是 sleep 赌时序。
+            import asyncio as _aio
+            cases, orders = [], []
+            for _ in range(50):                      # 最多 ~2.5s
+                async with async_session() as s:
+                    cases = (await s.execute(select(SecurityCase))).scalars().all()
+                    orders = (await s.execute(select(WorkOrder))).scalars().all()
+                if cases and orders:
+                    break
+                await _aio.sleep(0.05)
             assert len(cases) >= 1, "_audit_pipeline(Kafka 入口)应自动建 case"
             assert len(orders) >= 1, "high case 应自动派单建工单"
         _run(t())

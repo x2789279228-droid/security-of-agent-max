@@ -250,5 +250,13 @@ def test_detector_exception_fail_open_eval():
         user_role="admin",
         caller="ops",
     ))
+    # ⚠ 2026-10-20 更正（§9.46）：这行原先断言 `status == "success"`。
+    # MCP 的执行器是**模拟实现**，原先把模拟执行报成 success ——
+    # 那正是 §9.46 修掉的谎报；留着它等于**把谎报钉成契约**。
+    # 本用例的主体是「检测器崩了 → fail-open，不阻断」，
+    # 所以要断言的是「**调用确实到达了工具**」，而不是「工具谎报成功」。
+    # 断言 `action` 比断言 `status` 更能说明**哪个**工具跑了 → 并不放宽。
     assert resp["decision"] == "allow"
-    assert resp.get("execution", {}).get("status") == "success"
+    assert resp.get("execution", {}).get("action") == "alert_only"
+    assert resp["execution"]["status"] != "success", (
+        "模拟执行器不许报成功（§9.46）")

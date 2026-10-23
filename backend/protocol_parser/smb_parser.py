@@ -12,7 +12,10 @@ smb_parser.py — SMB/CIFS 协议解析
 """
 import logging
 import struct
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:  # only for annotations; ProtocolMessage is imported lazily at runtime
+    from protocol_parser.dissector import ProtocolMessage
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +82,6 @@ class SmbParser:
     """SMB 协议解析器"""
 
     def parse(self, pkt) -> Optional["ProtocolMessage"]:
-        from protocol_parser.dissector import ProtocolMessage
 
         payload = pkt.payload
         if not payload or len(payload) < 8:

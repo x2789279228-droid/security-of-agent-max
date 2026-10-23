@@ -10,8 +10,13 @@ from dataclasses import dataclass, field as dataclass_field
 from datetime import timedelta
 from typing import Any, Dict, List
 
+import logging
+
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+
+# 日志不产生 workflow command，不破坏确定性约束。
+_wf_log = logging.getLogger("temporal.workflows")
 
 
 @dataclass
@@ -93,16 +98,50 @@ class AuditPipelineWorkflow:
             ),
         )
 
+        # ── P0-D-1: CAD 独立审计必须**先于**响应决策 ──
+        # 修复前本段排在 trigger_response 之后，且返回值被直接丢弃：
+        #   CAD 对本事件的任何结论都是纯事后记录，熔断不阻止误封。
+        # save_result 已在上方 commit `_audit_llm`，cad_verify 从 DB 回源即可。
+        # 切勿把 merged 嵌进 audit_llm 再回传(易触发 Circular reference)。
+        cad_result = await workflow.execute_activity(
+            "cad_verify",
+            args=[{
+                "event_id": event_id,
+                "session_id": session_id,
+                "audit_llm": {},
+            }],
+            start_to_close_timeout=timedelta(seconds=180),
+            retry_policy=RetryPolicy(
+                initial_interval=timedelta(seconds=5),
+                maximum_interval=timedelta(seconds=60),
+                maximum_attempts=2,
+            ),
+        )
+        cad_result = cad_result or {}
+        cad_report = cad_result.get("report")
+        supervision_ok = not bool(cad_result.get("error"))
+        supervision_error = str(cad_result.get("error") or "")
+
         # 命中威胁 → 响应引擎
-        # v5 修复(A):触发条件与 async 路径(log_ingestion._audit_pipeline_inner)
-        # 对齐 — confirmed 与 faithfulness 软降级后的 suspicious(+threat=True)
-        # 都允许策略层处置; 此前仅 confirmed, 53 条软降级威胁永远不触发响应
-        if (
-            merged.get("threat_detected")
-            and merged.get("verdict") in ("confirmed", "suspicious")
-            and float(merged.get("confidence", 0) or 0) >= 0.4
-            and not merged.get("response_blocked")
-        ):
+        # v5 修复(A):触发条件与 async 路径对齐 — confirmed 与 faithfulness
+        # 软降级后的 suspicious(+threat=True) 都允许策略层处置。
+        # P0-C-6/D-1/D-3: 判定改走 veto_gates.evaluate_auto_response_gate 单一权威点，
+        # 额外纳入 needs_human_review / schema_valid / CAD 熔断 / 监督异常。
+        from veto_gates import evaluate_auto_response_gate
+
+        _gate = evaluate_auto_response_gate(
+            merged,
+            cad_report=cad_report,
+            supervision_ok=supervision_ok,
+            supervision_error=supervision_error,
+        )
+        if _gate.blocking_factors:
+            _wf_log.warning(
+                f"[AutoResponseGate] event {event_id} BLOCKED: "
+                f"factors={_gate.blocking_factors} reason={_gate.reason}"
+            )
+
+        if _gate.allowed:
             threat_info = {
                 "threat_type": (
                     merged.get("threat_type")
@@ -130,26 +169,10 @@ class AuditPipelineWorkflow:
                 ),
             )
 
-        # CAD 独立审计 — save_result 已把完整 `_audit_llm`(含 evidence_trail)
-        # 落库; cad_verify 入参留空并由 activity 从 DB 回源。
-        # 切勿把 merged 嵌进 audit_llm 再回传(易触发 Circular reference)。
-        await workflow.execute_activity(
-            "cad_verify",
-            args=[{
-                "event_id": event_id,
-                "session_id": session_id,
-                "audit_llm": {},
-            }],
-            start_to_close_timeout=timedelta(seconds=180),
-            retry_policy=RetryPolicy(
-                initial_interval=timedelta(seconds=5),
-                maximum_interval=timedelta(seconds=60),
-                maximum_attempts=2,
-            ),
-        )
-
         return {"event_id": event_id, "session_id": session_id,
-                "rounds": len(all_rounds), "merged": merged}
+                "rounds": len(all_rounds), "merged": merged,
+                "auto_response_allowed": _gate.allowed,
+                "auto_response_blocking_factors": list(_gate.blocking_factors)}
 
 
 @dataclass

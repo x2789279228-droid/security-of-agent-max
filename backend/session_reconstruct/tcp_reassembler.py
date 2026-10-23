@@ -14,11 +14,8 @@ tcp_reassembler.py — TCP 流重组
 """
 import logging
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
 
-from config import settings
 
 logger = logging.getLogger(__name__)
 

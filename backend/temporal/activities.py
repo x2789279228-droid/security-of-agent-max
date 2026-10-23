@@ -9,13 +9,32 @@ temporal.activities — Temporal Activity 实现
   - audit_round 返回 JSON 安全的 round dict(含 audit/verdict 摘要 + 供落库的完整 grounding 字段)。
   - 保留 pipeline_tracer.span(OTel→Jaeger) 与 trace_hook 调用, 与现有可视化一致。
 """
-import json
 import logging
 import time
 
 from temporalio import activity
 
 logger = logging.getLogger(__name__)
+
+
+def _faithfulness_gate_fail_closed(merged: dict, **kwargs) -> dict:
+    """执行忠实度闸；任何异常都必须 fail-closed（阻断响应）。
+
+    进程内路径没有外层 try，异常会让整轮降级；Temporal 路径此前在
+    异常时 `setdefault("response_blocked", False)` —— 等于整道闸被跳过
+    且默认放行。这里统一为：异常 → response_blocked=True + 人工复核。
+    """
+    try:
+        from faithfulness_gate import apply_faithfulness_gate
+        return apply_faithfulness_gate(merged, **kwargs)
+    except Exception as e:
+        logger.exception("[Temporal] faithfulness gate failed: %s", e)
+        out = dict(merged)
+        out["response_blocked"] = True
+        out["faithfulness_gate_error"] = str(e)
+        out.setdefault("needs_human_review", True)
+        out["verdict"] = out.get("verdict") or "insufficient_evidence"
+        return out
 
 
 # ── 单轮: Decomposer→ToolBuilder→Executor→Reviewer ──
@@ -57,6 +76,10 @@ async def audit_round(inp: dict) -> dict:
             f"[Temporal-audit_round] budget hard — short-circuit "
             f"event#{event_id} tier={_tier} round{round_num}"
         )
+        # P1-Executor: 硬预算短路是「**没跑**」，不是「跑完且干净」。
+        # 修复前本轮 audit={} 且无任何标记，merge_audit_rounds 直接把它
+        # 当成「这一轮没发现威胁」，最终 verdict 与真实全清完全相同
+        # (false_positive)。现在显式声明终态并把该原因带上。
         return {
             "round": round_num,
             "mode": mode,
@@ -67,6 +90,9 @@ async def audit_round(inp: dict) -> dict:
             "verdict": {},
             "missed_threats": [],
             "short_circuit": "budget_exhausted",
+            "terminal_state": "budget_exhausted",
+            "terminal_reason": f"hard_budget(tier={_tier})",
+            "llm_calls_made": 0,
             "audit_full": {
                 "grounding_score": 0.0,
                 "kb_verification": {},
@@ -218,33 +244,30 @@ async def save_result(inp: dict) -> dict:
     max_rounds = int(inp.get("max_rounds", 3))
 
     merged = _merge_rounds(all_rounds, log_data)
-    try:
-        from faithfulness_gate import apply_faithfulness_gate, contexts_from_audit
-        answer_text = str((final_verdict or {}).get("final_summary") or "")
-        evidence_for_gate = []
-        for rd in all_rounds:
-            for claim in (rd.get("audit") or {}).get("evidence") or []:
-                if isinstance(claim, dict) and "threat_claims" in claim:
-                    evidence_for_gate.extend(claim.get("threat_claims") or [])
-        _sigma = log_data.get("_sigma") or {} if isinstance(log_data, dict) else {}
-        _anomaly = log_data.get("_anomaly") or {} if isinstance(log_data, dict) else {}
-        merged = apply_faithfulness_gate(
-            merged,
-            answer=answer_text,
-            contexts=contexts_from_audit(log_data, evidence_for_gate),
-            query=str(log_data.get("message") or ""),
-            abstain=bool((final_verdict or {}).get("abstain") or merged.get("verdict") == "insufficient_evidence"),
-            non_llm_signals={
-                "sigma_detected": bool(_sigma.get("detected")),
-                "hits": _sigma.get("hits") or [],
-                "anomaly_score": _anomaly.get("score") if isinstance(_anomaly, dict) else 0,
-                "event_type": (log_data or {}).get("event") or (log_data or {}).get("type") or "",
-                "event_severity": (log_data or {}).get("severity") or "",
-                "sigma_severity": _sigma.get("max_severity") or _sigma.get("severity") or "",
-            },
-        )
-    except Exception:
-        merged.setdefault("response_blocked", False)
+    from faithfulness_gate import contexts_from_audit
+    answer_text = str((final_verdict or {}).get("final_summary") or "")
+    evidence_for_gate = []
+    for rd in all_rounds:
+        for claim in (rd.get("audit") or {}).get("evidence") or []:
+            if isinstance(claim, dict) and "threat_claims" in claim:
+                evidence_for_gate.extend(claim.get("threat_claims") or [])
+    _sigma = log_data.get("_sigma") or {} if isinstance(log_data, dict) else {}
+    _anomaly = log_data.get("_anomaly") or {} if isinstance(log_data, dict) else {}
+    merged = _faithfulness_gate_fail_closed(
+        merged,
+        answer=answer_text,
+        contexts=contexts_from_audit(log_data, evidence_for_gate),
+        query=str(log_data.get("message") or ""),
+        abstain=bool((final_verdict or {}).get("abstain") or merged.get("verdict") == "insufficient_evidence"),
+        non_llm_signals={
+            "sigma_detected": bool(_sigma.get("detected")),
+            "hits": _sigma.get("hits") or [],
+            "anomaly_score": _anomaly.get("score") if isinstance(_anomaly, dict) else 0,
+            "event_type": (log_data or {}).get("event") or (log_data or {}).get("type") or "",
+            "event_severity": (log_data or {}).get("severity") or "",
+            "sigma_severity": _sigma.get("max_severity") or _sigma.get("severity") or "",
+        },
+    )
 
     # 合并证据链
     all_evidence = []
@@ -399,8 +422,10 @@ async def save_result(inp: dict) -> dict:
     except Exception:
         pass
 
+    # 行已经提交。这条 publish 只是提醒，SSE 按 event_id 回源，不把载荷当唯一副本。
     event_bus.publish("audit_complete", {
         "event_id": event_id,
+        "_notice": True,
         "event_type": log_data.get("event", log_data.get("type", "UNKNOWN")),
         "threat_detected": merged.get("threat_detected", False),
         "confidence": merged.get("confidence", 0),
@@ -439,7 +464,12 @@ async def trigger_response(inp: dict) -> dict:
 
     # v5 修复(A):响应来源标记,写入 policy_match 日志供追溯(封禁是谁决定的)
     threat_info.setdefault("response_source", "audit_llm")
-    threat_info.setdefault("allow_blocking", True)
+    # P1-C-5: 只有 confirmed 具备自动封禁资格；suspicious 仅告警。
+    # 修复前这里是 setdefault(True) —— 无论 verdict 是什么都允许封禁。
+    threat_info["allow_blocking"] = (
+        str(threat_info.get("verdict") or merged.get("verdict") or "")
+        == "confirmed"
+    )
 
     try:
         _resp_orch = get_orchestrator()
@@ -451,6 +481,7 @@ async def trigger_response(inp: dict) -> dict:
                 )
         event_bus.publish("response_action", {
             "event_id": event_id,
+            "_notice": True,
             "threat_type": threat_info.get("threat_type", ""),
             "severity": threat_info.get("severity", "info"),
             "src_ip": threat_info.get("src_ip", ""),
@@ -475,7 +506,8 @@ async def trigger_response(inp: dict) -> dict:
                 db_evt = await s.get(SecurityEvent, event_id)
                 if db_evt and resp_steps:
                     db_evt.raw_data = merge_thought_into_raw(db_evt.raw_data or {}, resp_steps)
-                    await s.commit()
+                    from event_store import event_store
+                    await event_store.commit_then_invalidate(s, event_id)
         except Exception:
             pass
         return {"triggered": True}

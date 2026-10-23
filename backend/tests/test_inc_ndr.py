@@ -44,7 +44,7 @@ def test_ja3_lookup_unknown_harmless():
 
 def test_tls_metadata_build_and_score():
     """TLS 会话 data + 风险评分(自签名证书应升分)。"""
-    from encrypted_traffic.tls_metadata import TlsSessionData, TlsMetadataAggregator
+    from encrypted_traffic.tls_metadata import TlsSessionData
     agg = TlsMetadataAggregator()
     sess = TlsSessionData(src_ip="1.2.3.4", dst_ip="5.6.7.8", dst_port=443,
                           sni="www.example.com", tls_version="TLS1.3",
@@ -58,7 +58,7 @@ def test_tls_metadata_build_and_score():
 
 def test_tls_harmless_metadata_low_risk():
     """正常 TLS(未知 JA3 + 可信非自签证书)风险应低于自签。"""
-    from encrypted_traffic.tls_metadata import TlsSessionData, TlsMetadataAggregator
+    from encrypted_traffic.tls_metadata import TlsSessionData
     agg = TlsMetadataAggregator()
     sess = TlsSessionData(sni="www.google.com", ja3_hash="deadbeef" * 4,
                           cert_is_self_signed=False,

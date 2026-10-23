@@ -7,6 +7,26 @@ import { api } from '../lib/api'
 
 type Tab = 'inject' | 'batch' | 'pipeline' | 'cad' | 'chains' | 'guard'
 
+/**
+ * `causal_verdict` 的五个取值（后端 `causal_chain/compare.py::VERDICTS`）
+ * 各自对应完全不同的运维含义，**不能压成一个真假值** ——
+ * 整改方案 §三.1 明确要求前端能区分它们。
+ *
+ * 修复前这里只有三支：`causal_support` / `spurious` / 其余一律「未知」。
+ * 其中 `spurious` **根本不在后端词表里**，是一个永远不成立的死分支；
+ * 于是 `insufficient_data` / `not_identifiable` /
+ * `insufficient_causal_evidence` / `unknown` 四种结论在界面上完全同形。
+ *
+ * 落不到表里的取值直接显示原值：宁可难看，也不要谎报成「未知」。
+ */
+const CAUSAL_VERDICT_LABEL: Record<string, string> = {
+  causal_support: '因果支持',
+  insufficient_causal_evidence: '因果证据不足',
+  not_identifiable: '不可识别',
+  insufficient_data: '数据不足',
+  unknown: '无法判定',
+}
+
 const EVENT_PRESETS = [
   { label: 'C2通信 (critical)', value: { event: 'C2_BEACON', severity: 'critical', src_ip: '192.168.1.105', dst_ip: '23.129.64.33', message: '内部主机疑似与C2服务器通信', confidence: 85 } },
   { label: '端口扫描 (medium)', value: { event: 'PORT_SCAN', severity: 'medium', src_ip: '45.33.32.156', dst_ip: '192.168.1.100', message: '检测到端口扫描行为' } },
@@ -480,7 +500,7 @@ export default function SecurityAudit() {
                         [{c.pattern_name}] conf={c.confidence}
                         {c.causal_verdict && (
                           <span className="ml-2 font-sans text-[10px] px-1.5 py-0.5 border border-line">
-                            {c.causal_verdict === 'causal_support' ? '因果支持' : c.causal_verdict === 'spurious' ? '伪相关' : '未知'}
+                            {CAUSAL_VERDICT_LABEL[c.causal_verdict] ?? c.causal_verdict}
                           </span>
                         )}
                       </p>

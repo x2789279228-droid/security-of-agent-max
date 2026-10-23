@@ -11,15 +11,13 @@ SLA 跟踪器 (SLA Tracker) — P0.B
   - scheduler._sla_check_loop 周期触发
 """
 import logging
-import time
 from collections import deque
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import WorkOrder, SecurityCase
+from models import WorkOrder
 
 logger = logging.getLogger(__name__)
 

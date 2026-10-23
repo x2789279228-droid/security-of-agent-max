@@ -13,7 +13,6 @@ peer_group.py — 对等组行为分析
 """
 import logging
 import math
-from collections import defaultdict
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)

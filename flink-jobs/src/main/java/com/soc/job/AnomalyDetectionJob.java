@@ -3,6 +3,7 @@ package com.soc.job;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import com.soc.model.AlertEvent;
 import com.soc.model.SecurityEvent;
+import com.soc.util.EventEnvelope;
 import com.soc.util.KafkaConfig;
 import com.soc.util.TraceIdHeaderProvider;
 import com.soc.util.TraceUtil;
@@ -424,9 +425,16 @@ public class AnomalyDetectionJob {
             alert.setReasons(reasons);
             alert.setTimestamp(System.currentTimeMillis());
             alert.setTraceId(firstEvent.getTraceId());
+            alert.setParentEventId(firstEvent.getEventId());
+            if (firstEvent.getCorrelationId() != null && !firstEvent.getCorrelationId().isEmpty()) {
+                alert.setCorrelationId(firstEvent.getCorrelationId());
+            } else {
+                alert.setCorrelationId(firstEvent.getEventId());
+            }
             alert.setEvidenceEventIds(evidenceEventIds);
             alert.setEvidenceChain(evidenceChain);
             alert.setTimeSpanMs(maxTs > minTs ? maxTs - minTs : 0);
+            EventEnvelope.stamp(alert, EventEnvelope.PRODUCER_ANOMALY);
 
             LOG.warn("🚨 攻击链检测 [{}]: srcIp={}, 证据={}个事件, 跨度={}ms",
                     chainName, firstEvent.getSrcIp(),
@@ -826,6 +834,13 @@ public class AnomalyDetectionJob {
             alert.setReasons(reasons);
             alert.setTimestamp(System.currentTimeMillis());
             alert.setTraceId(event.getTraceId());
+            alert.setParentEventId(event.getEventId());
+            if (event.getCorrelationId() != null && !event.getCorrelationId().isEmpty()) {
+                alert.setCorrelationId(event.getCorrelationId());
+            } else {
+                alert.setCorrelationId(event.getEventId());
+            }
+            EventEnvelope.stamp(alert, EventEnvelope.PRODUCER_ANOMALY);
             return alert;
         }
     }
@@ -852,7 +867,7 @@ public class AnomalyDetectionJob {
                 if (value == null || value.trim().isEmpty()) {
                     return null;
                 }
-                return getMapper().readValue(value, SecurityEvent.class);
+                return EventEnvelope.parseSecurityEvent(getMapper(), value);
             } catch (Exception e) {
                 LOG.warn("JSON 解析失败，跳过: {}", e.getMessage());
                 return null;

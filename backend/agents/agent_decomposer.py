@@ -18,14 +18,13 @@
 import json
 import logging
 
-from summary_compression import summary
 from audit_types import (
     SubTask,
     AUDIT_DEPTH_QUICK, AUDIT_DEPTH_STANDARD, AUDIT_DEPTH_DEEP,
     SUBTASK_QUERY_EVENTS, SUBTASK_ANALYZE_IP, SUBTASK_FIND_CHAINS,
     SUBTASK_CHECK_MEMORY, SUBTASK_KNOWLEDGE_SEARCH,
     SUBTASK_DEEP_ANALYZE, SUBTASK_RECHECK,
-    SUBTASK_GET_WINDOW, SUBTASK_ENTITY_LINK,
+    SUBTASK_ENTITY_LINK,
 )
 # D3: 继承 BaseAuditComponent 统一 LLM 调用入口的 trace
 from .base import BaseAuditComponent
@@ -385,6 +384,33 @@ class Decomposer(BaseAuditComponent):
             ips = re.findall(r'\d+\.\d+\.\d+\.\d+', desc)
             target_ips.update(ips)
 
+        # P3-6: 事件ID 侧原本**没有任何上界**，而同一个循环里的 IP 侧写着 [:3]。
+        # evidence 是 LLM 自由文本，一个逗号分隔的 blob 能被放大到任意规模
+        # （实测 5000 个 ID），而下游 limit 被设成 len(target_ids) ——
+        # 等于把上界直接拱手让给输入长度。
+        #
+        # 这里**截断并留痕**，而不是拒绝：
+        # 规划层为一个超大的 evidence blob 中止整个补审批次代价过大，
+        # 截断后这次补审仍能跑完 —— 代价是它只覆盖了一部分，
+        # 所以 truncation 必须显式出现在返回的 plan 里，不能只写日志。
+        param_truncations = []
+        # 延迟导入：与 tool_registry._check_query_bounds 同一理由，
+        # capacity 会经 agents 侧回引，模块级导入会形成环。
+        from capacity import strict_int_setting
+
+        _max_ids = strict_int_setting("tool_query_max_event_ids", 500)
+        if len(target_ids) > _max_ids:
+            requested = len(target_ids)
+            target_ids = set(sorted(target_ids)[:_max_ids])
+            param_truncations.append({
+                "field": "event_ids", "requested": requested,
+                "used": len(target_ids), "limit": _max_ids,
+            })
+            logger.warning(
+                f"Decomposer(supplement): evidence 中的事件ID {requested} 个"
+                f"超过上界 {_max_ids}，已截断 —— 本次补审只覆盖前 {_max_ids} 个"
+            )
+
         # t1: 按ID精确查询遗漏事件
         if target_ids:
             idx += 1
@@ -393,7 +419,11 @@ class Decomposer(BaseAuditComponent):
                 type=SUBTASK_QUERY_EVENTS,
                 params={
                     "session_id": session_id,
-                    "event_ids": list(target_ids),
+                    # 排序：集合转列表不排序，顺序随进程哈希种子变
+                    # （§9.59）。此处元素是整数，跨进程本就稳定，
+                    # 但要与下面 description 里的 sorted(...) 保持一致 ——
+                    # 「计划里写的」和「参数里传的」必须是同一个顺序。
+                    "event_ids": sorted(target_ids),
                     "limit": len(target_ids),
                 },
                 priority=5,
@@ -401,7 +431,30 @@ class Decomposer(BaseAuditComponent):
             ))
 
         # t2: 查询遗漏IP的完整活动
-        for ip in list(target_ips)[:3]:
+        #
+        # IP 侧也有上限（[:3]），而上限必须**留痕** —— 同一个函数里
+        # event_ids 的截断写进了 param_truncations，IP 的截断却一个字
+        # 都没有，于是「本次补审只覆盖了 3 个 IP」对运维是不可见的。
+        #
+        # 更糟的是**选哪 3 个**：IP 是字符串，字符串哈希每进程随机，
+        # `list(target_ips)[:3]` 取到的是任意 3 个 → 同一份证据在不同
+        # 进程里查出不同的 IP，补审覆盖到谁变成一枚骰子。
+        #
+        # 现在按字典序取前 3 个：确定、可解释（缺谁、按什么顺序都能从
+        # 计划里读出来），并把丢弃的数量记进 param_truncations。
+        _max_ips = 3
+        sorted_ips = sorted(target_ips)
+        if len(sorted_ips) > _max_ips:
+            param_truncations.append({
+                "field": "src_ips", "requested": len(sorted_ips),
+                "used": _max_ips, "limit": _max_ips,
+            })
+            logger.warning(
+                f"Decomposer(supplement): 遗漏IP {len(sorted_ips)} 个"
+                f"超过上界 {_max_ips}，已按字典序取前 {_max_ips} 个 —— "
+                f"本次补审不覆盖其余 {len(sorted_ips) - _max_ips} 个"
+            )
+        for ip in sorted_ips[:_max_ips]:
             idx += 1
             tasks.append(SubTask(
                 task_id=f"s{idx}",
@@ -447,6 +500,12 @@ class Decomposer(BaseAuditComponent):
             "llm_analysis": "",
             "depth_reason": f"补审 {len(missed_threats)} 项遗漏威胁",
             "mode": "supplement",
+            # P3-6: 非空表示本次计划因参数上界做过裁剪。
+            # 消费端是 observability.thought_events.emit_plan —— 它把这个字段
+            # 写进思维链 step 的 metrics，随缓冲与 SSE 落到运维面。
+            # （最初只把它留在返回 dict 里，而 emit_plan 当时只挑固定字段，
+            #   记录下游无人可读，等同于只打了日志；已补上接线。）
+            "param_truncations": param_truncations,
         }
 
     async def _llm_pre_analyze(

@@ -13,7 +13,6 @@ sigma_engine.dry_run_import — 候选 SigmaHQ 规则 dry-run 评估
 import argparse
 import json
 import os
-import sys
 
 
 def load_events(path: str):

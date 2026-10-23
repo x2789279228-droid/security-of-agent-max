@@ -10,7 +10,6 @@ Streaming 渐进式推理上下文流 — 安全审计改造版
   存储 = 完整（永不丢）
   输出 = 视图（只截断不删除）
 """
-import hashlib
 import json
 import logging
 import time

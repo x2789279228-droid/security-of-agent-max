@@ -22,7 +22,7 @@ async def _probe_and_null(session, table: str, expect_dim: int, apply: bool) -> 
 
     # pgvector: vector_dims(embedding)
     rows = (await session.execute(text(
-        f"SELECT id, vector_dims(embedding) AS dim FROM {table} "
+        f"SELECT id, vector_dims(embedding) AS dim FROM {table} "  # nosec B608
         f"WHERE embedding IS NOT NULL"
     ))).all()
     bad_ids = [r.id for r in rows if int(r.dim or 0) != expect_dim]
@@ -36,7 +36,7 @@ async def _probe_and_null(session, table: str, expect_dim: int, apply: bool) -> 
         for i in range(0, len(bad_ids), 200):
             chunk = bad_ids[i:i + 200]
             await session.execute(
-                text(f"UPDATE {table} SET embedding = NULL WHERE id = ANY(:ids)"),
+                text(f"UPDATE {table} SET embedding = NULL WHERE id = ANY(:ids)"),  # nosec B608
                 {"ids": chunk},
             )
             cleared += len(chunk)

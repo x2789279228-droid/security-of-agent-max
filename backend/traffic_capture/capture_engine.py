@@ -18,10 +18,8 @@ capture_engine.py — 网络流量采集引擎
 """
 import asyncio
 import logging
-import os
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Optional, Callable, Awaitable
 
 from config import settings
@@ -207,6 +205,16 @@ class CaptureEngine:
             self._stats.packets_captured += 1
             self._stats.bytes_captured += info.length
             self._stats.last_packet_time = info.timestamp
+            # §十一.2: 这里是全仓唯一的包摄入收敛点（AF_PACKET / DPDK 后端
+            # 是占位实现，只 sleep、不摄入包），因此覆盖全部真实抓包流量。
+            # 修复前 soc_capture_packets_total 无自增点，/metrics 上恒为 0 ——
+            # 面板分不清「没流量」和「没埋点」。两者读数同形。
+            # 单独 try：埋点异常绝不能连带跳过下面的 handler 派发。
+            try:
+                from metrics import inc_capture_packet
+                inc_capture_packet()
+            except Exception:
+                logger.debug("抓包计数失败", exc_info=True)
             # 跨线程调度到主事件循环。不能在子线程里 get_event_loop()
             # (Python 3.10+ 子线程无循环会抛 RuntimeError, 导致 handler 永不执行)
             loop = self._loop

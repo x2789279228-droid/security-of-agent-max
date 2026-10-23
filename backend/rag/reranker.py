@@ -140,7 +140,7 @@ async def http_cross_encoder_rerank(query: str, chunks: list[dict], top_k: int) 
                 for payload in payloads:
                     try:
                         r = await client.post(url, json=payload, headers=headers)
-                    except httpx.TimeoutException as e:
+                    except httpx.TimeoutException:
                         last_err = f"timeout {CE_TIMEOUT}s url={url}"
                         logger.warning(f"[reranker] HTTP cross-encoder 超时: {last_err}")
                         return None

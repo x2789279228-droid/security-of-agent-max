@@ -68,6 +68,26 @@ public class SecurityEvent implements Serializable {
     @JsonProperty("traceId")
     private String traceId;
 
+    /** 事件结构版本 (semver)，缺省视为 1.0.0 */
+    @JsonProperty("schemaVersion")
+    private String schemaVersion;
+
+    /** 生产方标识 */
+    @JsonProperty("producer")
+    private String producer;
+
+    /** 同一业务处理过程的关联 ID */
+    @JsonProperty("correlationId")
+    private String correlationId;
+
+    /** 事件产生时间 (epoch millis) */
+    @JsonProperty("occurredAt")
+    private Long occurredAt;
+
+    /** 派生事件指向的来源业务事件 ID */
+    @JsonProperty("parentEventId")
+    private String parentEventId;
+
     /** 默认构造函数 - Jackson 反序列化需要 */
     public SecurityEvent() {
         this.rawData = new HashMap<>();
@@ -196,6 +216,46 @@ public class SecurityEvent implements Serializable {
 
     public void setTraceId(String traceId) {
         this.traceId = traceId;
+    }
+
+    public String getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    public void setSchemaVersion(String schemaVersion) {
+        this.schemaVersion = schemaVersion;
+    }
+
+    public String getProducer() {
+        return producer;
+    }
+
+    public void setProducer(String producer) {
+        this.producer = producer;
+    }
+
+    public String getCorrelationId() {
+        return correlationId;
+    }
+
+    public void setCorrelationId(String correlationId) {
+        this.correlationId = correlationId;
+    }
+
+    public Long getOccurredAt() {
+        return occurredAt;
+    }
+
+    public void setOccurredAt(Long occurredAt) {
+        this.occurredAt = occurredAt;
+    }
+
+    public String getParentEventId() {
+        return parentEventId;
+    }
+
+    public void setParentEventId(String parentEventId) {
+        this.parentEventId = parentEventId;
     }
 
     @Override

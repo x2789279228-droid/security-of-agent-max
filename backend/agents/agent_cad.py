@@ -19,17 +19,13 @@
   2. 定时运行（上下文审计）
   3. 人工触发
 """
-import asyncio
-import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cad import verifier, context_auditor, circuit_breaker, VerificationReport, ContextRisk
-from event_store import event_store, EventFilter
+from cad import verifier, context_auditor, circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +111,13 @@ class CADAgent:
             if not r.verified and r.severity in ("high", "critical")
         ]
 
+        # P1-D-4: 引用原文核验汇总（此前 evidence_quotes 从未被读取）
+        total_quotes = sum(r.quote_checked for r in verification_reports)
+        grounded_quotes = sum(r.quote_grounded for r in verification_reports)
+        fabricated_quotes = sum(len(r.ungrounded_quotes) for r in verification_reports)
+
         # 可验证基数归零 → “无证据可穿透验证”(NA)：不写入幻觉/完整度趋势,
         # 避免把“无口径(被记录为坏)”累积触发熔断; 仅计数(可观测)。
-        if (not has_audit_content) or verifiable_base == 0:
-            circuit_breaker.record_na(
-                notes=("single-source: 无分解证据可穿透验证"
-                       if has_audit_content else "empty audit: 无可验断言")
-            )
         hallucination_risk = (
             hallucination_count / verifiable_base if verifiable_base else 0.0
         )
@@ -131,11 +127,19 @@ class CADAgent:
 
         # ── 3. 更新熔断器 (真实可验证内容才进入趋势) ──
         if verifiable_base:
-            circuit_breaker.record_audit_result(
+            await circuit_breaker.record_audit_result(
                 hallucination_risk=hallucination_risk,
                 evidence_completeness=evidence_completeness,
                 anomaly_detected=hallucination_count > 0,
             )
+        else:
+            await circuit_breaker.record_na(
+                notes=("single-source: 无分解证据可穿透验证"
+                       if has_audit_content else "empty audit: 无可验断言")
+            )
+        # P1-D-3: 本轮监督**成功完成** → 清零自身故障计数。
+        # 修复前没有这个反向信号：一旦监督坏过一次就永远坏着。
+        await circuit_breaker.clear_supervision_failures()
 
         from ops_loop import locate_first_failed_hop
         first_hop = locate_first_failed_hop(audit_llm_data)
@@ -152,12 +156,20 @@ class CADAgent:
                 "hallucination_count": hallucination_count,
                 "hallucination_risk": round(hallucination_risk, 4),
                 "evidence_completeness": round(evidence_completeness, 4),
+                # P1-D-4: 引用原文核验口径（修复前 CAD 只查 ID 存在性，
+                # evidence_quotes 从未被读取）。
+                "quotes_checked": total_quotes,
+                "quotes_grounded": grounded_quotes,
+                "quotes_fabricated": fabricated_quotes,
                 "high_severity_discrepancies": [
                     {
                         "claim": r.claim[:80],
                         "discrepancy": r.discrepancy,
                         "claimed_ids": r.claimed_evidence_ids,
                         "actual_ids": r.actual_evidence_ids,
+                        "quote_checked": r.quote_checked,
+                        "quote_grounded": r.quote_grounded,
+                        "ungrounded_quotes": r.ungrounded_quotes[:3],
                     }
                     for r in high_sev_discrepancies
                 ],
@@ -166,11 +178,18 @@ class CADAgent:
             "duration_ms": round((time.time() - t_start) * 1000, 1),
         }
 
+        # P1-D-2: 生成报告前先从 DB 重载权威熔断状态。
+        # 本进程刚做的判定已经落库，但**别的进程**可能在此期间熔断/恢复；
+        # 报告里的 tripped 是自动响应闸门的输入，必须是全局一致的答案，
+        # 不能只是本进程的局部视角。
+        await circuit_breaker._load_persisted()
+        cad_report["circuit_breaker"] = circuit_breaker.get_status()
+
         # 如果熔断器被触发，记录日志
         if circuit_breaker.state.tripped:
             logger.critical(
-                f"CAD CIRCUIT BREAKER: event #{event_id} - "
-                f"{circuit_breaker.state.reason}"
+                f"CAD CIRCUIT BREAKER[{circuit_breaker.state.state}]: "
+                f"event #{event_id} - {circuit_breaker.state.reason}"
             )
 
         # 记录 CAD 决策（用于自身准确率评估）
@@ -227,12 +246,13 @@ class CADAgent:
         return report
 
     async def check_circuit_breaker(self) -> dict:
-        """查询熔断器状态"""
+        """查询熔断器状态（P1-D-2: 先从 DB 取权威状态，跨进程一致）"""
+        await circuit_breaker._load_persisted()
         return circuit_breaker.get_status()
 
     async def reset_circuit_breaker(self) -> dict:
         """人工重置熔断器"""
-        circuit_breaker.reset()
+        await circuit_breaker.reset()
         return circuit_breaker.get_status()
 
 

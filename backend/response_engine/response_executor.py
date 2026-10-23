@@ -67,6 +67,62 @@ def _maybe_prepend_snapshot(actions: list[dict], threat_info: Optional[dict]) ->
     return [snap] + actions
 
 
+#: 动作参数里**不得**原样进日志的键（子串匹配，忽略大小写）。
+#:
+#: 为什么需要脱敏：整改报告 §9.61 要求「动作参数必须进审计」，
+#: 但响应动作的参数里可能有凭据（ssh 密码、token…）。
+#: 审计要回答的是「这个动作对什么做了什么」，不是「它带了什么秘密」——
+#: 所以**键名保留**（「它带了 password 参数」本身就是信息），值替换成 ***。
+_SENSITIVE_PARAM_PATTERNS = (
+    "password", "passwd", "pwd", "secret", "token", "credential",
+    "apikey", "api_key", "access_key", "private_key", "cookie",
+)
+
+#: 参数值写进日志时的最大长度（超出截断）。
+_MAX_PARAM_VALUE_LEN = 500
+
+
+def redact_action_params(params: dict) -> dict:
+    """把动作参数整理成**可进审计**的形状。
+
+    · 敏感键的值 → `***`（键名保留）；
+    · 超长值截断（正文/命令行可能很长）；
+    · 不可 JSON 序列化的值 → 字符串。
+
+    整改报告 §9.61：此前 `ActionResult` **不带参数**，于是
+    `action_rows_from_batch` 写进响应日志的 `action_params` 只有
+    `{execution_mode, verified, error}` —— 「这个动作到底对什么
+    做了什么」在审计里查不到（比如告警发到了哪个 webhook URL）。
+    """
+    if not isinstance(params, dict):
+        return {}
+    out: dict = {}
+    for raw_key, value in params.items():
+        key = str(raw_key)
+        if any(p in key.lower() for p in _SENSITIVE_PARAM_PATTERNS):
+            out[key] = "***"
+            continue
+        if isinstance(value, str):
+            if value.lower().startswith(("http://", "https://")):
+                # URL 可能**内嵌密钥**（告警 webhook 尤其常见）→
+                # 审计里只留可关联、不含密钥的形态（整改报告 §9.63）
+                from .response_registry import redact_url_for_log
+                out[key] = redact_url_for_log(value)
+            elif len(value) > _MAX_PARAM_VALUE_LEN:
+                out[key] = value[:_MAX_PARAM_VALUE_LEN] + "…（已截断）"
+            else:
+                out[key] = value
+        elif isinstance(value, (int, float, bool)) or value is None:
+            out[key] = value
+        elif isinstance(value, (list, tuple, set)):
+            out[key] = [str(x)[:200] for x in list(value)[:50]]
+        elif isinstance(value, dict):
+            out[key] = {str(k): str(v)[:200] for k, v in list(value.items())[:50]}
+        else:
+            out[key] = str(value)[:_MAX_PARAM_VALUE_LEN]
+    return out
+
+
 @dataclass
 class ActionResult:
     """单次动作执行结果"""
@@ -77,6 +133,12 @@ class ActionResult:
     rollback_token: str = ""
     duration_ms: float = 0.0
     idempotent: bool = False
+    #: 动作**实际收到的参数**（已脱敏）。
+    #:
+    #: 整改报告 §9.61：此前 `ActionResult` 不带参数 →
+    #: 响应日志里的 `action_params` 只有执行模式/校验结果/错误三项，
+    #: 「动作的目标是什么」（封禁哪台机、告警发到哪个 URL）不可见。
+    params: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -285,7 +347,7 @@ class ResponseExecutor:
         # 注入威胁上下文参数（仅注入该动作接受的参数）
         if threat_info:
             action_def = response_registry.get_action(name)
-            accepted_params = list((action_def.params_schema if action_def else {}).keys()) if action_def else []
+            list((action_def.params_schema if action_def else {}).keys()) if action_def else []
 
             # 根据动作类型注入合适的IP参数
             if name in ("block_ip", "rate_limit", "unblock_ip", "remove_rate_limit"):
@@ -339,6 +401,7 @@ class ResponseExecutor:
                 rollback_token=result.get("rollback_token", ""),
                 duration_ms=round(duration, 1),
                 idempotent=result.get("idempotent", False),
+                params=redact_action_params(params),
             )
         except Exception as e:
             duration = (time.time() - t_start) * 1000
@@ -349,6 +412,8 @@ class ResponseExecutor:
                 success=False,
                 error=str(e),
                 duration_ms=round(duration, 1),
+                # 失败的动作同样要留下**它要对什么做什么**
+                params=redact_action_params(params),
             )
 
     async def rollback_batch(self, batch_token: str) -> BatchActionResult:

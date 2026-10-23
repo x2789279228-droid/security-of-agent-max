@@ -25,7 +25,6 @@ Sigma 风格检测引擎 — 规则化安全检测（检测能力核心）
     report = sigma_detector.detect_batch([event1, event2, ...])
 """
 import logging
-import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, asdict
@@ -69,6 +68,13 @@ class DetectionResult:
     action_recommend: str
     matched_fields: dict
     description: str
+    #: 该规则声明了 x-soc-aggregation —— 命中只代表「前置条件满足」，
+    #: 真正的判定阈值（count/op/timeframe）由聚合窗口另行评估。
+    #: True 时这条命中是**部分结果**，不能当作确定结论，
+    #: 也不能携带执行类动作（整改方案 §二 partial 语义）。
+    requires_aggregation: bool = False
+    #: 聚合窗口的阈值描述，便于下游/人复核"还差多少"
+    aggregation_spec: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -523,7 +529,9 @@ class SigmaDetector:
 
         severity_order = {"critical": 4, "high": 3, "medium": 2, "low": 1}
         max_sev = max(hits, key=lambda h: severity_order.get(h.severity, 0))
-        attack_types = list(set(h.attack_type for h in hits))
+        # 2026-10-20 修复（整改报告 §9.58）：集合转列表必须**排序** ——
+        # str 哈希每进程随机化 → 同一份数据的输出顺序每次启动都不同。
+        attack_types = sorted({h.attack_type for h in hits})
         action = max_sev.action_recommend
 
         return {
@@ -613,7 +621,7 @@ class SigmaDetector:
             "rules_count": len(self.rules),
             "enabled_count": len(enabled),
             "shadow_count": len(shadow),
-            "attack_types": list(set(r.attack_type for r in self.rules)),
+            "attack_types": sorted({r.attack_type for r in self.rules}),
             "severity_distribution": {
                 s: sum(1 for r in self.rules if r.severity == s)
                 for s in ["critical", "high", "medium", "low"]

@@ -8,12 +8,8 @@
   - PostgreSQL (ResponseLog 表) — 持久化审计
   - Redis 缓存 — 近期日志快速查询
 """
-import json
 import logging
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
 
 from sqlalchemy import select, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,6 +63,15 @@ class ResponseLogEntry:
             "approval_status": self.approval_status,
             "created_at": self.created_at,
         }
+
+
+def _record_audit_failed(phase: str) -> None:
+    """记录一次审计失败 → §9.55。指标不可用时静默忽略（计数失败不该阻断响应）。"""
+    try:
+        from core_metrics import record_response_audit_failed
+        record_response_audit_failed(phase)
+    except Exception:
+        pass
 
 
 class ResponseLogger:
@@ -124,7 +129,13 @@ class ResponseLogger:
             session.add(log_entry)
             await session.commit()
         except Exception as e:
-            logger.warning(f"Failed to log threat: {e}")
+            # 2026-10-20 修复（整改报告 §9.55）：审计写失败**不能**只留一行 warning ——
+            # 动作照常发生，但「谁触发的」在审计里**没有**了（审计缺口）。
+            # 现在：返回 False（调用方能知道）+ 计数 + error 级日志。
+            logger.error(f"[ResponseLog] 触发记录写失败(审计缺口): {e}")
+            _record_audit_failed("threat")
+            return False
+        return True
 
     async def log_action(
         self,
@@ -165,7 +176,12 @@ class ResponseLogger:
             session.add(log_entry)
             await session.commit()
         except Exception as e:
-            logger.warning(f"Failed to log action: {e}")
+            # 2026-10-20 修复（整改报告 §9.55）：同 log_threat ——
+            # 「动作执行了但审计里没有这条」必须能被看见、能被数出来。
+            logger.error(f"[ResponseLog] 动作记录写失败(审计缺口): {e}")
+            _record_audit_failed("action")
+            return False
+        return True
 
     async def query_logs(
         self,
@@ -222,8 +238,13 @@ class ResponseLogger:
                 for r in rows
             ]
         except Exception as e:
-            logger.warning(f"Failed to query response logs: {e}")
-            return []
+            # 2026-10-20 修复（整改报告 §9.55）：查询失败**不得**返回空列表 ——
+            # 空列表在运维眼里是「**没有响应动作记录**」，而真相是「**查不出来**」。
+            # 这是一条**审计**查询：把「读不到」说成「没有」= 制造假阴性。
+            # 现在：计数 + error 级日志 + **上抛**（端点转 503，明确「查不出来」）。
+            logger.error(f"[ResponseLog] 响应日志查询失败: {e}")
+            _record_audit_failed("query")
+            raise
 
 
 response_logger = ResponseLogger()

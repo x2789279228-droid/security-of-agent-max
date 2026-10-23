@@ -130,6 +130,8 @@ def send_to_kafka(event: dict, hostname: str):
     }
     try:
         headers = [
+            ("event_id", msg["eventId"].encode("utf-8")),
+            ("correlation_id", msg["eventId"].encode("utf-8")),
             ("traceparent", _make_traceparent(msg["eventId"]).encode("utf-8")),
             ("trace_id", msg["eventId"].encode("utf-8")),
         ]
@@ -146,8 +148,10 @@ def send_to_kafka(event: dict, hostname: str):
 def send_to_http(event: dict, hostname: str):
     """将事件 POST 到 SOC 平台（旧版 HTTP 直连, 带 W3C traceparent）"""
     event_id = str(uuid.uuid4())
+    payload = dict(event) if isinstance(event, dict) else {"message": event}
+    payload["eventId"] = event_id
     body = json.dumps({
-        "message": event,
+        "message": payload,
         "session_id": "linux-" + hostname,
     }).encode("utf-8")
     try:

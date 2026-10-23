@@ -53,8 +53,17 @@ def test_save_and_latest_graph():
     _run(t())
 
 
-def test_annotate_unknown_without_graph():
+def test_annotate_insufficient_data_without_graph():
+    """图不可用 → `insufficient_data`（不是 `unknown`）。
+
+    整改方案 §三.1 把 verdict 拆成 5 种之后，「没有图可用」和
+    「图上有链但方向不明」必须分开：前者连可达性都没得查，
+    后者是查了但不确定。原来两者都叫 `unknown`，
+    下游无法区分「系统还没学到东西」和「学了但学不出来」。
+    """
     from causal_chain.learn import annotate_chains
     chains = [{"pattern_name": "端口扫描→C2", "pattern_id": "port_scan_to_c2"}]
     out = annotate_chains(chains, {"ok": False})
-    assert out[0]["causal_verdict"] == "unknown"
+    assert out[0]["causal_verdict"] == "insufficient_data"
+    assert out[0]["data_available"] is False
+    assert out[0]["identifiability_reason"] == "no_graph"

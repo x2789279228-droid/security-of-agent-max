@@ -15,7 +15,6 @@ intel_enricher.py — 事件情报富化
     enriched = await intel_enricher.enrich_event(session, event_dict)
 """
 import logging
-from typing import Optional
 
 from config import settings
 

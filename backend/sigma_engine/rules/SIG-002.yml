@@ -1,7 +1,13 @@
 title: 敏感信息探测
 id: aaaaaaaa-0001-0000-0000-000000000002
 status: test
-description: 检测对系统信息接口的访问
+description: >
+  检测对系统信息接口的访问。2026-10-18 标定：移除过宽的 `/api/status`。
+  该子串会命中几乎所有健康检查/监控探针（量化评估 SIG-N-01 实测
+  良性 `/api/status` 巡检被误判为 info_disclosure 并给出 block_ip），
+  而 `/api/status` 本身不构成任何信息泄露证据。真正的敏感信息探测
+  仍由 `sel_event`（INFO_DISCLOSURE / 信息探测）与两个具体接口覆盖，
+  检出能力不受影响。
 date: 2026/08/24
 author: SOC Platform
 license: SOC-Internal
@@ -13,7 +19,6 @@ detection:
     url|contains:
       - /GetSystem
       - /system/info
-      - /api/status
   sel_event:
     event|contains:
       - INFO_DISCLOSURE
@@ -24,6 +29,7 @@ tags:
   - attack.reconnaissance.t1595.001
 falsepositives:
   - admin status polling
+  - internal monitoring probes hitting /GetSystem or /system/info
 x-soc-id: SIG-002
 x-soc-confidence: high
 x-soc-action: block_ip

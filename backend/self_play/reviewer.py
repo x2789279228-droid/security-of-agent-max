@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Any, Optional
+from typing import Optional
 
 from self_play.catalog import DECOY_TEMPLATES
 from self_play.overlay import GLOBAL_KEY, match_rule, overlay

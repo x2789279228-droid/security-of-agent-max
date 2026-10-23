@@ -41,11 +41,10 @@ def _report(score=0.8):
 
 
 async def _reset_db():
-    from models import Base, engine, _migrate_existing_tables
+    from models import Base, engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-        await _migrate_existing_tables(conn)
 
 
 @pytest.mark.asyncio
@@ -79,6 +78,36 @@ async def test_different_src_ip_misses():
     assert await audit_cache.get(src_a) is not None
     # 同类型同规则同级别, 仅 src_ip 不同 → 不同签名 → miss
     assert await audit_cache.get(src_b) is None
+
+
+@pytest.mark.asyncio
+async def test_different_dst_ip_misses():
+    """2026-10-23 修复回归：同源异目标不得互串审计结论（旧 key 无 dst_ip）。"""
+    _flush_cache()
+    a = _log(dst_ip="203.0.113.1")
+    b = _log(dst_ip="203.0.113.2")
+    await audit_cache.put(a, {
+        "threat_detected": True, "confidence": 0.9,
+        "severity": "critical", "verdict": "confirmed",
+    })
+    assert await audit_cache.get(a) is not None
+    assert await audit_cache.get(b) is None
+
+
+@pytest.mark.asyncio
+async def test_different_message_misses():
+    """同 src/dst/规则, message 不同（如端口/路径差异）→ 不复用结论。"""
+    _flush_cache()
+    a = _log(message="exploit attempt on /admin")
+    b = _log(message="exploit attempt on /api/v2")
+    await audit_cache.put(a, {
+        "threat_detected": True, "confidence": 0.9,
+        "severity": "critical", "verdict": "confirmed",
+    })
+    assert await audit_cache.get(a) is not None
+    assert await audit_cache.get(b) is None
+    # message 一致(含缺失→空串归一)才命中
+    assert await audit_cache.get(_log(message="exploit attempt on /admin")) is not None
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,8 @@ _SYS_NIX = ("/bin", "/sbin", "/usr/bin", "/usr/sbin", "/etc")
 
 
 def _mode() -> str:
-    return (getattr(settings, "execution_mode", "live") or "live").lower()
+    # 失败关闭：配置缺失时按 dry_run，而不是真实执行。
+    return (getattr(settings, "execution_mode", "dry_run") or "dry_run").lower()
 
 
 def _ssh_ready() -> bool:

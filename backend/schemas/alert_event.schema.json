@@ -1,7 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "AlertEvent",
-  "description": "安全告警 Schema (JSON 表达) — 与 flink-jobs/schemas/alert-event.avsc 保持契约一致。用于后端 security-alerts topic 消费侧校验。",
+  "description": "安全告警 Schema (JSON 表达) — 权威契约。schemaVersion 等信封字段为可选。",
+  "x-schema-version": "1.0.0",
   "type": "object",
   "properties": {
     "alertId": { "type": "string", "description": "告警唯一标识" },
@@ -17,7 +18,12 @@
     "evidenceChain": { "type": ["array", "null"] },
     "timeSpanMs": { "type": "integer" },
     "timestamp": { "type": "integer", "description": "告警时间戳 (epoch millis)" },
-    "traceId": { "type": ["string", "null"] }
+    "traceId": { "type": ["string", "null"] },
+    "schemaVersion": { "type": "string", "description": "事件结构版本 (semver)，缺省视为 1.0.0" },
+    "producer": { "type": "string", "description": "生产方标识" },
+    "correlationId": { "type": "string", "description": "同一业务处理过程的关联 ID" },
+    "occurredAt": { "type": "integer", "description": "事件产生时间 (epoch millis)" },
+    "parentEventId": { "type": "string", "description": "派生告警指向的来源业务事件 ID" }
   },
   "required": ["alertId", "eventType", "severity", "message", "anomalyScore", "alertType", "timestamp"],
   "additionalProperties": true

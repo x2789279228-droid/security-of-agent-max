@@ -156,9 +156,8 @@ class MitmProxy:
     def _generate_addon_script(self) -> str:
         """生成 mitmproxy addon 脚本，将解密流量 POST 到平台"""
         import os
-        import json
 
-        script_content = f'''
+        script_content = '''
 """mitmproxy addon: 将解密流量转发到 SOC 平台"""
 import json
 import urllib.request
@@ -169,7 +168,7 @@ PLATFORM_URL = "http://localhost:8001/api/v1/mitm/flow"
 def response(flow: http.HTTPFlow):
     """HTTP 响应完成后触发"""
     try:
-        data = {{
+        data = {
             "src_ip": flow.client_conn.peername[0] if flow.client_conn.peername else "",
             "dst_ip": flow.server_conn.peername[0] if flow.server_conn.peername else "",
             "dst_port": flow.server_conn.peername[1] if flow.server_conn.peername else 443,
@@ -178,16 +177,16 @@ def response(flow: http.HTTPFlow):
             "host": flow.request.host,
             "request_headers": dict(flow.request.headers),
             "response_status": flow.response.status_code if flow.response else 0,
-            "response_headers": dict(flow.response.headers) if flow.response else {{}},
+            "response_headers": dict(flow.response.headers) if flow.response else {},
             "request_body": flow.request.get_text()[:2048] if flow.request.content else "",
             "response_body": flow.response.get_text()[:2048] if flow.response and flow.response.content else "",
             "sni": flow.server_conn.sni or "",
-        }}
+        }
         payload = json.dumps(data).encode()
         req = urllib.request.Request(
             PLATFORM_URL,
             data=payload,
-            headers={{"Content-Type": "application/json"}},
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
         urllib.request.urlopen(req, timeout=5)

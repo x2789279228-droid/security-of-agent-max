@@ -66,6 +66,11 @@ $KAFKA_TOPICS --create --if-not-exists --topic security-logs-dlq --partitions 1 
 $KAFKA_CONFIGS --alter --topic security-logs-dlq \
   --add-config retention.ms=2592000000,cleanup.policy=delete
 
+# 延迟重试（仅 kafka_retry_ordering=unordered 使用；strict 默认不往这里发）
+$KAFKA_TOPICS --create --if-not-exists --topic security-logs-retry --partitions 3 --replication-factor 1
+$KAFKA_CONFIGS --alter --topic security-logs-retry \
+  --add-config retention.ms=604800000,cleanup.policy=delete
+
 # CEP 部分匹配预警: 保留 7 天（后端 kafka_consumer 消费）
 $KAFKA_TOPICS --create --if-not-exists --topic security-cep-partial --partitions 1 --replication-factor 1
 $KAFKA_CONFIGS --alter --topic security-cep-partial \

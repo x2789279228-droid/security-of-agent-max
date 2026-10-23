@@ -21,7 +21,12 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tool_registry import tool_registry
+from tool_registry import (
+    tool_registry,
+    ToolExecutionDenied,
+    ToolExecutionTimeout,
+    ToolParameterRejected,
+)
 from audit_types import ToolCall, ToolResult, AuditResult
 from summary_compression import summary
 from agents.chunker import chunker, AuditChunk
@@ -99,19 +104,36 @@ class Executor:
             audit_chunks, knowledge_chunks=knowledge_chunks
         )
 
+        # P1-Executor: 真实 LLM hop 账目。
+        # 修复前「hop 预算」只存在于命名与日志措辞里 —— 代码没有任何计数器，
+        # skip_reasoning 完全是质量阈值的副产品，且三类成因折叠成一个 bool。
+        # 现在：计划数 = chunk 审核 + (deep 档的 kb/deep/recheck 三跳)；
+        # 实计数在每个实际调用点累加。
+        # 每个 chunk 一次 SubAuditor LLM 调用（抛异常也算已消耗），
+        # 加一次 synthesize；deep 档另加 kb/deep/recheck 三跳。
+        _is_deep = (depth or "") == "deep"
+        _planned_hops = len(audit_chunks) + 1 + (3 if _is_deep else 0)
+        _llm_calls_made = len(audit_chunks)  # synthesize 完成后 +1
+
         from veto_gates import (
             hop_stats_from_verdicts,
             should_run_deep_llm_hops,
             extract_non_llm_signals,
         )
-        hop_stats = hop_stats_from_verdicts(chunk_verdicts)
+        hop_stats = hop_stats_from_verdicts(
+            chunk_verdicts,
+            llm_calls_planned=_planned_hops,
+            llm_calls_made=_llm_calls_made,
+        )
         skip_reasoning = hop_stats.skip_reasoning
         run_deep_hops = should_run_deep_llm_hops(depth, skip_reasoning)
         if skip_reasoning:
             logger.warning(
-                f"Executor hop-budget early-stop: risk={hop_stats.avg_hallucination_risk:.2f} "
+                f"Executor hop-budget early-stop: reasons={hop_stats.skip_reasons} "
+                f"risk={hop_stats.avg_hallucination_risk:.2f} "
                 f"grounding={hop_stats.avg_grounding:.2f} "
-                f"completeness={hop_stats.evidence_completeness:.2f}"
+                f"completeness={hop_stats.evidence_completeness:.2f} "
+                f"llm_calls={_llm_calls_made}/{_planned_hops}"
             )
 
         # 5b. EvidenceVerifier 知识库交叉验证 — 仅 deep 且未早停（控制 LLM hop）
@@ -120,6 +142,7 @@ class Executor:
             kb_verification = await self._verify_claims_with_knowledge(
                 session, chunk_verdicts, raw_event
             )
+            _llm_calls_made += 1
 
         # 6. 收集攻击链信息（如有）
         chain_info = self._extract_chain_info(all_results)
@@ -135,17 +158,46 @@ class Executor:
         # PR1: 仅 deep 且未触发早停时运行，禁止用推理 hop 填补无证据。
         deep_text = ""
         if deep_calls and run_deep_hops:
+            from agents.llm_fallback import is_llm_fallback
             deep_text = await self._llm_deep_analyze(
                 raw_event, audit_chunks, chunk_verdicts, depth
             )
+            _llm_calls_made += 1
+            # P0-E-1: 降级响应绝不能被当成"深度研判"。
+            # 修复前此处无 is_llm_fallback 检查 —— budget_exhausted / 429 / 超时
+            # 返回的 {"fallback": true, ...} 会被原样当作分析结论：
+            #   1) 以 "深度分析初步研判 (来自 deep_analyze)" 注入 synthesize prompt，
+            #      且提示词要求模型"纳入或显式反驳"，等于要求模型采信一段 JSON 报错；
+            #   2) ToolResult 标记 success=True，运维侧无法从工具结果发现真实失败。
+            deep_fb, deep_fb_reason = is_llm_fallback(deep_text)
             for dc in deep_calls:
-                all_results.append(ToolResult(
-                    call_id=dc.call_id, task_id=dc.task_id,
-                    tool="llm.deep_analyze", success=True,
-                    data=deep_text, duration_ms=0,
-                ))
+                if deep_fb:
+                    logger.warning(
+                        f"Executor: llm.deep_analyze degraded (no retry): {deep_fb_reason}"
+                    )
+                    all_results.append(ToolResult(
+                        call_id=dc.call_id, task_id=dc.task_id,
+                        tool="llm.deep_analyze", success=False,
+                        error=f"llm_fallback:{deep_fb_reason}",
+                        duration_ms=0,
+                    ))
+                else:
+                    all_results.append(ToolResult(
+                        call_id=dc.call_id, task_id=dc.task_id,
+                        tool="llm.deep_analyze", success=True,
+                        data=deep_text, duration_ms=0,
+                    ))
+            if deep_fb:
+                # 丢弃降级正文，绝不让它进入 summarize 的证据上下文
+                deep_text = ""
+                _deep_fallback = deep_fb_reason
+            else:
+                _deep_fallback = ""
         elif deep_calls:
             logger.info("Executor: skipped llm.deep_analyze (non-deep or hop budget)")
+            _deep_fallback = ""
+        else:
+            _deep_fallback = ""
 
         # 7. LLM 汇总所有块结论 → AuditResult（深度分析作为额外上下文注入）
         audit_result = await self._synthesize_from_chunks(
@@ -155,21 +207,101 @@ class Executor:
             signals=signals,
             hop_stats=hop_stats,
         )
+        _llm_calls_made += 1 if (audit_chunks and chunk_verdicts) else 0
         audit_result.deep_analysis = deep_text
 
-        # 8. recheck — 只允许抬升 needs_human，不允许升级威胁
+        # 8. recheck — 复核（P1：支持**有证据的威胁升级**，且降级可审计）
+        #
+        # 修复前的语义是「只能降、不能升」：
+        #   · 复核只能把 needs_human_review 置真，threat_detected 永不上升
+        #   · 复核结果直接就地覆盖原结论，原始等级不保留
+        # 后果是误判为低危的真实 critical 威胁**没有任何纠正路径** ——
+        # 漏报不可纠正，而误报可以纠正，方向正好反了。
+        #
+        # 现在：
+        #   · 升级：仅接受**自带可核验证据**的 missed_threats
+        #           （veto_gates.filter_missed_threats），且最多升到 suspicious，
+        #           confirmed 仍须走 apply_confirmation_gate 的完整条件；
+        #           由 P1 的 allow_blocking 规则，suspicious 只告警不封禁。
+        #   · 降级：仅在 recheck 明确 abstain 时发生，且**保留原始等级**，
+        #           把「没找到新证据」与「原证据已被推翻」区分开 ——
+        #           只有 abstain 才推翻；沉默不等于证伪。
+        #   · 全程写入 recheck_audit：原始 / 重评 / 最终，三者都可查。
         if recheck_calls and run_deep_hops:
+            from veto_gates import filter_missed_threats
+
+            original = {
+                "threat_detected": bool(audit_result.threat_detected),
+                "verdict": audit_result.verdict,
+                "severity": audit_result.severity,
+                "confidence": audit_result.confidence,
+                "threat_type": audit_result.threat_type,
+            }
             recheck = await self._llm_recheck(
                 raw_event, audit_result, chunk_verdicts
             )
+            _llm_calls_made += 1
             audit_result.needs_human_review = bool(
                 audit_result.needs_human_review or recheck.get("needs_human", False)
             )
+
+            recheck_audit = {
+                "original": original,
+                "abstain": bool(recheck.get("abstain")),
+                "escalated": False,
+                "demoted": False,
+                "escalation_basis": [],
+                "demotion_reason": "",
+            }
+
+            # ── 升级路径：必须自带可核验证据 ──
+            actionable = filter_missed_threats(recheck.get("missed_threats") or [])
+            if actionable and not recheck.get("abstain"):
+                recheck_audit["escalation_basis"] = [
+                    {
+                        "type": mt.get("type", ""),
+                        "summary": str(mt.get("summary") or mt.get("description") or "")[:120],
+                        "evidence_ids": mt.get("evidence_ids") or [],
+                    }
+                    for mt in actionable[:3]
+                ]
+                before_verdict = audit_result.verdict
+                audit_result.threat_detected = True
+                if before_verdict in ("", "false_positive", "insufficient_evidence"):
+                    audit_result.verdict = "suspicious"
+                if not audit_result.threat_type:
+                    audit_result.threat_type = str(
+                        actionable[0].get("type") or original["threat_type"] or ""
+                    )
+                # 升级后必须人审：复核未经完整确认闸
+                audit_result.needs_human_review = True
+                recheck_audit["escalated"] = True
+                logger.warning(
+                    f"Executor: recheck ESCALATED {before_verdict} → "
+                    f"{audit_result.verdict} on {len(actionable)} evidenced claim(s)"
+                )
+
+            # ── 降级路径：仅 abstain，且保留原始等级 ──
             if recheck.get("abstain"):
                 audit_result.needs_human_review = True
+                recheck_audit["demotion_reason"] = "llm_abstain"
                 if audit_result.verdict == "confirmed" or audit_result.threat_detected:
                     audit_result.threat_detected = False
                     audit_result.verdict = "insufficient_evidence"
+                    recheck_audit["demoted"] = True
+                    logger.warning(
+                        f"Executor: recheck DEMOTED {original['verdict']} → "
+                        "insufficient_evidence (llm_abstain); 原始等级已保留"
+                    )
+
+            recheck_audit["final"] = {
+                "threat_detected": bool(audit_result.threat_detected),
+                "verdict": audit_result.verdict,
+                "severity": audit_result.severity,
+                "confidence": audit_result.confidence,
+            }
+            audit_result.recheck_audit = recheck_audit
+
             for rc in recheck_calls:
                 all_results.append(ToolResult(
                     call_id=rc.call_id, task_id=rc.task_id,
@@ -180,6 +312,58 @@ class Executor:
             logger.info("Executor: skipped llm.recheck (non-deep or hop budget)")
 
         audit_result.tool_results = all_results
+
+        # ── P1-Executor: 三类终态 ──
+        # 修复前本函数只有一条返回路径，AuditResult 上没有任何字段说明
+        # 「这一轮到底跑完了没有」。三种截然不同的结局在下游长得一样：
+        #   · 正常跑完
+        #   · 因 hop 预算早停跳掉了 deep/recheck 三跳（分析未完成）
+        #   · 工具被安全层拒绝，没取到任何数据
+        # 现在显式落到 terminal_state，且 hop 账目与三类早停成因一并留痕。
+        from veto_gates import classify_terminal_state
+
+        _denied = [r for r in all_results if getattr(r, "security_denied", False)]
+        _denied_all = bool(all_results) and all(
+            getattr(r, "security_denied", False) for r in all_results
+        )
+        audit_result.terminal_state = classify_terminal_state(
+            skip_reasoning=skip_reasoning,
+            security_denied=_denied_all,
+        )
+        if _denied:
+            audit_result.terminal_reason = "tool_denied:" + ";".join(
+                f"{r.tool}({r.error})" for r in _denied[:3]
+            )
+        elif skip_reasoning:
+            audit_result.terminal_reason = "hop_early_stop:" + ",".join(
+                hop_stats.skip_reasons
+            )
+        elif _deep_fallback:
+            audit_result.terminal_reason = f"llm_fallback:{_deep_fallback}"
+        else:
+            audit_result.terminal_reason = ""
+        audit_result.llm_calls_made = _llm_calls_made
+        audit_result.llm_calls_planned = _planned_hops
+
+        # 终态非 completed 时，「未完成」不得被读成「干净」：
+        # 强制人审，并禁止把 verdict 说成 false_positive。
+        if audit_result.terminal_state != "completed":
+            audit_result.needs_human_review = True
+            if audit_result.verdict == "false_positive":
+                audit_result.verdict = "insufficient_evidence"
+                logger.warning(
+                    f"Executor: terminal_state={audit_result.terminal_state} "
+                    f"({audit_result.terminal_reason}) — false_positive → "
+                    "insufficient_evidence（未完成 ≠ 已排除）"
+                )
+        audit_result.hop_trace.append({
+            "hop": "terminal",
+            "terminal_state": audit_result.terminal_state,
+            "terminal_reason": audit_result.terminal_reason[:200],
+            "llm_calls_made": _llm_calls_made,
+            "llm_calls_planned": _planned_hops,
+            "skip_reasons": list(hop_stats.skip_reasons),
+        })
 
         duration = time.time() - start_time
         logger.info(
@@ -213,6 +397,59 @@ class Executor:
                     tool=tc.tool, success=True, data=data,
                     duration_ms=round(duration, 1),
                 )
+            except ToolExecutionDenied as denied:
+                # P1-Executor: 安全拒绝 ≠ 工具报错。
+                # 修复前两者都落进同一个 except，被记成普通失败；
+                # 上层因此无法把「因安全策略未取证」与「工具崩了」区分开，
+                # 终态只能是「跑完了」，进而可能落进 false_positive。
+                duration = (time.time() - t_start) * 1000
+                logger.warning(
+                    f"Tool {tc.tool} ({tc.call_id}) DENIED by security gate: {denied.reason}"
+                )
+                result = ToolResult(
+                    call_id=tc.call_id, task_id=tc.task_id,
+                    tool=tc.tool, success=False,
+                    error=f"security_denied:{denied.reason}",
+                    duration_ms=round(duration, 1),
+                    security_denied=True,
+                )
+            except ToolExecutionTimeout as to:
+                # P2-B-4: 超时是独立一类结果。修复前 timeout_ms 是死字段，
+                # 挂死的工具会永久占住 gather，整轮审计永不返回。
+                duration = (time.time() - t_start) * 1000
+                logger.warning(
+                    f"Tool {tc.tool} ({tc.call_id}) TIMEOUT after "
+                    f"{duration:.0f}ms (limit {to.timeout_ms}ms)"
+                )
+                result = ToolResult(
+                    call_id=tc.call_id, task_id=tc.task_id,
+                    tool=tc.tool, success=False,
+                    error=f"tool_timeout:{to.timeout_ms}ms",
+                    duration_ms=round(duration, 1),
+                    timed_out=True,
+                )
+            except ToolParameterRejected as pr:
+                # P3-6: 参数越界是独立一类结果。
+                # 与 security_denied / timed_out 分开的理由同上：
+                # 「因为参数不合法所以没查」和「工具崩了」在下游要做出不同反应 ——
+                # 前者说明上游给的计划有问题（值得告警），后者说明工具不可靠。
+                duration = (time.time() - t_start) * 1000
+                logger.warning(
+                    f"Tool {tc.tool} ({tc.call_id}) PARAM REJECTED: "
+                    f"{pr.field}={pr.value!r} > {pr.limit}"
+                )
+                result = ToolResult(
+                    call_id=tc.call_id, task_id=tc.task_id,
+                    tool=tc.tool, success=False,
+                    error=f"param_rejected:{pr.field}={pr.value!r}>{pr.limit}",
+                    duration_ms=round(duration, 1),
+                    param_rejected=True,
+                )
+            except asyncio.CancelledError:
+                # P2-B-4: 取消必须向上传播。吞掉它会让上层以为只是工具失败，
+                # 而实际上整个流水线已被要求停止。
+                logger.warning(f"Tool {tc.tool} ({tc.call_id}) cancelled")
+                raise
             except Exception as e:
                 duration = (time.time() - t_start) * 1000
                 logger.warning(f"Tool {tc.tool} ({tc.call_id}) failed: {e}")
@@ -226,11 +463,19 @@ class Executor:
 
         # return_exceptions=True：任何意外异常都不拖垮整批工具调用，
         # 与 _audit_chunks_parallel 的写法保持一致
+        #
+        # P2-B-4: 但 CancelledError **不在此列**。修复前它和普通异常一样
+        # 被收进 raw_results 再转成 success=False 的 ToolResult ——
+        # 于是「流水线已被要求停止」被降级成「这个工具坏了」，
+        # 整轮审计会继续跑完并产出结论。取消必须在这里原样上抛。
         raw_results = await asyncio.gather(
             *[execute_one(tc) for tc in tool_calls], return_exceptions=True
         )
         finalized: list[ToolResult] = []
         for tc, r in zip(tool_calls, raw_results):
+            if isinstance(r, asyncio.CancelledError):
+                logger.warning(f"Tool {tc.tool} ({tc.call_id}) cancelled — aborting batch")
+                raise r
             if isinstance(r, Exception):
                 logger.warning(f"Tool {tc.tool} ({tc.call_id}) crashed: {r}")
                 crashed = ToolResult(
@@ -248,19 +493,66 @@ class Executor:
 
     @staticmethod
     def _emit_tool_telemetry(tc: ToolCall, result: ToolResult, log_args: dict) -> None:
-        """链 C：调查工具调用打进 MCP Guard logger/检测器。失败不阻断执行。"""
+        """链 C：调查工具调用打进 MCP Guard logger/检测器。失败不阻断执行。
+
+        P0-B-2 / P2: 审计链路的工具调用**没有**经过 MCP Guard 的 RBAC /
+        参数校验 / 规则引擎。修复前这里硬编码 decision="allow"，
+        于是「从未被检查过的调用」在审计日志里长得和「检查通过」一模一样。
+
+        现在改为 decision="unguarded"，并显式列出实际执行过的检查，
+        使审计轨迹不再把「未检查」记录成「已授权」。
+        """
         try:
             from mcp_guard.telemetry import ingest_tool_call
+
+            # P3-6: 把 ToolResult 上三类失败标志真正带进遥测。
+            # 修复前只取 success/error 两个字段，于是「被安全层拒绝」
+            # 「超时」「参数越界」在审计日志里长得一模一样 ——
+            # 只有 ToolResult.to_dict() 带得出去，而生产路径上没人调它。
+            # 不新增 exec_status 词表：telemetry.py 用
+            # ``exec_status not in ("error","blocked","failed")`` 反推 success，
+            # 自造新值会被当成执行成功。类别放进已持久化的 exec_result。
+            failure_class = ""
+            if getattr(result, "security_denied", False):
+                failure_class = "security_denied"
+            elif getattr(result, "param_rejected", False):
+                failure_class = "param_rejected"
+            elif getattr(result, "timed_out", False):
+                failure_class = "timeout"
+
+            checks = [{
+                "check": "pre_exec_signature",
+                "passed": True,
+                "message": (
+                    "仅执行行为签名打分；本链路不经过 RBAC/规则引擎"
+                    "（P0 最小止漏档，P3 收敛）；事件查询工具另有参数上界校验"
+                    "（P3-6），其余工具仍无参数校验"
+                ),
+            }]
+            if failure_class == "param_rejected":
+                checks.append({
+                    "check": "query_param_bounds",
+                    "passed": False,
+                    "message": f"查询参数越界: {result.error}",
+                })
+
+            exec_result = None
+            if not result.success and result.error:
+                exec_result = {"error": result.error}
+                if failure_class:
+                    exec_result["failure_class"] = failure_class
+
             ingest_tool_call(
                 tool_name=tc.tool,
                 arguments=log_args,
                 caller="agent_executor",
                 source="audit_llm",
                 caller_role="system",
-                decision="allow",
+                decision="unguarded",
                 reason=tc.task_id or "",
+                checks=checks,
                 exec_status="success" if result.success else "error",
-                exec_result={"error": result.error} if (not result.success and result.error) else None,
+                exec_result=exec_result,
                 duration_ms=result.duration_ms,
             )
         except Exception as e:
@@ -487,8 +779,15 @@ class Executor:
         tool_results: list,
         depth: str = "",
     ) -> AuditResult:
-        """tools_only 车道: 不调 LLM,用 Sigma/异常/类型信号生成确定性结论。"""
-        from veto_gates import extract_non_llm_signals, apply_confirmation_gate
+        """tools_only 车道: 不调 LLM,用 Sigma/异常/类型信号生成确定性结论。
+
+        P1-C-5: 不再走 apply_confirmation_gate 并把「有已采纳断言」这道条件
+        用一个与 llm_threat_detected 同源的布尔自证掉 —— 本车道根本不产生
+        claim，那道 confirmed 必要条件形同虚设。改用
+        deterministic_non_llm_verdict：显式要求**强信号**并记录判定依据；
+        仅自由文本事件名这类弱信号最多给 insufficient_evidence。
+        """
+        from veto_gates import extract_non_llm_signals, deterministic_non_llm_verdict
 
         signals = extract_non_llm_signals(
             raw_event, tool_results=tool_results,
@@ -499,44 +798,57 @@ class Executor:
             ),
         )
         sigma = raw_event.get("_sigma") or {}
-        threat = bool(signals.has_signal or sigma.get("detected"))
-        conf = 0.0
-        if signals.anomaly_score:
-            conf = max(conf, float(signals.anomaly_score))
-        if sigma.get("detected"):
-            conf = max(conf, 0.55)
-            if str(sigma.get("max_severity") or "").lower() == "critical":
-                conf = max(conf, 0.75)
-        if signals.type_signal:
-            conf = max(conf, 0.5)
-        decision = apply_confirmation_gate(
-            llm_threat_detected=threat,
-            llm_abstain=not threat,
-            signals=signals,
-            has_admitted_claims=threat,
-            extra_human=False,
+        decision = deterministic_non_llm_verdict(
+            signals, sigma_severity=str(sigma.get("max_severity") or "")
         )
+
         et = str(
             raw_event.get("threat_type")
             or raw_event.get("event")
             or raw_event.get("type")
             or ""
         )
+        signal_dict = signals.to_dict()
+        signal_dict["evidence_basis"] = list(decision.evidence_basis)
+        signal_dict["decision_reason"] = decision.reason
+        # P1-Executor: tools-only 车道天然 0 次 LLM 调用 —— 显式记账，
+        # 否则它在 hop 账本上与「跑了 3 跳但被早停砍掉」无法区分。
+        denied = [
+            r for r in (tool_results or []) if getattr(r, "security_denied", False)
+        ]
+        if denied:
+            terminal_state = "security_denied"
+            terminal_reason = "tool_denied:" + ";".join(
+                f"{r.tool}({r.error})" for r in denied[:3]
+            )
+        else:
+            terminal_state = "completed"
+            terminal_reason = "deterministic_non_llm"
         return AuditResult(
             threat_detected=decision.threat_detected,
             threat_type=et if decision.threat_detected else "",
-            confidence=round(min(1.0, conf), 4),
+            confidence=round(min(1.0, decision.confidence), 4),
             severity=str(raw_event.get("severity") or "info"),
             summary=(
-                f"tools_only 确定性结论: signals={signals.reasons[:3]} "
-                f"verdict={decision.verdict}"
+                f"tools_only 确定性结论: basis={decision.evidence_basis or 'none'} "
+                f"reason={decision.reason} signals={signals.reasons[:3]}"
             ),
             needs_human_review=decision.needs_human_review,
             verdict=decision.verdict,
             tool_results=list(tool_results or []),
-            non_llm_signals=signals.to_dict(),
-            hop_trace=[{"hop": "tools_only", "skip_llm": True}],
+            non_llm_signals=signal_dict,
+            hop_trace=[{
+                "hop": "tools_only",
+                "skip_llm": True,
+                "decision_reason": decision.reason,
+                "evidence_basis": list(decision.evidence_basis),
+                "terminal_state": terminal_state,
+            }],
             schema_valid=True,
+            terminal_state=terminal_state,
+            terminal_reason=terminal_reason,
+            llm_calls_made=0,
+            llm_calls_planned=0,
         )
 
     async def _audit_chunks_parallel(
@@ -566,6 +878,12 @@ class Executor:
 
         verdicts: list[ChunkVerdict] = []
         for chunk, result in zip(chunks, results):
+            # P2-B-4: 取消不等于「审核异常」。修复前 CancelledError 会被
+            # 包成一条"审核异常、需人工复核"的 ChunkVerdict ——
+            # 流水线明明已被要求停止，却继续汇总出一个看起来完整的结论。
+            if isinstance(result, asyncio.CancelledError):
+                logger.warning(f"Chunk {chunk.chunk_id} audit cancelled — aborting")
+                raise result
             if isinstance(result, Exception):
                 logger.warning(
                     f"Chunk {chunk.chunk_id} audit failed: "
@@ -626,33 +944,24 @@ class Executor:
             )
 
         # ── 交叉验证：检查每条断言是否有真实事件支撑 ──
-        hallucination_risks = []
-        total_claims = 0
-        valid_claims = 0
-        invalid_claims = 0
-        all_validation_issues = []
+        # P3-2: 质量评分收敛到 quality_scoring.score_verdicts（唯一实现）。
+        # 修复前这里是**第二份**实现，且与 veto_gates 的那份算法不同：
+        # 本处对 hallucination_risk 取 max(属性, raw 快照)，那边只取属性 ——
+        # 两个同名「平均幻觉风险」在 raw 快照更大时会相差 0.70。
+        # 线上靠 sub_auditor 的 P0-C-2 恢复语句碰巧相等，那是跨模块巧合。
+        from quality_scoring import score_verdicts
 
-        for verdict in verdicts:
-            validation = verdict.validate_evidence()
-            total_claims += validation["total_claims"]
-            valid_claims += validation["valid_claims"]
-            invalid_claims += validation["invalid_claims"]
-            hallucination_risks.append(verdict.hallucination_risk)
-            all_validation_issues.extend(validation["issues"])
+        quality = score_verdicts(verdicts)
+        total_claims = quality.total_claims
+        valid_claims = quality.valid_claims
+        avg_hallucination_risk = quality.avg_hallucination_risk
+        all_validation_issues = list(quality.issues)
 
-        # 综合幻觉风险分数
-        avg_hallucination_risk = (
-            sum(hallucination_risks) / len(hallucination_risks)
-            if hallucination_risks else 0.0
-        )
-
-        # 证据完整度 = 有效断言比例
-        evidence_completeness = (
-            valid_claims / total_claims if total_claims > 0 else 1.0
-        )
+        # 断言层面的证据支撑率（与 vote 层面的 admitted_ratio 是两个量）
+        evidence_completeness = quality.claim_support_ratio
 
         # 自动调整：证据完整度低的块，整体置信度打折（惩罚上限 30%）
-        confidence_penalty = 1.0 - (avg_hallucination_risk * 0.3)
+        confidence_penalty = quality.confidence_penalty
 
         logger.info(
             f"Cross-verification: {valid_claims}/{total_claims} claims valid, "
@@ -780,6 +1089,10 @@ class Executor:
         # 结构化验证（Pydantic）
         from audit_schemas import validate_synthesis_output
         parsed, schema_errors = validate_synthesis_output(result)
+        # P0-E-4: schema 校验失败时 validate_synthesis_output 已把越界值收敛到合法域，
+        # 但该结论本身不可完全信任 —— 必须标记为 schema_invalid 并强制人工复核，
+        # 否则它仍能以正常 verdict 进入自动响应发布路径。
+        schema_invalid = bool(schema_errors)
         if schema_errors:
             logger.warning(f"Synthesis schema validation issues: {schema_errors}")
 
@@ -800,10 +1113,10 @@ class Executor:
 
             # 三层校验综合惩罚
             # Layer 1: Grounding 验证（程序化）
-            avg_grounding = (
-                sum(v.grounding_score for v in verdicts) / len(verdicts)
-                if verdicts else 1.0
-            )
+            # P3-2: 复用上方的 quality，不再第二次遍历 verdicts 另算一遍。
+            # 修复前这里是 `sum(v.grounding_score ...)`，没有 None 保护 ——
+            # 而 veto_gates 同一指标用 `or 1.0` 兜底，两处口径不同。
+            avg_grounding = quality.avg_grounding
             grounding_penalty = 1.0 - ((1.0 - avg_grounding) * 0.4)
 
             # Layer 2: 知识库交叉验证
@@ -837,6 +1150,8 @@ class Executor:
                 or avg_grounding < 0.5
                 or kb_risk > 0.7
                 or bool(parsed.get("abstain"))
+                # P0-E-4: schema 未通过校验的结论一律强制人工复核
+                or schema_invalid
             )
             decision = apply_confirmation_gate(
                 llm_threat_detected=bool(parsed.get("threat_detected", False)),
@@ -888,6 +1203,8 @@ class Executor:
                 non_llm_signals=gate_signals.to_dict(),
                 grounding_score=avg_grounding,
                 kb_verification=kb_verification or {},
+                schema_valid=not schema_invalid,
+                schema_errors=list(schema_errors or []),
             )
         except Exception as e:
             logger.warning(f"Synthesis parse failed: {e}")

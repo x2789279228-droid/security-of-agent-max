@@ -21,6 +21,7 @@ os.environ.setdefault("SHARED_MEMORY_LLM_API_KEY", "test")
 os.environ.setdefault("SHARED_MEMORY_EMBEDDING_API_KEY", "test")
 os.environ.setdefault("SHARED_MEMORY_ADMIN_PASSWORD", "test")
 
+import pytest
 import sqlalchemy.ext.asyncio as _sa_async
 
 _orig = _sa_async.create_async_engine
@@ -105,14 +106,43 @@ async def _fake_rollback_not_found(**kwargs):
     return {"action": "fake_pr2_gone", "success": False, "status": "not_found", "deleted": 0}
 
 
-response_registry.register(
-    "fake_pr2_block", _fake_exec, description="test only",
-    severity="low", rollback_fn=_fake_rollback,
-)
-response_registry.register(
-    "fake_pr2_gone", _fake_exec, description="test only",
-    severity="low", rollback_fn=_fake_rollback_not_found,
-)
+@pytest.fixture
+def fake_actions():
+    """把两个假动作注册到**全局**响应注册表，测试结束后**精确还原**。
+
+    2026-10-20 修复（整改报告 §9.47）：此前这段注册在**模块顶层**
+    （import 期即执行）且**永不还原** → 生产全局单例 `response_registry`
+    被**永久污染**，之后任何读 `list_actions()` 的代码都会看到 `fake_pr2_*`。
+
+    实测后果：本文件之外的守卫（参数契约三方漂移守卫）**单独跑绿、全量跑红**
+    —— 守卫被变成了**顺序依赖**，红的位置与真实缺陷无关。
+
+    现在改为 **fixture 注册 + teardown 精确还原**：
+    - 注册的仍是**全局单例**（`ResponseExecutor.rollback_batch` 走
+      `response_registry._rollback_fns`，必须是全局对象）；
+    - teardown 把 `_actions` / `_exec_fns` / `_rollback_fns` 三个字典
+      **逐项还原**到进入 fixture 前的状态（不是简单 del 两个键），
+      这样即使以后有人在别处注册了什么，也不会被这个 fixture 误删。
+    """
+    reg = response_registry
+    before = (dict(reg._actions), dict(reg._exec_fns), dict(reg._rollback_fns))
+    reg.register(
+        "fake_pr2_block", _fake_exec, description="test only",
+        severity="low", rollback_fn=_fake_rollback,
+    )
+    reg.register(
+        "fake_pr2_gone", _fake_exec, description="test only",
+        severity="low", rollback_fn=_fake_rollback_not_found,
+    )
+    try:
+        yield reg
+    finally:
+        reg._actions.clear()
+        reg._actions.update(before[0])
+        reg._exec_fns.clear()
+        reg._exec_fns.update(before[1])
+        reg._rollback_fns.clear()
+        reg._rollback_fns.update(before[2])
 
 
 def _reset_store(fake: FakeRedis):
@@ -160,14 +190,18 @@ class TestRestoreHostIdempotent:
     def test_restore_host_nothing_to_restore_is_success(self):
         async def t():
             import response_engine.ssh_firewall as fw_mod
+            from config import settings
             fw = FakeFirewall(rules=[])
             orig = fw_mod.ssh_firewall
+            old_mode = settings.execution_mode
+            settings.execution_mode = "live"  # 默认已改为 dry_run，本用例验证 live 路径
             fw_mod.ssh_firewall = fw  # _restore_host 运行时 from .ssh_firewall import → 取模块属性
             try:
                 r = await response_registry.rollback(
                     "isolate_host", host_ip="10.7.7.7")
             finally:
                 fw_mod.ssh_firewall = orig
+                settings.execution_mode = old_mode
             assert r["success"] is True
             inner = r.get("result", {})
             assert inner.get("idempotent") is True
@@ -176,7 +210,7 @@ class TestRestoreHostIdempotent:
 
 
 class TestRollbackBatchIdempotent:
-    def test_second_rollback_short_circuits(self):
+    def test_second_rollback_short_circuits(self, fake_actions):
         async def t():
             CALLS["rollback"] = 0
             _reset_store(FakeRedis())
@@ -198,7 +232,7 @@ class TestRollbackBatchIdempotent:
             assert CALLS["rollback"] == 1, "is_rolled 短路后不应再执行真实回滚"
         _run(t())
 
-    def test_not_found_counts_as_success_and_marks_rolled(self):
+    def test_not_found_counts_as_success_and_marks_rolled(self, fake_actions):
         async def t():
             _reset_store(FakeRedis())
             executor = ResponseExecutor()
@@ -212,7 +246,7 @@ class TestRollbackBatchIdempotent:
             assert r.results[0].idempotent is True
             assert (await rollback_store.is_rolled("tok-b")) is True
 
-    def test_redis_persists_rolled_flag(self):
+    def test_redis_persists_rolled_flag(self, fake_actions):
         async def t():
             fake = FakeRedis()
             _reset_store(fake)
@@ -227,7 +261,7 @@ class TestRollbackBatchIdempotent:
             rollback_store._rolled.clear()
             assert (await rollback_store.is_rolled("tok-c")) is True
 
-    def test_real_error_not_marked_rolled(self):
+    def test_real_error_not_marked_rolled(self, fake_actions):
         async def t():
             _reset_store(FakeRedis())
             executor = ResponseExecutor()

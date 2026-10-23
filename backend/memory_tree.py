@@ -14,10 +14,10 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, desc, func, and_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import MemoryTreeNode, SecurityEvent
+from models import MemoryTreeNode
 
 logger = logging.getLogger(__name__)
 

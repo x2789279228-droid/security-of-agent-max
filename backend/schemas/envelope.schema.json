@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EventEnvelope",
+  "description": "跨系统传输的统一事件信封。camelCase 为 Kafka/Flink 规范字段；snake_case 为兼容别名。未包信封的历史消息仍按业务 Schema 直接校验。",
+  "x-schema-version": "1.0.0",
+  "type": "object",
+  "properties": {
+    "eventId": { "type": "string", "description": "事件唯一标识" },
+    "event_id": { "type": "string" },
+    "eventType": { "type": "string", "description": "事件种类" },
+    "event_type": { "type": "string" },
+    "schemaVersion": { "type": "string", "description": "当前事件结构版本 (semver)" },
+    "schema_version": { "type": "string" },
+    "occurredAt": { "type": "integer", "description": "事件产生时间 (epoch millis)" },
+    "occurred_at": { "type": "integer" },
+    "producer": { "type": "string", "description": "生产方标识" },
+    "correlationId": { "type": "string", "description": "同一业务处理过程的关联 ID" },
+    "correlation_id": { "type": "string" },
+    "parentEventId": { "type": "string", "description": "派生事件指向的来源业务事件 ID" },
+    "parent_event_id": { "type": "string" },
+    "payload": { "type": "object", "description": "实际业务内容" }
+  },
+  "anyOf": [
+    {
+      "required": [
+        "eventId",
+        "eventType",
+        "schemaVersion",
+        "occurredAt",
+        "producer",
+        "correlationId",
+        "payload"
+      ]
+    },
+    {
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "producer",
+        "correlation_id",
+        "payload"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

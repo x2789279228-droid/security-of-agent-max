@@ -21,6 +21,10 @@ class LlmSlotTimeout(Exception):
     """等不到 LLM 槽。"""
 
 
+class LlmRateExceeded(Exception):
+    """这一分钟的 LLM 请求额度已经用完。调用方降级，闸内不等待。"""
+
+
 class LlmLimiter:
     def __init__(self) -> None:
         self._lock: Optional[asyncio.Lock] = None
@@ -28,6 +32,7 @@ class LlmLimiter:
         self._used = 0
         self._p0_used = 0
         self._waiters = 0
+        self._rate_hits: list[float] = []
 
     def _ensure(self) -> asyncio.Condition:
         if self._cv is None:
@@ -56,7 +61,31 @@ class LlmLimiter:
             "waiters": self._waiters,
             "limit": self._limit(),
             "reserve": self._reserve(),
+            "rate_per_minute": self._rate_limit(),
+            "rate_used": len(self._rate_hits),
         }
+
+    def _rate_limit(self) -> int:
+        try:
+            return int(getattr(settings, "llm_rate_per_minute", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _take_rate_locked(self) -> None:
+        """在持有条件锁时调用。额度用完立刻拒绝，不把调用方留在等待队列里。"""
+        limit = self._rate_limit()
+        if limit <= 0:
+            return
+        now = time.monotonic()
+        cutoff = now - 60.0
+        hits = self._rate_hits
+        while hits and hits[0] < cutoff:
+            hits.pop(0)
+        if len(hits) >= limit:
+            raise LlmRateExceeded(
+                f"llm rate limit {len(hits)}/{limit} per 60s"
+            )
+        hits.append(now)
 
     def _can_enter(self, is_p0: bool) -> bool:
         limit = self._limit()
@@ -73,6 +102,7 @@ class LlmLimiter:
         cv = self._ensure()
         deadline = time.monotonic() + max(0.05, float(timeout))
         async with cv:
+            self._take_rate_locked()
             self._waiters += 1
             try:
                 while not self._can_enter(is_p0):

@@ -12,8 +12,11 @@ JA3 指纹计算委托给 encrypted_traffic.ja3_fingerprint。
 """
 import logging
 import struct
-from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:  # only for annotations; ProtocolMessage is imported lazily at runtime
+    from protocol_parser.dissector import ProtocolMessage
+
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +113,6 @@ class TlsParser:
     """TLS 握手解析器"""
 
     def parse(self, pkt) -> Optional["ProtocolMessage"]:
-        from protocol_parser.dissector import ProtocolMessage
 
         payload = pkt.payload
         if not payload or len(payload) < 6:
@@ -121,7 +123,7 @@ class TlsParser:
         if content_type != _CT_HANDSHAKE:
             return None
 
-        record_version = struct.unpack("!H", payload[1:3])[0]
+        struct.unpack("!H", payload[1:3])[0]
         # record_length = struct.unpack("!H", payload[3:5])[0]
 
         # Handshake: type(1) length(3)
@@ -139,7 +141,6 @@ class TlsParser:
         return None
 
     def _parse_client_hello(self, payload: bytes, offset: int, pkt) -> Optional["ProtocolMessage"]:
-        from protocol_parser.dissector import ProtocolMessage
 
         try:
             # hs_type(1) + length(3) + client_version(2) + random(32)

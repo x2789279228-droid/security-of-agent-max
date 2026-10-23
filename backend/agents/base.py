@@ -18,10 +18,9 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vector_store import vector_store
 from sliding_window import sliding_window
-from summary_compression import embedder, summary
-from event_store import event_store, EventFilter, StoredEvent
+from summary_compression import summary
+from event_store import event_store, EventFilter
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +199,8 @@ class BaseAuditComponent:
         else:
             set_trace_context(operation="audit_component", caller=self.agent_id)
         # 轻量 chain-of-thought：最后追加"先逐步推理，再给出结论"工作流引导
-        cot_hint = (f"请先依据上下文逐步推理（列出关键证据链、排除干扰、给出置信度），"
-                    f"再输出最终结论。推理过程简明扼要，结论必须可追溯到事件证据。")
+        cot_hint = ("请先依据上下文逐步推理（列出关键证据链、排除干扰、给出置信度），"
+                    "再输出最终结论。推理过程简明扼要，结论必须可追溯到事件证据。")
         try:
             if isinstance(messages, list) and messages:
                 last = dict(messages[-1])

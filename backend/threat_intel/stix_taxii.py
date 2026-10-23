@@ -12,10 +12,8 @@ stix_taxii.py — TAXII 2.1 客户端与 STIX Bundle 解析
     from threat_intel.stix_taxii import taxii_client
     iocs = await taxii_client.poll_feed(feed_config)
 """
-import asyncio
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from config import settings
@@ -54,16 +52,29 @@ class TaxiiClient:
         feed_type = feed_config.get("feed_type", "taxii")
 
         if feed_type == "taxii":
-            return await self._poll_taxii(feed_config)
+            iocs = await self._poll_taxii(feed_config)
         elif feed_type == "misp":
-            return await self._poll_misp(feed_config)
+            iocs = await self._poll_misp(feed_config)
         elif feed_type == "csv":
-            return await self._import_csv(feed_config)
+            iocs = await self._import_csv(feed_config)
         elif feed_type == "stix_bundle":
-            return await self._import_stix_bundle(feed_config)
+            iocs = await self._import_stix_bundle(feed_config)
         else:
             logger.warning("不支持的情报源类型: %s", feed_type)
             return []
+
+        # §十一.2: 本函数是四种源的**唯一**汇聚点，计数打在这里。
+        # 修复前 soc_intel_ioc_total 无任何自增点，而 capabilities.py 正用它给
+        # /api/capabilities/status 的 threat_intel.count 赋值 → 面板恒显示
+        # 「已启用、0 条」。0 看上去像「暂无数据」，与「情报源已挂」完全同形。
+        # 标签取 feed 的 name，与 IOC 自带的 source 字段同源，便于按源下钻。
+        try:
+            from metrics import inc_intel_ioc
+            inc_intel_ioc(str(feed_config.get("name") or feed_type), n=len(iocs))
+        except Exception:
+            logger.debug("情报 IOC 计数失败", exc_info=True)
+
+        return iocs
 
     async def _poll_taxii(self, config: dict) -> list[dict]:
         """TAXII 2.1 拉取"""
@@ -141,7 +152,9 @@ class TaxiiClient:
                     "last": "1d",
                     "published": True,
                 }
-                ssl_ctx = None if not self.misp_verify_ssl else False
+                # aiohttp 语义：None=使用默认证书校验；False=关闭校验。
+                # 因此 verify=True 时必须传 None，verify=False 时才传 False。
+                ssl_ctx = None if self.misp_verify_ssl else False
 
                 async with session.post(
                     f"{url.rstrip('/')}/attributes/restSearch",

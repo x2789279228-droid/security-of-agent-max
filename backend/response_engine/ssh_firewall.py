@@ -38,6 +38,8 @@ import time
 from datetime import datetime
 from typing import Optional
 
+from config import settings
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -92,19 +94,26 @@ class SshFirewallAdapter:
             "use_sudo": True,
             "connect_timeout": 8,
             "exec_timeout": 10,
+            "known_hosts": "",
+            "allow_unknown_host": False,
         }
         self._connected = False
         # 规则追踪（内存）
         self._active_rules: dict[str, dict] = {}
 
     def configure(self, host: str, port: int = 22, username: str = "",
-                  password: str = "", use_sudo: bool = True):
+                  password: str = "", use_sudo: bool = True,
+                  known_hosts: str = "", allow_unknown_host: bool | None = None):
         """配置 SSH 连接参数
 
         v5 修复:configure 时即解析主机名并缓存 IP。burst 高并发期间
         Docker 内嵌 DNS (127.0.0.11) 偶发丢包导致 paramiko 连接报
         "Name or service not known"(2026-09-01 复现:block_ip 连续 error)。
         缓存后连接直接用 IP, 不再依赖每次 DNS; 连接异常时清缓存重新解析。
+
+        2026-10-21: 主机密钥默认失败关闭。known_hosts 缺失时不再静默接受
+        任意主机密钥；仅当 allow_unknown_host=True（隔离靶场显式开启）才
+        回退到 AutoAddPolicy。
         """
         self._config.update({
             "host": host,
@@ -113,6 +122,11 @@ class SshFirewallAdapter:
             "password": password,
             "use_sudo": use_sudo,
             "resolved_ip": "",
+            "known_hosts": known_hosts or getattr(settings, "fw_ssh_known_hosts", ""),
+            "allow_unknown_host": (
+                getattr(settings, "fw_ssh_allow_unknown_host", False)
+                if allow_unknown_host is None else allow_unknown_host
+            ),
         })
         self._resolve_host()
 
@@ -159,12 +173,33 @@ class SshFirewallAdapter:
             raise RuntimeError("paramiko 未安装")
         cfg = self._config
         client = paramiko.SSHClient()
-        # 优先加载 known_hosts；未知主机首次连接时记录警告而非静默接受
-        try:
-            client.load_system_host_keys()
-        except Exception:
-            pass
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # 主机密钥校验：默认失败关闭。
+        # - known_hosts 存在：只接受其中已登记的主机密钥（RejectPolicy）
+        # - known_hosts 缺失：除非显式 allow_unknown_host=True，否则拒绝连接
+        #   （静默 AutoAddPolicy 会让 MITM 完整劫持 iptables 封禁通道）
+        known_hosts = str(cfg.get("known_hosts") or "").strip()
+        allow_unknown = bool(cfg.get("allow_unknown_host"))
+        if known_hosts and os.path.isfile(known_hosts):
+            try:
+                client.load_host_keys(known_hosts)
+            except Exception as e:
+                raise RuntimeError(
+                    f"SSH known_hosts 加载失败: {known_hosts}: {e}"
+                ) from e
+        elif not allow_unknown:
+            raise RuntimeError(
+                "SSH 主机密钥校验失败：known_hosts 不存在 "
+                f"({known_hosts or '未配置'})。请先登记目标主机密钥，"
+                "或在隔离靶场显式设置 SHARED_MEMORY_FW_SSH_ALLOW_UNKNOWN_HOST=true"
+            )
+        if allow_unknown:
+            logger.warning(
+                "SSH 防火墙：allow_unknown_host=True —— 正在接受未登记的主机密钥，"
+                "仅限隔离靶场使用"
+            )
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # nosec B507
+        else:
+            client.set_missing_host_key_policy(paramiko.RejectPolicy())
 
         # v4 修复(2026-09-01):私钥类型自动探测,支持 ED25519/RSA/ECDSA/DSS
         # 之前硬编码 password=cfg["password"],但 SOC 私钥是 ED25519,paramiko 用 password 走不通
@@ -242,7 +277,7 @@ class SshFirewallAdapter:
             if (cmd.startswith("iptables") or cmd.startswith("iptables ")
                     or cmd.startswith("ip6tables") or cmd.startswith("ip6tables ")):
                 cmd = f"sudo {cmd}"
-        stdin, stdout, stderr = self._client.exec_command(cmd, timeout=t)
+        stdin, stdout, stderr = self._client.exec_command(cmd, timeout=t)  # nosec B601
         out = stdout.read().decode("utf-8", errors="ignore")
         err = stderr.read().decode("utf-8", errors="ignore")
         rc = stdout.channel.recv_exit_status()
@@ -252,8 +287,31 @@ class SshFirewallAdapter:
 
     # ── 防火墙 API ──
 
-    def block_ip(self, ip: str, duration: int = 3600) -> dict:
-        """按地址族封禁 IP: IPv4→iptables, IPv6→ip6tables(IP 先规范化再拼命令)。"""
+    def run_verify_command(self, cmd: str, timeout: Optional[int] = None) -> dict:
+        """执行只读验证命令，返回与 transport 一致的结构。
+
+        post_validator 期望 `exec_fn` 返回 dict（含 stdout），而 `_exec`
+        直接返回字符串并在失败时抛异常。这里做一层适配，供 SafeExecutor
+        的 verify_fn 使用。
+        """
+        try:
+            out = self._exec(cmd, timeout=timeout)
+            return {"success": True, "stdout": out, "stderr": "", "returncode": 0}
+        except Exception as e:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": str(e),
+                "returncode": -1,
+                "error": str(e),
+            }
+
+    def block_ip(self, ip: str, duration: int = 3600, rule_id: str = "") -> dict:
+        """按地址族封禁 IP: IPv4→iptables, IPv6→ip6tables(IP 先规范化再拼命令)。
+
+        `rule_id` 可由上层预生成（SafeExecutor 需要它做 TTL 注册）；
+        未提供时保持原有的随机生成行为。
+        """
         # 参数强校验 + 规范化
         try:
             norm_ip, family = _normalize_ip(ip)
@@ -266,7 +324,10 @@ class SshFirewallAdapter:
         if is_protected:
             return {"status": "blocked", "message": reason}
 
-        rule_id = f"FW-RULE-{random.randint(10000, 99999)}"
+        rule_id = str(rule_id or "").strip()
+        if rule_id and not re.fullmatch(r"FW-RULE-[0-9]{5,12}", rule_id):
+            return {"status": "error", "message": f"非法 rule_id: {rule_id}"}
+        rule_id = rule_id or f"FW-RULE-{random.randint(10000, 99999)}"
         table = _table_for(family)
         cmd = f"{table} -I INPUT -s {norm_ip} -j DROP -m comment --comment '{rule_id}'"
         try:
@@ -274,7 +335,8 @@ class SshFirewallAdapter:
         except Exception as e:
             logger.error(f"[Firewall] block {norm_ip} failed on {table}: {e}")
             return {"status": "error", "message": f"{table} 封禁命令执行失败: {e}",
-                    "rule_id": rule_id, "ip": norm_ip, "family": family}
+                    "rule_id": rule_id, "ip": norm_ip, "family": family,
+                    "command": cmd}
         # 记录规则
         self._active_rules[rule_id] = {
             "ip": norm_ip, "family": family, "duration": duration, "chain": "INPUT",
@@ -288,11 +350,13 @@ class SshFirewallAdapter:
             "ip": norm_ip,
             "family": family,
             "duration": duration,
+            "command": cmd,
             "message": f"IP {norm_ip} 已通过 {table} 封禁",
         }
 
     def isolate_host(self, host: str, isolation_type: str = "network",
-                     extra_ips: Optional[list] = None) -> dict:
+                     extra_ips: Optional[list] = None,
+                     isolation_id: str = "") -> dict:
         """双栈隔离主机: 每个地址(host + extra_ips)在对应族表写 INPUT -s + OUTPUT -d DROP。
 
         返回 complete / families_applied / families_missing — 有请求的协议族未全部写入时
@@ -328,15 +392,20 @@ class SshFirewallAdapter:
             return {"status": "error", "message": "没有可隔离的 IP 地址", "host": host}
 
         requested_families = sorted({fam for _, fam in targets})
-        isolation_id = f"EDR-ISO-{random.randint(10000, 99999)}"
+        isolation_id = str(isolation_id or "").strip()
+        if isolation_id and not re.fullmatch(r"EDR-ISO-[0-9]{5,12}", isolation_id):
+            return {"status": "error", "message": f"非法 isolation_id: {isolation_id}"}
+        isolation_id = isolation_id or f"EDR-ISO-{random.randint(10000, 99999)}"
         ok_families: set[str] = set()  # INPUT+OUTPUT 全部写成功的族
         written = 0                    # 成功写入的规则条数
+        commands: list[str] = []
         for norm_ip, family in targets:
             table = _table_for(family)
             chain_ok = True
             for chain, flag in (("INPUT", "-s"), ("OUTPUT", "-d")):
                 cmd = (f"{table} -I {chain} {flag} {norm_ip} -j DROP "
                        f"-m comment --comment '{isolation_id}'")
+                commands.append(cmd)
                 try:
                     self._exec(cmd)
                     written += 1
@@ -367,6 +436,7 @@ class SshFirewallAdapter:
             "families_missing": missing,
             "rule_ids": [isolation_id] if written else [],
             "isolation_id": isolation_id,
+            "commands": commands,
             "host": host,
             "ip": norm_host,
             "isolation_type": isolation_type,
@@ -390,7 +460,7 @@ class SshFirewallAdapter:
             }
         flags = {"fast": "-T4 -F", "full": "-A -T4", "custom": "-sV"}.get(scan_type, "-T4 -F")
         out = self._exec(f"nmap {flags} {target}", timeout=60)
-        open_ports = [l.strip() for l in out.splitlines() if "/tcp" in l and "open" in l]
+        open_ports = [ln.strip() for ln in out.splitlines() if "/tcp" in ln and "open" in ln]
         return {
             "status": "success",
             "device": "Linux-iptables-SSH",
@@ -502,7 +572,7 @@ class SshFirewallAdapter:
                     "domain": d, "marker_id": marker_id, "backend": "unconfigured",
                     "message": f"非法域名: {domain!r}"}
         if not _MARKER_RE.match(marker_id):
-            marker_id = f"SOC-SH-{hashlib.sha1(d.encode('ascii')).hexdigest()[:10].upper()}"
+            marker_id = f"SOC-SH-{hashlib.sha1(d.encode('ascii'), usedforsecurity=False).hexdigest()[:10].upper()}"
         # IP 规范化; v4-mapped IPv6 不能作真实 AAAA/主机条目, 只参与 IPv4 语义
         try:
             v4_norm = _normalize_ip(ipv4)[0] if ipv4 else ""
@@ -593,7 +663,7 @@ class SshFirewallAdapter:
                 return {"status": "error", "success": False, "mode": "invalid",
                         "domain": d, "marker_id": marker_id, "backend": "unconfigured",
                         "message": "缺少 marker_id 或 domain"}
-            marker_id = f"SOC-SH-{hashlib.sha1(d.encode('ascii')).hexdigest()[:10].upper()}"
+            marker_id = f"SOC-SH-{hashlib.sha1(d.encode('ascii'), usedforsecurity=False).hexdigest()[:10].upper()}"
         done: list[str] = []
         try:
             self._exec(self._sudo(f"sed -i '/{marker_id}/d' /etc/hosts"), skip_whitelist=True)
@@ -655,20 +725,16 @@ class SshFirewallAdapter:
     # ── 异步包装器（避免阻塞事件循环） ──
 
     async def async_connect(self) -> str:
-        import asyncio
         return await asyncio.to_thread(self.connect)
 
     async def async_block_ip(self, ip: str, duration: int = 3600) -> dict:
-        import asyncio
         return await asyncio.to_thread(self.block_ip, ip, duration)
 
     async def async_isolate_host(self, host: str, isolation_type: str = "network",
                                  extra_ips: Optional[list] = None) -> dict:
-        import asyncio
         return await asyncio.to_thread(self.isolate_host, host, isolation_type, extra_ips)
 
     async def async_vulnerability_scan(self, target: str, scan_type: str = "fast") -> dict:
-        import asyncio
         return await asyncio.to_thread(self.vulnerability_scan, target, scan_type)
 
 

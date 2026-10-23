@@ -157,7 +157,7 @@ class Chunker:
         self, events: list[dict], prefix: str, ip: str
     ) -> list[AuditChunk]:
         """按时间窗口切分（30分钟一个窗口）"""
-        from datetime import datetime, timedelta
+        from datetime import datetime
 
         chunks = []
         current_batch = []

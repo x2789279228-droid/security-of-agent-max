@@ -12,16 +12,17 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from config import settings
 from models import get_session, Conversation, SecurityEvent, Memory, MemoryTreeNode
 from sliding_window import sliding_window
-from memory_tree import memory_tree, MemoryTreeNode
+from memory_tree import memory_tree
 from context_stream import context_stream
-from event_bus import BOOT_TS, event_bus
+from event_bus import BOOT_TS, dedup_key, event_bus, hydrate_notice, render_sse, should_skip_live
+from event_replay import load_sse_replay, parse_refresh_ids, resolve_resume_cursor
 from agents import AgentA, AgentB, AgentC
 
 logger = logging.getLogger(__name__)
@@ -45,14 +46,15 @@ class ChatRequest(BaseModel):
 
 @router.get("/events/stream")
 async def events_stream(request: Request):
-    """SSE 实时事件流 — 推送安全事件、审计结果、响应动作
+    """SSE 实时事件流。
 
-    浏览器 EventSource 断线自动重连时会携带 Last-Event-ID 请求头，
-    此处先按序号补发历史中错过的事件再进入实时循环，消除断线窗口的数据空洞；
-    订阅队列先于历史快照建立，重复投递由客户端按 _seq 去重兜底。
+    存储决定安全事件是否存在，这里只负责提醒和断线补查。
+    先订阅并开始缓冲实时事件，再按 SecurityEvent.id 从数据库补查，
+    最后按事件 ID 丢掉补查与实时重叠的部分。
+    界面状态不写 SSE id 行，避免污染浏览器的 Last-Event-ID。
     """
-    q = event_bus.subscribe()
-    if q is None:
+    sub = event_bus.subscribe()
+    if sub is None:
         # 订阅槽满员：拒绝而非踢出老订阅者（踢出会造成客户端无法感知的僵尸流）
         return JSONResponse(
             status_code=503,
@@ -63,47 +65,86 @@ async def events_stream(request: Request):
                 "max": event_bus.max_subscribers,
             },
         )
-    # 浏览器自动重连经 Last-Event-ID 头携带断点；手动重建连接无法设头，允许用同名查询参数兜底
-    last_id_raw = (
-        request.headers.get("last-event-id")
-        or request.query_params.get("last_event_id")
-        or ""
+    # 浏览器自动重连会带 Last-Event-ID；手动重建用同名查询参数。两者都是业务游标时取较大值。
+    resume_from, cursor_note = resolve_resume_cursor(
+        request.headers.get("last-event-id"),
+        request.query_params.get("last_event_id"),
     )
-    resume_from = int(last_id_raw) if last_id_raw.isdigit() else 0
+    refresh_ids = parse_refresh_ids(request.query_params.get("refresh_ids"))
 
     async def generator():
+        sent: set[str] = set()
+        high_water = resume_from
         try:
-            missed = event_bus.recent(limit=200, since_seq=resume_from)
-            # complete=False 表示断点已超出服务端历史窗口（或服务端重启），客户端将标记数据空洞
-            no_history = event_bus.oldest_seq == 0
-            window_intact = event_bus.oldest_seq <= resume_from + 1
-            complete = resume_from == 0 or (len(missed) == 0 and no_history) or window_intact
+            try:
+                # 订阅已经建立。此后入库并 publish 的事件会留在 sub 里，补查不会把它漏掉。
+                missed, meta = await load_sse_replay(resume_from, refresh_ids)
+            except Exception as exc:
+                logger.warning("SSE replay from security_events failed: %s", exc)
+                missed, meta = [], {
+                    "complete": False,
+                    "cursor_reset": False,
+                    "max_event_id": None,
+                    "next_after_id": None,
+                    "db_error": True,
+                }
+            if cursor_note == "ignored":
+                meta["complete"] = False
+            try:
+                from core_metrics import inc_eventbus_catchup
+                inc_eventbus_catchup(len(missed))
+            except Exception:
+                pass
             yield {"event": "connected", "data": json.dumps({
                 "subscribers": event_bus.subscriber_count,
                 "server_time": time.time(),
                 "epoch": BOOT_TS,
-                "resumed": bool(resume_from),
+                "cursor_kind": "event_id",
+                "resumed": resume_from > 0,
+                "resume_from": resume_from,
                 "replayed": len(missed),
-                "complete": bool(complete),
+                "complete": bool(meta.get("complete")),
+                "cursor_reset": bool(meta.get("cursor_reset")),
+                "cursor_ignored": cursor_note == "ignored",
+                "max_event_id": meta.get("max_event_id"),
+                "next_after_id": meta.get("next_after_id"),
+                "db_error": bool(meta.get("db_error")),
             })}
             for item in missed:
-                yield {"event": item["event"], "id": str(item["seq"]), "data": item["data"]}
+                dedup = item.get("dedup")
+                if dedup:
+                    sent.add(dedup)
+                sse_id = item.get("id")
+                if sse_id is not None and str(sse_id).isdigit():
+                    high_water = max(high_water, int(sse_id))
+                frame = {"event": item["event"], "data": item["data"]}
+                if sse_id is not None:
+                    frame["id"] = str(sse_id)
+                yield frame
             while True:
                 try:
-                    # ping 周期 15s：既保活，又让客户端能通过 id 行(last_seq)检测
-                    # "订阅被挤出"型僵尸流（连接存活但收不到数据）
-                    evt = await asyncio.wait_for(q.get(), timeout=15)
-                    if evt.seq <= resume_from:
+                    evt = await asyncio.wait_for(sub.get(), timeout=15)
+                    if should_skip_live(evt, resume_from, sent):
                         continue
-                    yield evt.to_sse()
+                    evt = await hydrate_notice(evt)
+                    sent.add(dedup_key(evt))
+                    frame, high_water = render_sse(evt, high_water)
+                    yield frame
                 except asyncio.TimeoutError:
+                    # ping 不写 id 行。缺口在载荷里，客户端据此重连续传，而不是比较内存 seq。
                     yield {
                         "event": "ping",
-                        "id": str(event_bus.last_seq),
-                        "data": json.dumps({"ts": time.time()}),
+                        "data": json.dumps({
+                            "ts": time.time(),
+                            "epoch": BOOT_TS,
+                            "cursor_kind": "event_id",
+                            "missed_critical": sub.missed_critical,
+                            "critical_lost": sub.critical_lost,
+                            "refresh_ids": list(sub.gap_ids),
+                        }),
                     }
         finally:
-            event_bus.unsubscribe(q)
+            event_bus.unsubscribe(sub)
 
     return EventSourceResponse(generator())
 
@@ -112,7 +153,7 @@ async def events_recent(
     limit: int = Query(50, ge=1, le=200),
     since_seq: int = Query(0, ge=0),
 ):
-    """获取最近的实时事件（用于页面刷新后恢复/断线回放），按 seq 升序"""
+    """内存诊断窗口（进程内 seq）。安全事件补查使用 /logs/events?after_id=。"""
     return event_bus.recent(limit, since_seq=since_seq)
 
 

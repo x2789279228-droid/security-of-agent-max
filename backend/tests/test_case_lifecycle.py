@@ -271,14 +271,34 @@ class TestRuleManager:
         assert self.rm.get_rule("sigma", "SIG-DEL-001") is None
 
     def test_update_response_policy(self):
+        # 2026-10-03 修正(经精确复现确认)。
+        #   policy_store.update_policy("C2通信自动封禁", ...) 在本上下文中【成功】，
+        #   因此走的是 rule_manager.py:216 的 YAML 分支，version_data["content"]
+        #   是 YAML 内容: 有嵌套的 match:{threat_type,min_confidence,min_severity}，
+        #   没有平铺的 min_confidence 键。
+        #   原用例传平铺 {"min_confidence": 0.8} 并断言 content["min_confidence"]，
+        #   必然 KeyError —— 且 update_policy 返回 success=True 却什么都没改。
+        #   改为使用真实 schema，并取一个与现值不同的值，使断言真正有意义。
+        #
         result = self.rm.update_rule("response_policy", "C2通信自动封禁", {
-            "min_confidence": 0.8,
+            "match": {"min_confidence": 0.9},
         }, change_summary="提高置信度阈值")
         assert result["success"] is True
-        assert result["version_data"]["content"]["min_confidence"] == 0.8
+        content = result["version_data"]["content"]
+        assert content["match"]["min_confidence"] == 0.9, \
+            f"更新未落到 match.min_confidence: {content.get('match')}"
+
+        bad = self.rm.update_rule("response_policy", "C2通信自动封禁", {
+            "confidence": 0.95,
+        }, change_summary="错误字段名")
+        assert bad["success"] is False
+        assert "不支持的字段" in bad["error"]
+        assert "confidence" in bad["error"]
 
         # 恢复
-        self.rm.update_rule("response_policy", "C2通信自动封禁", {"min_confidence": 0.6})
+        self.rm.update_rule("response_policy", "C2通信自动封禁", {
+            "match": {"min_confidence": 0.8},
+        })
 
 
 # ════════════════════════════════════════════

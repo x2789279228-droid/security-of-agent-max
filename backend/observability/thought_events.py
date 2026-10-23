@@ -415,7 +415,17 @@ def emit_plan(decomp_output: Optional[dict], **ids_kw: Any) -> list[dict]:
         ),
         "status": "success" if sub_tasks else "abstain",
         "parent_ids": parent,
-        "metrics": {"sub_tasks": len(sub_tasks), "mode": decomp_output.get("mode") or ""},
+        "metrics": {
+            "sub_tasks": len(sub_tasks),
+            "mode": decomp_output.get("mode") or "",
+            # P3-6: Decomposer 因参数上界做过裁剪时，这里是它唯一的出口。
+            # 修复前截断只写在返回 dict 里，而本函数只挑上面这几个固定字段，
+            # 于是那条记录下游一个消费者都读不到 —— 与「只打日志」无异。
+            # compact_step 保留 metrics（本函数只用 3 个，远未到 8 个上限），
+            # 所以它会随思维链缓冲与 SSE 一起落到运维面。
+            # 恒定写入（空列表）而非仅在非空时写：消费者拿到 [] 比 None 更不容易判错。
+            "param_truncations": decomp_output.get("param_truncations") or [],
+        },
     }
     return publish_thought_batch([step], stage="decomposer")
 

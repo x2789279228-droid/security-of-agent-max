@@ -3,11 +3,11 @@
  *
  * 模块级单例 EventSource + zustand store：
  * - 覆盖后端全部 8 类事件（旧实现只监听 3 类，alert/pipeline_health 等被静默丢弃）
- * - 断线续传：浏览器自动重连时原生携带 Last-Event-ID；手动重建时改走
- *   ?last_event_id= 查询参数；服务端按序号补发，客户端以 seq 去重兜底
- * - 服务端重启识别（epoch 变化）与历史窗口溢出识别（complete=false）
- *   分别插入合成标记行，保证"过程可解释"
- * - 心跳保活监测：SSE 通道静默超过阈值强制重连（服务端订阅槽满员时会静默移除最老订阅者）
+ * - 断线续传：业务游标是 SecurityEvent.id。手动重建走 ?last_event_id=。
+ *   浏览器自动重连还会带 Last-Event-ID。界面状态不写 id 行，避免污染这个游标。
+ * - 服务端重启（epoch 变化）只作废界面状态的去重表，业务游标保留。
+ *   complete=false / cursor_reset 插入空洞标记。critical 队列缺口由 ping 的
+ *   missed_critical 触发重连，不再拿内存 seq 做僵尸判断。
  */
 import { useEffect } from 'react'
 import { create } from 'zustand'
@@ -17,7 +17,8 @@ export type StreamStatus = 'idle' | 'connecting' | 'online' | 'reconnecting' | '
 
 export interface StreamEvent {
   id: number              // 本地渲染自增
-  seq: number             // 服务端全局序号（_seq / SSE id 行），0 表示无序号或合成标记
+  seq: number             // 业务游标 SecurityEvent.id；界面状态和合成标记为 0
+  dedupKey?: string
   kind: 'event' | 'gap' | 'restart'
   type: string            // 业务事件类型；合成标记为 __gap__ / __restart__
   data: any
@@ -33,6 +34,7 @@ export const EVENT_META: Record<string, { label: string; badge: string }> = {
   agent_stage:               { label: 'Agent 阶段', badge: 'border border-hui/45 bg-hui/10 text-hui' },
   agent_thought:             { label: '思维步骤', badge: 'border border-line bg-mist text-ink-faint' },
   audit_complete:            { label: '审计完成', badge: 'border border-accent/35 bg-accent/5 text-accent' },
+  audit_degraded:            { label: '审计降级', badge: 'border border-warn/45 bg-warn/10 text-warn' },
   response_action:           { label: '响应执行', badge: 'border border-warn/45 bg-warn/10 text-warn' },
   pipeline_health:           { label: '管道健康', badge: 'border border-hui/35 bg-hui/5 text-hui' },
   edr_correlation:           { label: 'EDR关联', badge: 'border border-dan/60 bg-transparent text-ink-soft' },
@@ -55,12 +57,13 @@ export const SEVERITY_META: Record<string, { label: string; chip: string; bar: s
 }
 export function severityOf(type: string, data: any): keyof typeof SEVERITY_META {
   const s = String(data?.severity ?? '').toLowerCase()
-  return s in SEVERITY_META ? (s as keyof typeof SEVERITY_META)
-    : type === 'alert' ? 'high'
-    : type === 'tool_anomaly' ? 'high'
-    : type === 'pipeline_health' ? 'medium'
-    : type === 'agent_stage' && (data?.status === 'error' || data?.status === 'timeout') ? 'high'
-    : 'info'
+  if (s in SEVERITY_META) return s as keyof typeof SEVERITY_META
+  const subtype = String(data?.type ?? '').toLowerCase()
+  if (type === 'pipeline_health' && (subtype === 'sla_breach' || subtype === 'alert')) return 'high'
+  if (type === 'alert' || type === 'tool_anomaly') return 'high'
+  if (type === 'pipeline_health') return 'medium'
+  if (type === 'agent_stage' && (data?.status === 'error' || data?.status === 'timeout')) return 'high'
+  return 'info'
 }
 
 // ── store ──
@@ -102,18 +105,37 @@ let watchdogTimer: ReturnType<typeof setInterval> | undefined
 let localId = 0
 let errStreak = 0
 let lastActivityTs = 0
-let knownMaxSeq: number | null = null   // 已见最大服务端 seq（手动重连断点）
+const CURSOR_STORAGE_KEY = 'soc_event_cursor'
+
+function readStoredCursor(): number | null {
+  try {
+    const n = Number(sessionStorage.getItem(CURSOR_STORAGE_KEY))
+    return Number.isFinite(n) && n > 0 ? n : null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredCursor(id: number) {
+  try { sessionStorage.setItem(CURSOR_STORAGE_KEY, String(id)) } catch { /* 隐私模式忽略 */ }
+}
+
+let knownEventId: number | null = readStoredCursor()  // SecurityEvent.id，刷新页面后仍用于补查
 let storedEpoch: number | null = null   // 服务端进程纪元
 let replayDebt = 0                      // 服务端宣告的本轮回放条数，随到达递减
 let lastAutoRetryTs = 0                 // 最近一次针对终态的自动重建时刻
-let pingStall = 0                       // 服务端 seq 持续前进而本地无新事件的 ping 计数
-const seenSeqs = new Set<number>()
+let lastGapReconnectTs = 0              // critical 缺口触发的重连，避免紧接着再连一次
+let lastMissedCritical = 0
+let lastCriticalLost = 0
+let pendingRefreshIds: number[] = []
+let replayPages = 0
+let continueAfterReplay = false
+const seenKeys = new Set<string>()
 const arrivalTimes: number[] = []       // 最近实到时刻，供速率直方图采样
 
 const IDLE_GRACE_MS = 10_000            // 页面离开后保留连接的宽限期
 const SILENT_RESTART_MS = 25_000        // 完全静默（连 ping 都没有）的兜底重连阈值；须大于 ping 周期(15s)
-const PING_STALL_LIMIT = 2              // 连续 N 个 ping 显示服务端 seq 前进而本地未收到 → 订阅已被挤出（僵尸流）
-const PING_GAP_LIMIT = 20              // ping 的 seq 与本地已见 seq 差距过大 → 直接判定被挤出
+const GAP_RECONNECT_COOLDOWN_MS = 3_000
 
 function bumpActivity() {
   lastActivityTs = Date.now()
@@ -148,7 +170,7 @@ function flushBatch() {
   while (buffer.length > BUFFER_MAX) {
     const dropped = buffer.pop()
     if (dropped) {
-      if (dropped.seq > 0) seenSeqs.delete(dropped.seq)
+      if (dropped.dedupKey) seenKeys.delete(dropped.dedupKey)
       if (dropped.kind === 'event') {
         const n = (counts[dropped.type] ?? 0) - 1
         if (n > 0) counts[dropped.type] = n
@@ -182,17 +204,54 @@ function insertMarker(kind: 'gap' | 'restart') {
   enqueue({ id: localId, seq: 0, kind, type: kind === 'gap' ? '__gap__' : '__restart__', data: {}, ts: Date.now() })
 }
 
+function cursorOf(type: string, data: any, lastEventId: string): { key: string; eventId: number } {
+  if (data?._cursor_kind === 'epoch_seq') {
+    const ephemeral = String(data?._ephemeral_id || lastEventId || '')
+    return { key: ephemeral ? `p:${ephemeral}` : '', eventId: 0 }
+  }
+  if (data?._cursor_kind === 'event_id') {
+    const eid = Number(data?._event_id ?? data?.event_id)
+    if (Number.isFinite(eid) && eid > 0) return { key: `e:${type}:${eid}`, eventId: eid }
+  }
+  // 旧服务端没有 cursor_kind：整数 id 仍按业务游标处理。
+  const legacy = Number(lastEventId) || Number(data?._event_id) || 0
+  if (data?._cursor_kind == null && Number.isFinite(legacy) && legacy > 0) {
+    return { key: `e:${type}:${legacy}`, eventId: legacy }
+  }
+  return { key: '', eventId: 0 }
+}
+
+function patchExisting(key: string, data: any, ts: number) {
+  const pendingIdx = pendingBatch.findIndex((e) => e.dedupKey === key)
+  if (pendingIdx >= 0) {
+    pendingBatch[pendingIdx] = { ...pendingBatch[pendingIdx], data, ts }
+    return
+  }
+  const st = useEventStreamStore.getState()
+  const idx = st.buffer.findIndex((e) => e.dedupKey === key)
+  if (idx < 0) return
+  const buffer = st.buffer.slice()
+  buffer[idx] = { ...buffer[idx], data, ts }
+  useEventStreamStore.setState({ buffer })
+}
+
 function ingestEvent(
   type: string,
   data: any,
-  seq: number,
+  lastEventId: string,
   rawTs: unknown,
   opts: { replay?: boolean } = {},
 ) {
-  if (seq > 0) {
-    if (seenSeqs.has(seq)) return // 补发与实时竞态的重复投递
-    seenSeqs.add(seq)
-    if (knownMaxSeq === null || seq > knownMaxSeq) knownMaxSeq = seq
+  const { key, eventId } = cursorOf(type, data, lastEventId)
+  const refresh = Boolean(data?._refresh)
+  if (key && seenKeys.has(key)) {
+    if (refresh || data?._replay) patchExisting(key, data, typeof rawTs === 'number' ? Math.round(rawTs * 1000) : Date.now())
+    return
+  }
+  if (key) seenKeys.add(key)
+  if (eventId > 0 && (knownEventId === null || eventId > knownEventId)) {
+    knownEventId = eventId
+    writeStoredCursor(eventId)
   }
   const ts = typeof rawTs === 'number' ? Math.round(rawTs * 1000) : Date.now()
   if (!opts.replay) {
@@ -200,7 +259,7 @@ function ingestEvent(
     while (arrivalTimes.length && arrivalTimes[0] < ts - 70_000) arrivalTimes.shift()
   }
   localId += 1
-  enqueue({ id: localId, seq, kind: 'event', type, data, ts, replay: !!opts.replay })
+  enqueue({ id: localId, seq: eventId, dedupKey: key || undefined, kind: 'event', type, data, ts, replay: !!opts.replay })
 }
 
 function parsePayload(raw: string): any | null {
@@ -213,15 +272,46 @@ function handleConnected(raw: string) {
   const st = useEventStreamStore.getState()
   if (typeof payload.epoch === 'number') {
     if (storedEpoch !== null && storedEpoch !== payload.epoch) {
-      // 服务端重启：seq 从头计数，作废本地断点与去重表
+      // 进程重启只作废界面状态的去重键。SecurityEvent.id 跨重启仍然有效。
       insertMarker('restart')
-      seenSeqs.clear()
-      knownMaxSeq = null
+      for (const key of [...seenKeys]) {
+        if (key.startsWith('p:')) seenKeys.delete(key)
+      }
     }
     storedEpoch = payload.epoch
   }
-  if (payload.resumed && payload.complete === false) insertMarker('gap')
-  replayDebt = typeof payload.replayed === 'number' ? Math.max(0, payload.replayed) : 0
+  const replayed = typeof payload.replayed === 'number' ? Math.max(0, payload.replayed) : 0
+  const canPage = (
+    payload.complete === false
+    && !payload.cursor_reset
+    && !payload.db_error
+    && !payload.cursor_ignored
+    && replayed > 0
+    && typeof payload.next_after_id === 'number'
+    && replayPages < 8
+  )
+  if (payload.cursor_reset) {
+    insertMarker('gap')
+    if (typeof payload.max_event_id === 'number' && payload.max_event_id >= 0) {
+      knownEventId = payload.max_event_id
+      writeStoredCursor(payload.max_event_id)
+    }
+    continueAfterReplay = false
+    replayPages = 0
+  } else if (canPage) {
+    continueAfterReplay = true
+    replayPages += 1
+  } else if (payload.complete === false || payload.cursor_ignored) {
+    insertMarker('gap')
+    continueAfterReplay = false
+    replayPages = 0
+  } else {
+    continueAfterReplay = false
+    replayPages = 0
+  }
+  replayDebt = replayed
+  lastMissedCritical = 0
+  lastCriticalLost = 0
   useEventStreamStore.setState({
     status: 'online',
     subscribers: typeof payload.subscribers === 'number' ? payload.subscribers : st.subscribers,
@@ -229,46 +319,46 @@ function handleConnected(raw: string) {
     reconnects: errStreak > 0 ? st.reconnects + 1 : st.reconnects,
   })
   errStreak = 0
-  pingStall = 0
+}
+
+function maybeContinueReplay() {
+  if (replayDebt > 0 || !continueAfterReplay) return
+  continueAfterReplay = false
+  streamReconnect()
 }
 
 function handleNamedMessage(type: string, raw: string, lastEventId: string) {
   bumpActivity()
   const data = parsePayload(raw)
-  if (!data) return
-  const seqRaw = Number(lastEventId) || Number(data._seq) || 0
   const isReplay = replayDebt > 0
   if (isReplay) replayDebt -= 1
-  ingestEvent(type, data, seqRaw, data._ts, { replay: isReplay })
+  if (data) ingestEvent(type, data, lastEventId, data._ts, { replay: isReplay })
+  maybeContinueReplay()
 }
 
-function handlePing(lastEventId: string) {
+function handlePing(raw: string) {
   bumpActivity()
-  // 僵尸流检测：服务端 ping 的 id 行携带其当前 last_seq。若它持续大于
-  // 本地已见 seq，说明服务端有数据而我们收不到 —— 订阅已被挤出
-  // （满员淘汰/队列溢出），此时 SSE 连接仍存活、ping 正常到达，
-  // 静默看门狗永远不会触发，必须主动重建连接。
-  const seq = Number(lastEventId) || 0
-  if (seq > 0 && knownMaxSeq !== null && seq > knownMaxSeq) {
-    if (seq - knownMaxSeq >= PING_GAP_LIMIT) {
-      // 服务端 seq 已大幅领先：在途积压不可能这么大，立即重建
-      pingStall = 0
-      streamReconnect()
-      return
-    }
-    pingStall += 1
-    if (pingStall >= PING_STALL_LIMIT) {
-      pingStall = 0
-      streamReconnect()
-    }
-  } else {
-    pingStall = 0
-  }
+  // critical 队列满时服务端不丢已入队告警，而是在 ping 里报告缺口。
+  // 这里重连并把 refresh_ids 交回去，由数据库补查，不比较内存 seq。
+  const payload = parsePayload(raw) ?? {}
+  const missed = Number(payload.missed_critical) || 0
+  const lost = Number(payload.critical_lost) || 0
+  if (missed <= lastMissedCritical && lost <= lastCriticalLost) return
+  if (Date.now() - lastGapReconnectTs < GAP_RECONNECT_COOLDOWN_MS) return
+  lastMissedCritical = missed
+  lastCriticalLost = lost
+  lastGapReconnectTs = Date.now()
+  if (lost > 0) insertMarker('gap')
+  const ids = Array.isArray(payload.refresh_ids) ? payload.refresh_ids : []
+  pendingRefreshIds = ids.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n) && n > 0).slice(0, 32)
+  streamReconnect()
 }
 
 function openStream() {
   if (es) return
-  const source = api.eventsStream(knownMaxSeq ?? undefined)
+  const refresh = pendingRefreshIds
+  pendingRefreshIds = []
+  const source = api.eventsStream(knownEventId ?? undefined, refresh)
   if (!source) {
     // 未登录(无 token):不建连,交给认证流程引导登录页
     errStreak += 1
@@ -279,7 +369,7 @@ function openStream() {
   useEventStreamStore.setState({ status: 'connecting' })
 
   source.addEventListener('connected', (e: MessageEvent) => handleConnected(e.data))
-  source.addEventListener('ping', (e: MessageEvent) => handlePing((e as MessageEvent).lastEventId))
+  source.addEventListener('ping', (e: MessageEvent) => handlePing(e.data))
   for (const type of TYPE_KEYS) {
     source.addEventListener(type, (e: MessageEvent) =>
       handleNamedMessage(type, e.data, (e as MessageEvent).lastEventId),
@@ -335,7 +425,6 @@ function closeStream() {
 export function streamReconnect() {
   if (es) { es.close(); es = null }
   errStreak = 0
-  pingStall = 0
   lastActivityTs = 0
   openStream()
 }
@@ -344,7 +433,7 @@ export function streamClear() {
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = undefined }
   pendingBatch.length = 0
   const st = useEventStreamStore.getState()
-  for (const e of st.buffer) if (e.seq > 0) seenSeqs.delete(e.seq)
+  for (const e of st.buffer) if (e.dedupKey) seenKeys.delete(e.dedupKey)
   useEventStreamStore.setState({ buffer: [], overflow: 0, typeCounts: {} })
 }
 

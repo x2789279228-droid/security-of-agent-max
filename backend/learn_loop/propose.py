@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 
-from learn_loop.types import AUTO_APPLY_TYPES, LLM_PREFIX
+from learn_loop.types import LLM_PREFIX
 
 logger = logging.getLogger(__name__)
 

@@ -75,7 +75,7 @@ def _evt(event: str, severity: str, src: str, dst: str, message: str,
 
 
 def gen_c2_beacons(n_events: int) -> list[dict]:
-    """C2 回连: 3 台失陷内网主机 → 3 个外部 C2, �台 30 条时序。
+    """C2 回连: 3 台失陷内网主机 → 3 个外部 C2, 每台 30 条时序。
 
     Reviewer 此前拒绝的理由是 "该 IP 24h 仅 1 条事件却声称 60s beacon" —
     现在每台主机有 30 条连续 beacon, dst 为外部公网 C2 (非 loopback),

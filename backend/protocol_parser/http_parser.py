@@ -10,7 +10,10 @@ http_parser.py — HTTP 请求/响应语义解析
 """
 import logging
 import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:  # only for annotations; ProtocolMessage is imported lazily at runtime
+    from protocol_parser.dissector import ProtocolMessage
 from urllib.parse import urlparse, parse_qs
 
 logger = logging.getLogger(__name__)
@@ -32,7 +35,6 @@ class HttpParser:
     """HTTP 协议解析器"""
 
     def parse(self, pkt) -> Optional["ProtocolMessage"]:
-        from protocol_parser.dissector import ProtocolMessage
 
         payload = pkt.payload
         if not payload:

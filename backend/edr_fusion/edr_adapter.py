@@ -20,7 +20,6 @@ edr_adapter.py — EDR 数据接入适配器
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,7 +102,7 @@ class EdrAdapter:
             # 自动识别来源
             if source_type == "auto":
                 if "EventID" in event_dict or "event_id" in event_dict:
-                    eid = event_dict.get("EventID", event_dict.get("event_id", 0))
+                    event_dict.get("EventID", event_dict.get("event_id", 0))
                     # Sysmon 通常有 Sysmon 特定字段
                     if "EventData" in event_dict:
                         ed = event_dict["EventData"]

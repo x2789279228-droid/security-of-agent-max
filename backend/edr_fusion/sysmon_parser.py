@@ -29,7 +29,9 @@ sysmon_parser.py — Sysmon 事件解析
 """
 import logging
 import re
-import xml.etree.ElementTree as ET
+# defusedxml: EDR 事件 XML 属不可信输入, 必须禁用实体展开(XXE 防护);
+# API 与 ElementTree 完全兼容 (2026-10-23 bandit B314 加固)
+import defusedxml.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional
 

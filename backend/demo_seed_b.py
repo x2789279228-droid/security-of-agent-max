@@ -11,7 +11,6 @@ demo_seed_b — B 类高级能力演示数据注入(离线)
 用法(在 backend 目录):
     python -m tools.demo_seed_b          # 或 python ../环境测试/demo_seed_b.py
 """
-import asyncio
 import os
 import sys
 

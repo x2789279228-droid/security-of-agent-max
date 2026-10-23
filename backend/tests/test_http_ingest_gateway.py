@@ -57,6 +57,29 @@ def test_ingest_202_queued_and_no_session(monkeypatch, client):
     # sanitize 仍然生效
     assert captured[0]["api_key"] == ""
     assert captured[0]["events"][0]["message"] == "hi"
+    assert captured[0]["events"][0]["eventId"]
+    assert body["eventId"] == captured[0]["events"][0]["eventId"]
+
+
+def test_ingest_202_preserves_client_event_id(monkeypatch, client):
+    captured = []
+
+    async def fake_enqueue(session_id, api_key, events):
+        captured.append(list(events))
+        return len(events)
+
+    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
+    monkeypatch.setattr(models, "get_session", _no_get_session)
+
+    eid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    resp = client.post("/api/logs/ingest", json={
+        "message": {"event": "BRUTE_FORCE", "eventId": eid, "severity": "high"},
+        "session_id": "s-keep",
+    })
+    assert resp.status_code == 202
+    assert resp.json()["eventId"] == eid
+    assert captured[0][0]["eventId"] == eid
 
 
 def test_batch_202_forwards_api_key(monkeypatch, client):
@@ -101,6 +124,64 @@ def test_batch_202_without_api_key_header(monkeypatch, client):
 
     assert resp.status_code == 202
     assert captured[0]["api_key"] == ""
+
+
+def test_batch_207_when_kafka_partially_acks(monkeypatch, client):
+    async def fake_enqueue(session_id, api_key, events):
+        return 2
+
+    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
+    monkeypatch.setattr(models, "get_session", _no_get_session)
+
+    resp = client.post(
+        "/api/logs/ingest/batch",
+        json={"logs": [{"event": "A"}, {"event": "B"}, {"event": "C"}], "session_id": "sp"},
+    )
+    assert resp.status_code == 207
+    body = resp.json()
+    assert body["status"] == "partial"
+    assert body["produced"] == 2
+    assert body["failed"] == 1
+    assert body["count"] == 3
+
+
+def test_ingest_503_when_kafka_does_not_ack(monkeypatch, client):
+    async def fake_enqueue(session_id, api_key, events):
+        return 0
+
+    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
+    monkeypatch.setattr(models, "get_session", _no_get_session)
+
+    resp = client.post("/api/logs/ingest", json={
+        "message": {"event": "BRUTE_FORCE", "severity": "high"},
+        "session_id": "s-partial",
+    })
+    assert resp.status_code == 503
+    assert resp.json()["status"] == "not_durable"
+    assert resp.json()["produced"] == 0
+
+
+def test_ingest_503_while_draining(monkeypatch, client):
+    from drain import drain
+
+    async def fake_enqueue(session_id, api_key, events):
+        raise AssertionError("draining 时不得再写入 Kafka")
+
+    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
+    monkeypatch.setattr(models, "get_session", _no_get_session)
+    drain.begin()
+    try:
+        resp = client.post("/api/logs/ingest", json={
+            "message": {"event": "BRUTE_FORCE"},
+            "session_id": "s-drain",
+        })
+    finally:
+        drain.reset()
+    assert resp.status_code == 503
+    assert resp.json()["status"] == "draining"
 
 
 def test_ingest_falls_back_to_sync_200(monkeypatch, client):

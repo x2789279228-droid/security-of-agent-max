@@ -16,7 +16,7 @@ seasonal.py — 时间序列季节性分解与异常检测
 import logging
 import math
 import time
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)

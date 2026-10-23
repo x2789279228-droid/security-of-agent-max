@@ -22,7 +22,6 @@
 """
 import json
 import logging
-from typing import Optional
 
 from summary_compression import summary
 from audit_types import (
@@ -60,8 +59,8 @@ class Reviewer:
             FinalVerdict
         """
         depth = decomposer_output.get("audit_depth", AUDIT_DEPTH_STANDARD)
-        sub_tasks = decomposer_output.get("sub_tasks", [])
-        llm_analysis = decomposer_output.get("llm_analysis", "")
+        decomposer_output.get("sub_tasks", [])
+        decomposer_output.get("llm_analysis", "")
 
         from veto_gates import (
             should_run_llm_reviewer,

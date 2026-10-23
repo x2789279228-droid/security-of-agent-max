@@ -32,7 +32,7 @@ tls_risk_*                       # 证书/JA3 风险权重
 
 **生产化前提**：
 - 宿主机 **root 抓包权限** + `scapy`（依赖列表已含）。
-- 可选增强：`af_packet`/`dpdk` 后端、`mitm_proxy`（透明解密，需部署自签 CA 到终端信任链）——二者的 `run()` 均为占位/脚本生成，属可选高性能路径，非必需。
+- 可选增强：`af_packet`/`dpdk` 后端（⚠ 二者在 `capture_engine.py` 里确为**占位实现**，只 `sleep` 不摄入包）、`mitm_proxy`（⚠ **不是占位** —— `start()` 真的拉起 `mitmdump` 子进程，但它**在生产里零导入方**，所以 `mitm_enabled=true` 什么也不会发生；需另部署自签 CA 到终端信任链）。属可选高性能路径，非必需。
 
 **离线验证**：`python -m pytest tests/test_inc_ndr.py`（JA3 计算/GREASE 过滤、TLS 风险评分、证书自签判定）。
 
@@ -59,25 +59,43 @@ sysmon_kafka_topic / winevent_kafka_topic   # Kafka 消费 topic
 
 ## 3. 威胁情报（MISP / TAXII / IOC）
 
-**代码位置**：`threat_intel/`（stix_taxii 客户端、ioc_matcher、reputation、intel_enricher、llm_context）。
+> ⚠ **本节描述的拉取链路当前在生产里未接线，且缺一环。**
+> 详见 `backend/DETECTION_ENGINE_REMEDIATION_REPORT.md` §7.1.8。
+>
+> - `TaxiiClient.poll_feed` 在生产代码里**零调用方**；
+> - `poll_feed` **只返回 list、不落库** —— 即使接线，
+>   `ioc_matcher` 读到的 `threat_iocs` 表仍是空的，**匹配一次都不会命中**；
+> - `intel_poll_interval` 这个配置项**全仓没有任何代码读它**（没有轮询调度器）。
+>
+> `ioc_matcher` 本身是接线的（`app.py` 在 `intel_enabled=true` 时加载），
+> 它从 `threat_iocs` 表读 IOC —— 但那张表目前**没有任何写入方**。
+>
+> 也就是说：配置下面的 `intel_enabled` / `misp_*` / `taxii_*`，
+> 目前只影响「IOC 匹配器是否加载」，不影响任何情报的获取。
 
-**对接方式**：`TaxiiClient.poll_feed(feed_config)` 拉取 IOC——支持
+**代码位置**：`threat_intel/`（stix_taxii 客户端⚠未接线、ioc_matcher、reputation、intel_enricher⚠未接线、llm_context⚠未接线）。
+
+**对接方式**（⚠ 以下是**设计意图**，当前未接线）：`TaxiiClient.poll_feed(feed_config)` 拉取 IOC——支持
 - **TAXII 2.1**：`feed_type=taxii`, `url`, `collection`
 - **MISP REST**：`feed_type=misp`, `url`, `api_key`
 
-拉取结果可写入 DB / 供 `ioc_matcher` 做事件 IOC 匹配。
+拉取结果目前**只返回、不持久化**；落库这一环尚不存在，
+所以「供 `ioc_matcher` 做事件 IOC 匹配」这条链路目前是断的。
 
 **配置**：
 ```
-intel_enabled=true
+intel_enabled=true            # 只控制是否加载 ioc_matcher，不驱动任何拉取
 misp_url / misp_api_key / misp_verify_ssl
 taxii_url / taxii_user / taxii_password
-intel_poll_interval=60          # 拉取间隔(分钟)
+intel_poll_interval=60        # ⚠ 当前无任何代码读取（没有轮询调度器）
 ```
 
-**生产化前提**：可访问的 MISP/TAXII 服务器（外网或内网情报源），含凭据。
+**生产化前提**：① 可访问的 MISP/TAXII 服务器（外网或内网情报源），含凭据；
+② **先补上落库环节**（谁写 `threat_iocs`、重复 IOC 如何 upsert、
+`is_active`/`expires_at` 谁维护）—— 这一条比①更要紧，缺了它前面都白搭。
 
 **离线验证**：`python -m pytest tests/test_inc_threat_intel.py`（mock TAXII/MISP 拉取、IOC matcher 命中）。
+⚠ 注意它验证的是**各环节单独可用**，不验证「拉取 → 落库 → 匹配」串起来跑得通。
 
 ---
 

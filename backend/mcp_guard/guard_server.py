@@ -28,11 +28,13 @@ from .permission_manager import PermissionManager
 from .validator import ParamValidator
 from .policy_engine import PolicyEngine
 from .call_logger import CallLogger
-from .behavior_detector import BehaviorDetector
+from .behavior_detector import BehaviorDetector, DECISION_RANK, escalate_decision
 from .call_record import ToolCallRecord
 from .approval_queue import ApprovalQueue
 
-_DECISION_RANK = {"allow": 0, "require_confirmation": 1, "deny": 2}
+# P3-1: 升级规则已收敛到 behavior_detector.escalate_decision（唯一来源）。
+# 这里保留别名只为兼容既有引用，**不要再在本文件里另写一份判定**。
+_DECISION_RANK = DECISION_RANK
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +115,6 @@ class McpGuardServer:
         }
         """
         checks = []
-        exec_result = None
 
         # ===== 第1层：工具注册检查（防幻觉工具） =====
         tool_info = self.registry.get_tool(request.tool_name)
@@ -239,20 +240,22 @@ class McpGuardServer:
 
     def _apply_enforcement(self, request: ToolCallRequest, decision: GuardDecision,
                            rec: ToolCallRecord, report) -> None:
-        """按 report.action 升级决策（只升不降）。shadow / 故障不改。"""
-        if report is None or report.action in (None, "logged"):
-            return
-        desired = "deny" if report.action == "deny" else "require_confirmation"
-        if _DECISION_RANK[desired] <= _DECISION_RANK.get(decision.status, 0):
-            return
+        """按 report.action 升级决策（只升不降）。shadow / 故障不改。
+
+        P3-1: 判定逻辑已收敛到 behavior_detector.escalate_decision，
+        与 tool_registry._pre_execute_check 共用同一份规则。
+        修复前本方法内联了这份规则，而审计工具侧根本没有对应的执行点 ——
+        于是 tool_signature_mode=deny 只对本文件负责的响应侧工具生效。
+        """
         before = decision.status
-        decision.status = desired
-        decision.reason = "behavior_signature: " + (
-            "; ".join(report.reasons[:3]) or f"score={report.anomaly_score}"
-        )
-        rec.decision = desired
-        rec.reason = decision.reason
-        self._audit_veto(request, rec, before, desired, report)
+        after, reason = escalate_decision(before, report)
+        if after == before:
+            return
+        decision.status = after
+        decision.reason = reason
+        rec.decision = after
+        rec.reason = reason
+        self._audit_veto(request, rec, before, after, report)
 
     def _enqueue_approval(self, request: ToolCallRequest, decision: GuardDecision,
                           rec: ToolCallRecord, report) -> dict:

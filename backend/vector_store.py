@@ -1,16 +1,15 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from pgvector.sqlalchemy import Vector
 
 from models import Memory
 from config import settings
+from summary_compression import is_degraded_vector
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +113,15 @@ class VectorStore:
                     "refusing write (set embedding=None)"
                 )
                 embedding = None
+            elif is_degraded_vector(embedding):
+                # 2026-10-20 修复（整改报告 §9.50）：embedding 失败时客户端返回
+                # **维度正确但内容全零**的向量 —— 维度护栏拦不住它，
+                # 于是一条「没算出来」的降级产物被当成「算出来了」存进库。
+                logger.error(
+                    "[Memory] embedding 是降级产物(全零向量) —— refusing write "
+                    "(set embedding=None)"
+                )
+                embedding = None
 
         meta = dict(metadata or {})
         digest = content_hash(content)
@@ -185,6 +193,16 @@ class VectorStore:
     ) -> list[Memory]:
         if min_score is None:
             min_score = settings.vector_search_threshold
+        if is_degraded_vector(query_embedding):
+            # 2026-10-20 修复（整改报告 §9.50）：查询向量是降级产物(全零)时，
+            # 所有余弦相似度恒为 0 → 阈值过滤后必然为空 → 而兜底逻辑
+            # `filtered if filtered else rows[:1]` 会返回**任意一条**记录，
+            # 被上层当成「相关记忆」交给 LLM —— 那是一条与查询**毫无关系**的记忆。
+            # 这里直接返回空：检索**不可用**必须表现为空，而不是冒充命中。
+            logger.warning(
+                "[Memory] 查询向量是降级产物(全零向量) → 检索不可用, 返回空结果"
+            )
+            return []
         hits = await self._search_qdrant(query_embedding, agent_id, top_k, min_score)
         if hits is not None:
             memories = await self._load_memories_by_ids(session, hits)

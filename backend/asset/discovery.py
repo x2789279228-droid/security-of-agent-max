@@ -11,12 +11,11 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from sqlalchemy import select, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import AssetDiscoveryTask, Asset
+from models import AssetDiscoveryTask
 from .asset_manager import asset_manager
 
 logger = logging.getLogger(__name__)

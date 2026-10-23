@@ -18,6 +18,7 @@
 """
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -136,6 +137,51 @@ def _aware(dt: Optional[datetime]) -> Optional[datetime]:
     return dt
 
 
+def session_dialect_name(session: Optional[AsyncSession] = None) -> str:
+    """当前会话的 SQL 方言。优先 bind.dialect，再回落到 DATABASE_URL。"""
+    bind = None
+    if session is not None:
+        bind = getattr(session, "bind", None)
+        if bind is None:
+            sync = getattr(session, "sync_session", None)
+            bind = getattr(sync, "bind", None) if sync is not None else None
+        if bind is None:
+            getter = getattr(session, "get_bind", None)
+            if callable(getter):
+                try:
+                    bind = getter()
+                except Exception:
+                    bind = None
+    name = str(getattr(getattr(bind, "dialect", None), "name", "") or "").lower()
+    if name:
+        return name
+    try:
+        from config import settings
+        url = str(getattr(settings, "database_url", "") or "").lower()
+    except Exception:
+        url = ""
+    if url.startswith("sqlite"):
+        return "sqlite"
+    if url.startswith("postgres"):
+        return "postgresql"
+    if "://" in url:
+        return url.split(":", 1)[0].split("+", 1)[0]
+    return ""
+
+
+_LOCAL_SESSION_LOCKS: dict[tuple, asyncio.Lock] = {}
+
+
+def _local_session_lock(session_id: str) -> asyncio.Lock:
+    """同进程、当前事件循环内按 session_id 串行化找/建案例。不替代跨进程唯一性。"""
+    loop = asyncio.get_running_loop()
+    key = (id(loop), session_id)
+    lock = _LOCAL_SESSION_LOCKS.get(key)
+    if lock is None:
+        lock = _LOCAL_SESSION_LOCKS.setdefault(key, asyncio.Lock())
+    return lock
+
+
 class CaseManager:
     """案例生命周期管理器"""
 
@@ -168,39 +214,38 @@ class CaseManager:
         window_start = now - timedelta(minutes=AGGREGATION_WINDOW_MINUTES)
         type_window_start = now - timedelta(hours=TYPE_TARGET_WINDOW_HOURS)
 
-        await self._lock_session_case(session, event.session_id)
+        async with self._session_case_guard(session, event.session_id):
+            # 策略 0: 同 session 聚合（演示/同源攻击链）
+            if event.session_id:
+                existing = await self._find_active_case_by_session(
+                    session, event.session_id
+                )
+                if existing:
+                    await self._add_event_to_case(session, existing, event)
+                    return existing
+                # 新 session 必须新开案例，禁止被同 IP 的旧 demo 吸走
+                return await self._create_case_from_event(session, event)
 
-        # 策略 0: 同 session 聚合（演示/同源攻击链）
-        if event.session_id:
-            existing = await self._find_active_case_by_session(
-                session, event.session_id
-            )
-            if existing:
-                await self._add_event_to_case(session, existing, event)
-                return existing
-            # 新 session 必须新开案例，禁止被同 IP 的旧 demo 吸走
+            # 策略 1: 同 src_ip + 时间窗口（仅无 session 的真实采集流）
+            if event.src_ip:
+                existing = await self._find_active_case_by_ip(
+                    session, event.src_ip, window_start
+                )
+                if existing:
+                    await self._add_event_to_case(session, existing, event)
+                    return existing
+
+            # 策略 2: 同 threat_type + 同 dst_ip（限时间窗，避免吸进多日前旧案）
+            if event.event_type and event.dst_ip:
+                existing = await self._find_active_case_by_type_target(
+                    session, event.event_type, event.dst_ip, type_window_start
+                )
+                if existing:
+                    await self._add_event_to_case(session, existing, event)
+                    return existing
+
+            # 创建新案例
             return await self._create_case_from_event(session, event)
-
-        # 策略 1: 同 src_ip + 时间窗口（仅无 session 的真实采集流）
-        if event.src_ip:
-            existing = await self._find_active_case_by_ip(
-                session, event.src_ip, window_start
-            )
-            if existing:
-                await self._add_event_to_case(session, existing, event)
-                return existing
-
-        # 策略 2: 同 threat_type + 同 dst_ip（限时间窗，避免吸进多日前旧案）
-        if event.event_type and event.dst_ip:
-            existing = await self._find_active_case_by_type_target(
-                session, event.event_type, event.dst_ip, type_window_start
-            )
-            if existing:
-                await self._add_event_to_case(session, existing, event)
-                return existing
-
-        # 创建新案例
-        return await self._create_case_from_event(session, event)
 
     async def create_case(
         self,
@@ -524,20 +569,34 @@ class CaseManager:
 
     # ── 内部方法 ──
 
+    @asynccontextmanager
+    async def _session_case_guard(self, session: AsyncSession, session_id: str):
+        """按方言选择并发协调方式。锁失败不得跳过建案。"""
+        if not session_id:
+            yield
+            return
+        dialect = session_dialect_name(session)
+        if dialect == "postgresql":
+            await self._lock_session_case(session, session_id)
+            yield
+            return
+        async with _local_session_lock(session_id):
+            yield
+
     async def _lock_session_case(self, session: AsyncSession, session_id: str) -> None:
-        """Postgres 事务锁，防止同 session 并发创建两个案例。SQLite 单测忽略。"""
+        """Postgres 事务级 advisory lock。非 PG 方言不执行 PG 专用 SQL。
+
+        连接错误、事务错误、SQL 错误原样抛出，不再用 except Exception 吞掉。
+        """
         if not session_id:
             return
-        try:
-            from sqlalchemy import text
-            await session.execute(
-                text("SELECT pg_advisory_xact_lock(hashtext(:sid))"),
-                {"sid": session_id},
-            )
-        except Exception as e:
-            # 非 Postgres 后端（如 SQLite 测试/本地模式）没有咨询锁，
-            # 此时并发保护静默失效，必须留痕便于排查，不能完全吞掉
-            logger.warning(f"advisory lock unavailable for {session_id[:8]}...: {e}")
+        if session_dialect_name(session) != "postgresql":
+            return
+        from sqlalchemy import text
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:sid))"),
+            {"sid": session_id},
+        )
 
     async def _find_active_case_by_session(
         self, session: AsyncSession, session_id: str
@@ -682,14 +741,17 @@ class CaseManager:
         已有未完成 disposition 工单则不重复派单，仅补齐状态。
         未命中阈值返回 False。
         """
-        if case is None:
-            return False
         try:
+            from core_metrics import record_case_auto_dispatch
             from config import settings
             from work_order_service import work_order_service
             from models import WorkOrder
+            if case is None:
+                record_case_auto_dispatch("skipped")
+                return False
             prios = [p.strip().lower() for p in (settings.case_auto_order_priorities or "").split(",") if p.strip()]
             if (case.priority or "").lower() not in (prios or ["high", "critical"]):
+                record_case_auto_dispatch("skipped")
                 return False
 
             existing = (await session.execute(
@@ -710,6 +772,7 @@ class CaseManager:
             if existing:
                 await _advance("open", "investigating")
                 await _advance("investigating", "responding")
+                record_case_auto_dispatch("ok")
                 return True
 
             await _advance("open", "investigating")
@@ -723,9 +786,17 @@ class CaseManager:
             )
             await _advance("investigating", "responding")
             logger.info(f"[Case] Auto-dispatched work_order {order.order_number} for {case.case_number}")
+            record_case_auto_dispatch("ok")
             return True
         except Exception as e:
             logger.warning(f"[Case] auto-dispatch failed: {e}")
+            # 失败必须**可观测**：案例已建好却没有工单，
+            # 而这在指标上此前与「不需要派单」完全同形。
+            try:
+                from core_metrics import record_case_auto_dispatch
+                record_case_auto_dispatch("failed")
+            except Exception:
+                pass
             return False
 
     async def _add_event_to_case(

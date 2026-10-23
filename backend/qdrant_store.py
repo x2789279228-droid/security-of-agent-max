@@ -16,6 +16,7 @@ import uuid
 from typing import Optional
 
 from config import settings
+from summary_compression import is_degraded_vector
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,15 @@ class QdrantStore:
         sparse_values: Optional[list] = None,
     ) -> Optional[bool]:
         """写入/覆盖一个 knowledge chunk 的向量与过滤 payload。"""
+        # 2026-10-20 修复（整改报告 §9.50）：embedding 失败时客户端返回
+        # **全零向量**（维度正确、内容为空）—— 与真实向量不可区分。
+        # 写进向量库就多了一条「看起来正常、实际无信息」的点。
+        # ⚠ 闸门放在 SDK import **之前**：它是纯输入检查，
+        # 不该依赖 `qdrant_client` 是否安装。
+        if is_degraded_vector(vector):
+            logger.warning(
+                "[Qdrant] chunk %s 的向量是降级产物(全零向量) → 跳过写入", chunk_id)
+            return None
         from qdrant_client.http import models as m
 
         pl = {

@@ -17,9 +17,8 @@ timeline.py — 攻击时间线构建与故事化叙述
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
-from sqlalchemy import select, desc, and_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)

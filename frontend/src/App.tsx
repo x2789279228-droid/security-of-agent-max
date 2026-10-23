@@ -40,9 +40,23 @@ function Guard({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-function page(el: ReactNode, auth = true) {
-  const inner = <Suspense fallback={<PageLoader />}>{el}</Suspense>
-  return auth ? <Guard>{inner}</Guard> : inner
+/**
+ * 业务路由统一挂 Guard。
+ *
+ * 2026-10-03 修复：此前 `page(el, auth)` 的 auth 参数在【全部 15 条路由】上
+ * 都被显式传成 false，Guard 因此从不被渲染 —— 未登录用户能进入 /operations、
+ * /rag、/response，看到完整页面外壳，然后各区块各自 401/403，最终呈现为
+ * 一个"看起来正常但全是 0 / 暂无"的面板。
+ *
+ * 现在不再提供跳过鉴权的开关：需要免鉴权的只有 /login 与 /register，
+ * 它们在下方直接用 Suspense 包裹，不经过本函数。
+ */
+function page(el: ReactNode) {
+  return (
+    <Guard>
+      <Suspense fallback={<PageLoader />}>{el}</Suspense>
+    </Guard>
+  )
 }
 
 export default function App() {
@@ -52,20 +66,20 @@ export default function App() {
         <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
         <Route path="/register" element={<Suspense fallback={<PageLoader />}><Register /></Suspense>} />
         <Route element={<RootLayout />}>
-          <Route index element={page(<Home />, false)} />
-          <Route path={ROUTES.LOGS} element={page(<Logs />, false)} />
-          <Route path={ROUTES.MONITOR} element={page(<Monitor />, false)} />
-          <Route path={ROUTES.SECURITY_AUDIT} element={page(<SecurityAudit />, false)} />
-          <Route path={ROUTES.RESPONSE} element={page(<Response />, false)} />
-          <Route path={ROUTES.OPERATIONS} element={page(<Operations />, false)} />
-          <Route path={ROUTES.SELF_PLAY} element={page(<SelfPlay />, false)} />
-          <Route path={ROUTES.RAG} element={page(<RAG />, false)} />
-          <Route path={ROUTES.TRAFFIC} element={page(<Traffic />, false)} />
-          <Route path={ROUTES.ENCRYPTED} element={page(<Encrypted />, false)} />
-          <Route path={ROUTES.INTEL} element={page(<Intel />, false)} />
-          <Route path={ROUTES.SANDBOX} element={page(<Sandbox />, false)} />
-          <Route path={ROUTES.EDR} element={page(<EDR />, false)} />
-          <Route path={ROUTES.CAPABILITIES} element={page(<CapabilitiesDashboard />, false)} />
+          <Route index element={page(<Home />)} />
+          <Route path={ROUTES.LOGS} element={page(<Logs />)} />
+          <Route path={ROUTES.MONITOR} element={page(<Monitor />)} />
+          <Route path={ROUTES.SECURITY_AUDIT} element={page(<SecurityAudit />)} />
+          <Route path={ROUTES.RESPONSE} element={page(<Response />)} />
+          <Route path={ROUTES.OPERATIONS} element={page(<Operations />)} />
+          <Route path={ROUTES.SELF_PLAY} element={page(<SelfPlay />)} />
+          <Route path={ROUTES.RAG} element={page(<RAG />)} />
+          <Route path={ROUTES.TRAFFIC} element={page(<Traffic />)} />
+          <Route path={ROUTES.ENCRYPTED} element={page(<Encrypted />)} />
+          <Route path={ROUTES.INTEL} element={page(<Intel />)} />
+          <Route path={ROUTES.SANDBOX} element={page(<Sandbox />)} />
+          <Route path={ROUTES.EDR} element={page(<EDR />)} />
+          <Route path={ROUTES.CAPABILITIES} element={page(<CapabilitiesDashboard />)} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

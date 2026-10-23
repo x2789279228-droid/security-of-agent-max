@@ -15,12 +15,12 @@ SSH 连接信息由以下环境变量配置:
   RESPONSE_SSH_KEY_FILE   SSH 私钥路径 (容器内路径)
 """
 import asyncio
-import json
 import logging
 import os
 import socket
-import tempfile
 import time
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,6 @@ class SSHTransport:
     def _schedule_retry_reconfigure(self):
         """v4 修复:后台延迟重试 configure, 解决 9p mount race condition"""
         import asyncio
-        import time as _t
         kwargs = self._last_configure_kwargs
         if not kwargs or not kwargs.get("host"):
             return
@@ -123,7 +122,7 @@ class SSHTransport:
                 if self._enabled:
                     logger.info(f"SSH transport: retry succeeded after {delay}s")
                     return
-            logger.warning(f"SSH transport: still stub after retries, giving up")
+            logger.warning("SSH transport: still stub after retries, giving up")
         try:
             self._retry_task = loop.create_task(_retry())
         except Exception as e:
@@ -161,10 +160,27 @@ class SSHTransport:
                 "returncode": -1,
             }
 
+        # 先构造**最终下发形态**，再查白名单。
+        #
+        # 2026-10-21 修复：此前白名单检查的是**原始 PowerShell 脚本**
+        # （含 `;`、`|`、换行），而 Windows 白名单只放行
+        # `powershell ... -EncodedCommand <base64>`；于是所有
+        # `powershell=True` 的主机遏制动作（kill_process / quarantine_file /
+        # clean_persistence / forensic_snapshot）在 live 模式下 100% 被拒。
+        # 现在检查与实际下发的字符串逐字相同。
+        if powershell:
+            encoded = _powershell_base64(command)
+            checked_command = (
+                "powershell -NoProfile -ExecutionPolicy Bypass "
+                f"-EncodedCommand {encoded}"
+            )
+        else:
+            checked_command = command
+
         # 命令白名单检查(平台参数化,默认 linux 匹配 soc-firewall)
         # v4 修复:之前硬编码 platform="windows",导致 iptables 命令全被拒
         from .command_whitelist import command_whitelist
-        allowed, rule_id, reason = command_whitelist.check(command, platform=platform)
+        allowed, rule_id, reason = command_whitelist.check(checked_command, platform=platform)
         if not allowed:
             logger.warning(f"[SSH] Command whitelist REJECTED ({platform}): {reason}")
             return {
@@ -177,20 +193,35 @@ class SSHTransport:
             }
 
         # 构造 SSH 命令
-        # 使用 /tmp/ssh/known_hosts 或 /dev/null 避免 appuser 无 home 目录问题
-        known_hosts_candidates = ["/tmp/ssh/known_hosts", "/dev/null"]
-        known_hosts = None
-        for kh in known_hosts_candidates:
-            kh_dir = os.path.dirname(kh)
-            if kh == "/dev/null" or os.path.isdir(kh_dir):
-                known_hosts = kh
-                break
-        if not known_hosts:
+        # 主机密钥校验默认失败关闭：
+        # - known_hosts 存在 → StrictHostKeyChecking=yes
+        # - 缺失 → 拒绝执行（除非显式 allow_unknown_host，仅限隔离靶场）
+        known_hosts = str(getattr(settings, "response_ssh_known_hosts", "") or "").strip()
+        allow_unknown = bool(getattr(settings, "response_ssh_allow_unknown_host", False))
+        if not known_hosts or not os.path.isfile(known_hosts):
+            if not allow_unknown:
+                return {
+                    "success": False,
+                    "error": (
+                        "SSH 主机密钥校验失败：known_hosts 不存在 "
+                        f"({known_hosts or '未配置'})。请先登记目标主机密钥，"
+                        "或在隔离靶场显式设置 "
+                        "SHARED_MEMORY_RESPONSE_SSH_ALLOW_UNKNOWN_HOST=true"
+                    ),
+                    "stdout": "",
+                    "stderr": "",
+                    "returncode": -1,
+                    "blocked_by": "host_key",
+                }
             known_hosts = "/dev/null"
+            logger.warning(
+                "SSH transport: allow_unknown_host=True —— 正在接受未登记的主机密钥，"
+                "仅限隔离靶场使用"
+            )
 
         ssh_args = [
             "ssh",
-            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", f"StrictHostKeyChecking={'no' if allow_unknown else 'yes'}",
             "-o", f"UserKnownHostsFile={known_hosts}",
             "-o", "ConnectTimeout=10",
             "-o", "ServerAliveInterval=5",
@@ -200,13 +231,8 @@ class SSHTransport:
         if self._key_file:
             ssh_args.extend(["-i", self._key_file])
 
-        # Windows 命令用 PowerShell 包装以获取更好的错误信息
-        if powershell:
-            # 用 Base64 编码避免转义问题
-            encoded = _powershell_base64(command)
-            remote_cmd = f"powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}"
-        else:
-            remote_cmd = command
+        # 实际下发的就是刚通过白名单校验的那个字符串（不得二次编码）。
+        remote_cmd = checked_command
 
         ssh_args.extend([f"{self._user}@{self._host}", remote_cmd])
 

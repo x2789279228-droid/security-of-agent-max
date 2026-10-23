@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from models import init_db, async_session, NetworkFlow, PcapFile
+from observability.logging_setup import configure_logging
 from sliding_window import sliding_window
 from summary_compression import summary, embedder
 from context_stream import context_stream
@@ -35,14 +36,44 @@ from kafka_producer import kafka_producer
 from response_engine import ssh_transport
 from rag import seed_knowledge_base
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+# 结构化日志（JSON in prod / 带 request_id 的文本 in dev）——取代裸 basicConfig
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up...")
+    # 数据库迁移: schema 演进的权威路径 (alembic), 必须先于 create_all。
+    # to_thread: env.py 内部用 asyncio.run, 不能在运行中的事件循环里直接调。
+    # fail-closed: 迁移失败阻止启动, 不允许未迁移的 schema 接流量。
+    if getattr(settings, "auto_migrate", False):
+        import os as _os
+        from alembic import command as _alembic_command
+        from alembic.config import Config as _AlembicConfig
+        _backend_dir = _os.path.dirname(_os.path.abspath(__file__))
+        _cfg = _AlembicConfig(_os.path.join(_backend_dir, "alembic.ini"))
+        _cfg.set_main_option("script_location", _os.path.join(_backend_dir, "migrations"))
+        try:
+            await asyncio.to_thread(_alembic_command.upgrade, _cfg, "head")
+            logger.info("Database migrations applied (alembic upgrade head)")
+        except Exception as e:
+            logger.error(f"Database migration failed — refusing to start: {e}")
+            raise
     await init_db()
+    # 审批工单持久化: 注入 session 工厂并恢复上次进程未决的 PENDING 工单
+    # (修复前审批队列是纯内存 dict, 重启即丢全部高危待办)
+    try:
+        from response_engine.human_approval import approval_queue as _aq
+        _aq.set_session_factory(async_session)
+        _restored = await _aq.restore()
+        if _restored:
+            logger.warning("ApprovalQueue: %d pending ticket(s) restored from DB", _restored)
+        _cleaned = await _aq.cleanup_db(max_age_hours=72)
+        if _cleaned:
+            logger.info("ApprovalQueue: cleaned %d terminal ticket row(s) from DB", _cleaned)
+    except Exception as e:
+        logger.warning(f"ApprovalQueue persistence init failed: {e}")
     # 成本控制: 从 llm_traces 重建今日用量, 保证预算门禁不因重启失效
     try:
         from datetime import datetime, timezone, timedelta
@@ -99,12 +130,51 @@ async def lifespan(app: FastAPI):
         await _event_store.start_invalidate_listener()
         await _event_bus.start_redis_bridge()
         await anomaly_detector.load_baselines_from_redis()
+    # ── 响应执行层：失败关闭的默认模式 + Redis 幂等 + 持久化 TTL ──
+    try:
+        from response_engine.safe_executor import safe_executor
+        from response_engine.ttl_manager import ttl_manager
+        from response_engine.response_registry import ttl_rollback
+
+        safe_executor.initialize()
+        if redis_client:
+            safe_executor.set_redis(redis_client)
+            ttl_manager.set_redis(redis_client)
+            ttl_manager.set_rollback_callback(ttl_rollback)
+            await ttl_manager.recover_on_startup()
+            await ttl_manager.start_scanner()
+        mode = getattr(settings, "execution_mode", "dry_run")
+        if mode == "live":
+            logger.warning(
+                "[Response] execution_mode=live —— 真实封禁/隔离已启用；"
+                "请确认这是隔离靶场且已完成审批与资产白名单配置"
+            )
+        else:
+            logger.info(f"[Response] execution_mode={mode}（真实执行关闭）")
+        logger.info(
+            "[Response] SafeExecutor initialized: redis=%s ttl=%s",
+            bool(redis_client), bool(redis_client),
+        )
+    except Exception as e:
+        # 初始化失败必须显式暴露；不能静默回落到 live。
+        logger.error(f"[Response] SafeExecutor/TTL init failed: {e}")
     logger.info("安全审计模式: 所有事件全量存储，无有损压缩 + 异常基线持久化")
     if not settings.llm_api_key:
         logger.warning("LLM API key not set — LLM calls will return fallback responses")
     if not settings.embedding_api_key:
         logger.warning("Embedding API key not set — embeddings will return zero vectors")
     logger.info(f"LLM: {settings.llm_model} @ {settings.llm_base_url}")
+    logger.info(
+        "容量: llm并发=%s llm每分钟=%s 审计队列=%s 批大小=%s 策略=%s "
+        "db写并发=%s kafka在途=%s",
+        settings.llm_global_concurrency,
+        settings.llm_rate_per_minute,
+        settings.audit_queue_max,
+        settings.http_ingest_max_batch,
+        settings.http_ingest_batch_policy,
+        settings.db_write_max_concurrency,
+        settings.kafka_produce_max_inflight,
+    )
     logger.info(f"Embedding: {settings.embedding_model} @ {settings.embedding_base_url}")
     logger.info(f"Embedding dim: {settings.embedding_dim}")
 
@@ -286,7 +356,14 @@ async def lifespan(app: FastAPI):
     if settings.kafka_enabled:
         # 注册 Flink↔Python 跨运行时 Schema 契约 (best-effort, 失败不影响消费)
         from schema_registry import schema_registry
-        await schema_registry.register_all()
+        register_results = await schema_registry.register_all()
+        failed_subjects = [r.subject for r in register_results if not r.ok]
+        if failed_subjects:
+            logger.error(
+                "[Schema] %s 个 subject 注册失败（冲突未核对待为失败）: %s",
+                len(failed_subjects),
+                ", ".join(failed_subjects),
+            )
         await kafka_producer.start()
         await kafka_consumer_manager.start()
         logger.info("Kafka 模式已启用: 数据通过 Kafka + Flink 流水线处理 (Python 为薄消费者)")
@@ -305,6 +382,17 @@ async def lifespan(app: FastAPI):
     logger.info("Scheduler started")
 
     # 可观测性
+    # OpenTelemetry 标准 trace (→ otel-collector → Tempo)
+    # 放在 lifespan 而非模块 import 期: 见文件下方"OpenTelemetry 说明"。
+    if getattr(settings, "otel_enabled", True):
+        try:
+            from otel_setup import setup_otel
+            setup_otel(app=app)
+        except Exception as e:
+            logger.warning(f"OTel setup failed: {e}")
+    else:
+        logger.info("OpenTelemetry disabled (otel_enabled=false)")
+
     from observability.health_monitor import health_monitor
     from observability.watchdog import watchdog
     from observability.pipeline_tracer import pipeline_tracer
@@ -312,7 +400,26 @@ async def lifespan(app: FastAPI):
     pipeline_tracer.enable_persist()
     logger.info("Observability: health monitor + watchdog + pipeline tracer initialized")
 
-    # 启动时清理长期 stuck 未分析事件，避免积压拖垮队列
+    try:
+        from audit_worker import recover_unanalyzed
+        restored = await recover_unanalyzed()
+        if restored:
+            logger.info("Startup recovered %d unanalyzed audit tasks from the database", restored)
+    except Exception as e:
+        logger.warning(f"Unanalyzed audit recovery skipped: {e}")
+
+    # 审计死信重放(2026-10-23 第二阶段): PQ 丢失的任务上次运行时已落库,
+    # 这里把它们再送进 worker —— "丢失→可见→可重放"闭环的最后一环。
+    try:
+        from audit_dead_letters import replay_dead_letters
+        _replayed = await replay_dead_letters(limit=500)
+        if _replayed:
+            logger.warning("Audit dead letters replayed into worker: %d", _replayed)
+    except Exception as e:
+        logger.warning(f"Audit dead letter replay skipped: {e}")
+
+    # 启动时清理长期 stuck 未分析事件，避免积压拖垮队列。
+    # 已经回到审计队列或 spill 重放里的不标失败，否则刚恢复的任务会被清掉。
     if settings.stuck_auto_reset_minutes and settings.stuck_auto_reset_minutes > 0:
         try:
             from datetime import datetime, timezone, timedelta
@@ -326,8 +433,13 @@ async def lifespan(app: FastAPI):
                         SecurityEvent.created_at < cutoff,
                     ).limit(500)
                 )).scalars().all()
+                from audit_worker import audit_worker as _audit_worker
+                from event_store import event_store as _es
                 n = 0
+                reset_ids = []
                 for e in rows:
+                    if _audit_worker.holds(int(e.id)):
+                        continue
                     e.analyzed = True
                     raw = dict(e.raw_data or {})
                     raw["_audit_llm_error"] = "auto_reset_stuck_on_startup"
@@ -339,9 +451,10 @@ async def lifespan(app: FastAPI):
                     })
                     raw["_audit_llm"] = audit
                     e.raw_data = raw
+                    reset_ids.append(e.id)
                     n += 1
                 if n:
-                    await _s.commit()
+                    await _es.commit_then_invalidate(_s, *reset_ids)
                     logger.warning(f"Cleared {n} stuck unanalyzed events older than {settings.stuck_auto_reset_minutes}m")
         except Exception as e:
             logger.warning(f"Stuck auto-reset skipped: {e}")
@@ -349,19 +462,15 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── Shutdown ──
-    if settings.kafka_enabled:
-        await kafka_consumer_manager.stop()
-        await kafka_producer.stop()
-
+    # draining → 停拉 Kafka → 等审计任务或写成可恢复记录 → 刷生产者 →
+    # 只提交已完成位点 → 关 Redis / Kafka / 数据库。
     try:
-        from audit_worker import audit_worker
-        await audit_worker.stop()
-    except Exception:
-        pass
-    await scheduler.stop()
-    await summary.close()
-    await embedder.close()
-    logger.info("Shutdown complete")
+        from response_engine.ttl_manager import ttl_manager
+        await ttl_manager.stop_scanner()
+    except Exception as e:
+        logger.warning(f"[Response] TTL scanner stop failed: {e}")
+    from lifecycle import shutdown_platform
+    await shutdown_platform()
 
 
 # ════════════════════════════════════════════
@@ -380,13 +489,15 @@ app = FastAPI(
     openapi_url=None if _is_prod else "/openapi.json",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=json.loads(settings.allowed_origins),
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
-)
+# 注: CORSMiddleware 的注册位置在文件末尾(所有中间件之后)。
+#     Starlette 的 add_middleware / @app.middleware 执行 user_middleware.insert(0, ...),
+#     即"最后注册 = 最外层"。若 CORS 先于 auth/rate_limit 注册, 它会落在最内层,
+#     而 auth/rate_limit 用 return JSONResponse 直接返回 401/403/429 (不经过 call_next),
+#     这些错误响应就不会带 Access-Control-Allow-Origin →
+#     浏览器报 CORS "Failed to fetch" 而非可读的 401, 且违反 CORS 规范
+#     (跨源请求的错误响应同样必须携带 ACAO)。
+#     前端 lib/eventStream.ts 依赖这个 401 来清凭证并跳登录页;
+#     CORS 位置错误时令牌过期会表现为"永远重连中"而不是登出。
 
 # ── 全局认证中间件 ──
 # 所有 /api/* 端点默认需要 JWT 认证 (Bearer header 或 ?token= query param)
@@ -444,6 +555,7 @@ _RATE_LIMIT_CLEANUP_INTERVAL = 300
 _last_rate_limit_cleanup = 0.0
 
 from http_guards import rate_limit_decision as _rate_limit_decision
+from http_guards import rate_limit_quota as _rate_limit_quota
 
 
 def _resolve_rate_limit_key(request: Request) -> str:
@@ -510,16 +622,34 @@ async def rate_limit_middleware(request: Request, call_next):
     timestamps = _rate_limit_store[rate_key]
     cutoff = now - window
     _rate_limit_store[rate_key] = [t for t in timestamps if t > cutoff]
-    if len(_rate_limit_store[rate_key]) >= settings.rate_limit_per_minute:
+    limit = _rate_limit_quota(namespace)
+    if len(_rate_limit_store[rate_key]) >= limit:
         return JSONResponse(
             status_code=429,
             content={
                 "detail": "Rate limit exceeded",
-                "limit_per_minute": settings.rate_limit_per_minute,
+                "limit_per_minute": limit,
                 "scope": namespace,
             },
         )
     _rate_limit_store[rate_key].append(now)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def ingest_body_limit_middleware(request: Request, call_next):
+    """接入入口在读正文前按 Content-Length 拒绝。真正的批大小仍由路由再查一次。"""
+    path = request.url.path
+    if request.method == "POST" and (
+        path == "/api/logs/ingest" or path.startswith("/api/logs/ingest/")
+    ):
+        from capacity import body_too_large
+        raw = request.headers.get("content-length")
+        if raw and str(raw).isdigit() and body_too_large(int(raw)):
+            return JSONResponse(
+                status_code=413,
+                content={"status": "rejected", "reason": "body_too_large"},
+            )
     return await call_next(request)
 
 
@@ -530,6 +660,7 @@ async def rate_limit_middleware(request: Request, call_next):
 from routers.auth import router as auth_router
 from routers.sources import router as sources_router
 from routers.kafka import router as kafka_router
+from routers.dlq import router as dlq_router
 from routers.assets import router as assets_router
 from routers.logs import router as logs_router
 from routers.chat import router as chat_router
@@ -547,6 +678,7 @@ from routers.causal import router as causal_router
 app.include_router(auth_router)
 app.include_router(sources_router)
 app.include_router(kafka_router)
+app.include_router(dlq_router)
 app.include_router(assets_router)
 app.include_router(logs_router)
 app.include_router(chat_router)
@@ -563,12 +695,16 @@ app.include_router(causal_router)
 
 logger.info(f"Mounted 15 routers — {len(app.routes)} routes total")
 
-# ── OpenTelemetry 标准 trace (→ otel-collector → Tempo) ──
-try:
-    from otel_setup import setup_otel
-    setup_otel(app=app)
-except Exception as e:
-    logger.warning(f"OTel setup failed: {e}")
+# ── OpenTelemetry 说明（初始化已移入 lifespan，见下）──
+# 2026-10-03: 原先在本模块 import 期无条件 setup_otel()。OTel 的全局 TracerProvider
+# 是一次性的（第二次 set_tracer_provider 被静默忽略），于是：
+#   1) 任何 import app 的代码都会永久抢占该进程级全局；
+#   2) 测试无法注入自己的 provider —— test_trace_otel 只能"看谁先 import"，
+#      且它标注为"还原"的那句 set_tracer_provider 本身就是被忽略的空操作；
+#   3) 测试期间还会真的向 otel-collector:4317 发包。
+# 现在改为在 lifespan 启动阶段初始化：import app 不再有副作用，测试可自行控制
+# provider；且 FastAPI 在 lifespan 之后才开始构建中间件栈，此时 add_middleware
+# 仍然有效。
 
 # ── Prometheus 指标出口 (Python 侧; 与 Flink 9250 对齐, 统一可观测) ──
 # 注: 用轻量 metrics.py (兼容 FastAPI 0.14x _IncludedRouter), 替代
@@ -578,3 +714,25 @@ from metrics import metrics_endpoint, MetricsMiddleware
 app.add_middleware(MetricsMiddleware)
 app.add_api_route("/metrics", metrics_endpoint, include_in_schema=False, methods=["GET"])
 logger.info("Prometheus /metrics enabled (metrics.py)")
+
+# ── Request-Id + 全局异常处理 ──
+# 注册在 Metrics 之后 → 位于 CORS(最外) 之下、Metrics 之上：
+# 所有路径(含 /metrics、401/403/429 短路响应)都带 X-Request-ID，日志可关联。
+from observability.request_middleware import RequestContextMiddleware, unhandled_exception_handler
+
+app.add_middleware(RequestContextMiddleware)
+app.add_exception_handler(Exception, unhandled_exception_handler)
+
+# ════════════════════════════════════════════
+# CORS — 必须最后注册(Starlette insert(0) → 最后注册=最外层)
+# ════════════════════════════════════════════
+# 放在这里而不是文件开头, 是为了让 auth/rate_limit/allowlist/mTLS 直接返回的
+# 401/403/429 也经过 CORS 包装并带上 Access-Control-Allow-Origin。
+# 详见本文件 FastAPI 实例创建处的说明。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=json.loads(settings.allowed_origins),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+)

@@ -17,7 +17,6 @@ cert_analyzer.py — 证书链分析与风险评分
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from config import settings
 

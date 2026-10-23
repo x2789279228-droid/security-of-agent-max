@@ -180,9 +180,141 @@ class ReviewerOutputSchema(BaseModel):
 
 
 # ═══════════════════════════════════════════
+# 值域强制收敛（P0-E-4）
+# ═══════════════════════════════════════════
+# 修复前: Pydantic 校验失败时 `return parsed, errors` 把**未校验的原始 dict**
+#         交回调用方，而调用方只判 `parsed is None`。
+#         → severity 枚举拦截只产生一条 warning，非法值原样写入 AuditResult.severity。
+#
+# 修复后: 校验失败仍返回可用结构，但所有越界值被强制收敛到合法域（fail-closed），
+#         且 errors 非空 → 调用方必须把该结论标记为 schema_valid=False 并强制人工复核。
+#
+# P3 补: 上述收敛原先只覆盖 _sanitize_synthesis / _sanitize_reviewer，
+#        **漏了 SubAuditor**。于是 `return parsed, errors` 在这条路径上原样放行，
+#        ThreatClaimSchema.check_evidence_ids 的「每条断言必须有证据」只产生一条
+#        warning —— 零证据断言照样进入 verify_chunk。配合 GroundingVerifier 的空真
+#        评分（五个维度记满分 → 0.9000 = grounded），这条断言最终以
+#        severity=critical 进入投票集。详见 _sanitize_sub_auditor。
+
+def _safe_severity(value, fallback: str = "info") -> str:
+    """把任意 severity 收敛到 VALID_SEVERITIES；非法值一律降级为 info。"""
+    s = str(value or "").lower().strip()
+    return s if s in VALID_SEVERITIES else fallback
+
+
+def _safe_float(value, lo: float = 0.0, hi: float = 1.0, fallback: float = 0.0) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if f != f or f in (float("inf"), float("-inf")):  # NaN / inf
+        return fallback
+    return max(lo, min(hi, f))
+
+
+def _sanitize_synthesis(parsed: dict) -> dict:
+    """把 LLM 汇总输出强制收敛到合法域（不新增/不删除业务字段）。"""
+    out = dict(parsed)
+    out["severity"] = _safe_severity(out.get("severity"))
+    out["confidence"] = _safe_float(out.get("confidence"))
+    out["threat_detected"] = bool(out.get("threat_detected", False))
+    out["abstain"] = bool(out.get("abstain", False))
+    out["needs_human_review"] = bool(out.get("needs_human_review", False))
+    for key in ("threat_type", "summary", "evidence_summary"):
+        if not isinstance(out.get(key), str):
+            out[key] = "" if out.get(key) is None else str(out[key])
+    for key in ("affected_entities",):
+        if not isinstance(out.get(key), dict):
+            out[key] = {}
+    for key in ("suggested_actions",):
+        if not isinstance(out.get(key), list):
+            out[key] = []
+    return out
+
+
+def _sanitize_reviewer(parsed: dict) -> dict:
+    """把 Reviewer 输出强制收敛到合法域。"""
+    out = dict(parsed)
+    concl = str(out.get("conclusion") or "").strip()
+    out["conclusion"] = concl if concl in VALID_CONCLUSIONS else "suspicious"
+    out["confidence"] = _safe_float(out.get("confidence"))
+    for key in ("human_intervention", "abstain"):
+        out[key] = bool(out.get(key, False))
+    for key in ("missed_threats", "evidence_chain"):
+        if not isinstance(out.get(key), list):
+            out[key] = []
+    for key in ("final_summary", "reviewer_notes"):
+        if not isinstance(out.get(key), str):
+            out[key] = "" if out.get(key) is None else str(out[key])
+    return out
+
+
+def _sanitize_claim(claim: dict) -> dict | None:
+    """收敛单条 threat_claim；证据缺失无法修复时返回 None（整条丢弃）。
+
+    与顶层字段的差别：severity / confidence / 引文这些越界值都可以**修**，
+    但 `evidence_ids 为空` 修不了 —— 凭空补一个 ID 就是伪造证据。
+    所以这里对它是 fail-closed：宁可丢掉整条断言，也不能让一条无证据断言
+    以合法形状继续往下走。
+    """
+    out = dict(claim)
+    out["severity"] = _safe_severity(out.get("severity"))
+    out["confidence"] = _safe_float(out.get("confidence"))
+    for key in ("type", "summary"):
+        if not isinstance(out.get(key), str):
+            out[key] = "" if out.get(key) is None else str(out[key])
+    quotes = out.get("evidence_quotes")
+    out["evidence_quotes"] = [str(q) for q in quotes] if isinstance(quotes, list) else []
+
+    # 与 ThreatClaimSchema.coerce_evidence_ids 同一套规则（'#552' / '552' 兼容），
+    # 区别只在于这里不抛错，空列表直接判定为不可修复。
+    ids = out.get("evidence_ids")
+    if not isinstance(ids, list):
+        ids = [ids] if ids is not None else []
+    coerced: list[int] = []
+    for item in ids:
+        if isinstance(item, int):
+            coerced.append(item)
+            continue
+        s = str(item).strip().lstrip("#")
+        if s.isdigit():
+            coerced.append(int(s))
+    if not coerced:
+        return None
+    out["evidence_ids"] = coerced
+    return out
+
+
+def _sanitize_sub_auditor(parsed: dict) -> dict:
+    """把 SubAuditor 输出强制收敛到合法域。
+
+    claim 是**列表**，因此除了逐条收敛，还要处理「有的能留、有的留不下」：
+    这里只丢弃证据为空的那几条，其余照常返回 ——
+    丢掉全部 claim 时 threat_detected 由调用方的 `and len(claims) > 0` 收敛为 False。
+    """
+    out = dict(parsed)
+    out["severity"] = _safe_severity(out.get("severity"))
+    out["confidence"] = _safe_float(out.get("confidence"))
+    out["threat_detected"] = bool(out.get("threat_detected", False))
+    for key in ("summary", "alert"):
+        if not isinstance(out.get(key), str):
+            out[key] = "" if out.get(key) is None else str(out[key])
+    if not isinstance(out.get("suspicious_entities"), list):
+        out["suspicious_entities"] = []
+
+    kept: list[dict] = []
+    for claim in (out.get("threat_claims") or []):
+        if isinstance(claim, dict):
+            sanitized = _sanitize_claim(claim)
+            if sanitized is not None:
+                kept.append(sanitized)
+    out["threat_claims"] = kept
+    return out
+
+
+# ═══════════════════════════════════════════
 # 验证函数（带 JSON 提取 + 重试逻辑）
 # ═══════════════════════════════════════════
-
 def extract_json(text: str) -> Optional[dict]:
     """
     从 LLM 输出中提取 JSON
@@ -248,7 +380,12 @@ def validate_sub_auditor_output(raw_text: str) -> tuple[Optional[dict], list[str
         return model.model_dump(), []
     except Exception as e:
         errors.append(f"结构验证失败: {e}")
-        return parsed, errors
+        if not isinstance(parsed, dict):
+            return None, errors
+        # fail-closed：返回**收敛后**的结构，零证据断言在此被丢弃。
+        # 修复前直接 return parsed（原样未校验 dict），于是 schema 层的拒绝
+        # 只剩一条 warning，断言照常进入 verify_chunk。
+        return _sanitize_sub_auditor(parsed), errors
 
 
 def validate_synthesis_output(raw_text: str) -> tuple[Optional[dict], list[str]]:
@@ -264,7 +401,11 @@ def validate_synthesis_output(raw_text: str) -> tuple[Optional[dict], list[str]]
         return model.model_dump(), []
     except Exception as e:
         errors.append(f"结构验证失败: {e}")
-        return parsed, errors
+        if not isinstance(parsed, dict):
+            return None, errors
+        # fail-closed：返回收敛后的结构，越界值不会流入下游；
+        # errors 非空 → 调用方须标记 schema_valid=False 并强制人工复核。
+        return _sanitize_synthesis(parsed), errors
 
 
 def validate_reviewer_output(raw_text: str) -> tuple[Optional[dict], list[str]]:
@@ -280,4 +421,7 @@ def validate_reviewer_output(raw_text: str) -> tuple[Optional[dict], list[str]]:
         return model.model_dump(), []
     except Exception as e:
         errors.append(f"结构验证失败: {e}")
-        return parsed, errors
+        if not isinstance(parsed, dict):
+            return None, errors
+        # fail-closed：非法 conclusion 收敛为 suspicious（不放行任意值）
+        return _sanitize_reviewer(parsed), errors

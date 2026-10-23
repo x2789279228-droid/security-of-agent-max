@@ -12,7 +12,6 @@ MITRE ATT&CK 知识库导入器
   - 映射 kill_chain_phases → threat_types
   - 包含检测规则、缓解措施、平台信息
 """
-import json
 import logging
 import re
 from typing import Optional

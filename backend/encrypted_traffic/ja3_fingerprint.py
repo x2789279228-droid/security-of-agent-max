@@ -88,7 +88,7 @@ class JA3Engine:
         pf_str = "-".join(str(p) for p in point_formats)
 
         ja3_string = f"{version},{cipher_str},{ext_str},{curve_str},{pf_str}"
-        ja3_hash = hashlib.md5(ja3_string.encode()).hexdigest()
+        ja3_hash = hashlib.md5(ja3_string.encode(), usedforsecurity=False).hexdigest()
 
         logger.debug("JA3: %s → %s", ja3_string[:80], ja3_hash)
         return ja3_hash
@@ -105,7 +105,7 @@ class JA3Engine:
 
         ext_str = "-".join(str(e) for e in extensions)
         ja3s_string = f"{version},{cipher},{ext_str}"
-        return hashlib.md5(ja3s_string.encode()).hexdigest()
+        return hashlib.md5(ja3s_string.encode(), usedforsecurity=False).hexdigest()
 
     def compute_ja4(self, fields: dict) -> str:
         """

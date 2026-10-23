@@ -18,6 +18,7 @@ from http_guards import (
     is_rate_limit_whitelisted,
     parse_allowlist,
     rate_limit_decision,
+    rate_limit_quota,
 )
 
 
@@ -219,6 +220,19 @@ class TestRateLimitForced:
     def test_unclassified_path_still_uses_global_limiter(self):
         assert rate_limit_decision("/api/ragazine", "GET") == (True, "std")
         assert rate_limit_decision("/", "GET") == (True, "std")
+
+    def test_dlq_query_exempt_writes_forced(self):
+        assert is_rate_limit_whitelisted("/api/dlq") is True
+        assert is_rate_limit_whitelisted("/api/dlq/9") is True
+        assert is_rate_limit_whitelisted("/api/dlqazine") is False
+        assert rate_limit_decision("/api/dlq", "GET") == (False, None)
+        assert rate_limit_decision("/api/dlq/9", "GET") == (False, None)
+        assert rate_limit_decision("/api/dlq/9/dry-run", "POST") == (True, "crit")
+        assert rate_limit_decision("/api/dlq/9/replay", "POST") == (True, "strict")
+        assert is_rate_limit_forced("/api/dlq/9/replay", "POST") is True
+        assert is_rate_limit_forced("/api/dlq/9", "GET") is False
+        assert rate_limit_quota("strict") < rate_limit_quota("crit")
+        assert rate_limit_quota("crit") == rate_limit_quota("std")
 
 
 class TestExtraWhitelistEnv:

@@ -15,8 +15,22 @@ permissions:
   packages: write
 
 jobs:
+  schema-gate:
+    name: Schema compatibility gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install jsonschema
+        run: pip install jsonschema
+      - name: Block publish on incompatible schema
+        run: python tools/check-schema-compat.py
+
   publish:
     name: Build & push GHCR
+    needs: [schema-gate]
     runs-on: ubuntu-latest
     strategy:
       matrix:

@@ -1,0 +1,104 @@
+# 守望核心运营告警。队列丢弃、DLQ 积压、关闭未完成任务、
+# 承诺不丢类别的非预期丢弃必须立刻可见。
+groups:
+  - name: soc-core
+    interval: 15s
+    rules:
+      - alert: SocEventBusDrop
+        expr: increase(soc_eventbus_drops_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: SSE 队列发生丢弃
+          description: 近 5 分钟丢弃 {{ $value }} 条。critical 车道的丢弃视为非预期丢失。
+
+      - alert: SocEventBusCriticalDrop
+        expr: increase(soc_unexpected_drops_total{kind="eventbus_critical"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: 承诺不丢的 SSE 事件被丢弃
+          description: critical 车道无法入队且无法按事件 ID 补查。
+
+      - alert: SocDlqBacklog
+        expr: soc_dlq_depth > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: DLQ 出现积压
+          description: 当前待处理死信 {{ $value }} 条。
+
+      - alert: SocDlqOldestWait
+        expr: soc_dlq_oldest_wait_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: DLQ 最老消息等待超过 5 分钟
+          description: 最老死信已等待 {{ $value }} 秒。
+
+      - alert: SocShutdownLeftoverTasks
+        expr: soc_lifecycle_leftover_tasks > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: 关闭时仍有未完成任务
+          description: 组件遗留任务 {{ $value }}。spilled 应可恢复；lost 是非预期丢失。
+
+      - alert: SocUnexpectedDrop
+        expr: increase(soc_unexpected_drops_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: 承诺不丢的事件发生非预期丢弃
+          description: 近 5 分钟非预期丢弃 {{ $value }}。
+
+      - alert: SocKafkaConsumerLag
+        expr: soc_kafka_consumer_lag > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kafka 消费跟不上
+          description: topic={{ $labels.topic }} lag={{ $value }}
+
+      - alert: SocKafkaOldestLag
+        expr: soc_kafka_oldest_lag_seconds > 120
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kafka 最老积压消息超过 2 分钟
+          description: topic={{ $labels.topic }} age={{ $value }}s
+
+      - alert: SocKafkaConsumerDead
+        expr: soc_kafka_consumer_alive == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Kafka 消费循环已停止
+          description: loop={{ $labels.loop }} 未存活超过 1 分钟。
+
+      - alert: SocAuditPqLost
+        expr: increase(soc_audit_pq_lost_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: 审计优先级队列任务丢失
+          description: payload 先于 ZSET 成员过期，任务不可恢复；reason={{ $labels.reason }}
+
+      - alert: SocKafkaConsumerRestarts
+        expr: increase(soc_kafka_consumer_restarts_total[10m]) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kafka 消费循环反复重启
+          description: loop={{ $labels.loop }} 近 10 分钟重启 {{ $value }} 次。

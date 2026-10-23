@@ -24,14 +24,25 @@ logger = logging.getLogger(__name__)
 # 与 log_ingestion.AUDIT_PROMPT_VERSION 区分: 本模块用独立快审 prompt 版本
 AUDIT_SINGLE_PROMPT_VERSION = "audit_single-v1.0.0"
 
-_SYSTEM_PROMPT = (
-    "你是安全运营中心的资深审计员。对给定的一条安全事件做单次判定, 不要调用任何工具。\n"
-    "只依据事件本身、Sigma 命中与统计异常信号; 不要脑补事件之外的攻击链。\n"
-    "最后必须输出一个 JSON 对象(不要 Markdown 代码块包裹, 不要输出 JSON 之外的文字), 字段:\n"
-    '{"threat_detected": true/false, "confidence": 0-1, '
-    '"severity": "critical|high|medium|low|info", '
-    '"verdict": "confirmed|suspicious|benign", "summary": "≤120字中文结论"}'
-)
+# 2026-10-03: system prompt 外置到 prompts/audit/audit_single_system.j2。
+# 原为模块内的字面量字符串，违反本项目"提示词集中管理到 prompts/*.j2"的规约
+# （tests/test_prompts_integrity.py::test_no_hardcoded_system_prompt 即为此设的守卫）。
+# 改为与 agent_a/agent_b 一致的 render() 模式；模板缺失时降级为不含提示词的
+# 占位串 —— 与其悄悄用一个"看起来正常"的提示词，不如让降级在日志里可见。
+_SYSTEM_PROMPT: Optional[str] = None
+
+
+def _system_prompt() -> str:
+    """懒加载 + 进程内缓存的 system prompt（避免 import 期就依赖模板文件）。"""
+    global _SYSTEM_PROMPT
+    if _SYSTEM_PROMPT is None:
+        try:
+            from prompts import render
+            _SYSTEM_PROMPT = render("audit/audit_single_system")
+        except Exception as e:  # 模板缺失/渲染失败 → 降级
+            logger.error("[audit_single] system prompt 模板加载失败，使用降级占位: %s", e)
+            _SYSTEM_PROMPT = "[PROMPT_TEMPLATE_MISSING] audit_single system template unavailable"
+    return _SYSTEM_PROMPT
 
 _VALID_VERDICTS = frozenset({"confirmed", "suspicious", "benign"})
 _VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
@@ -106,7 +117,7 @@ def _build_messages(log_data: dict, anomaly_report: Any) -> list[dict]:
         "输出 JSON: threat_detected / confidence / severity / verdict / summary。",
     ]
     return [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": _system_prompt()},
         {"role": "user", "content": "\n".join(lines)},
     ]
 

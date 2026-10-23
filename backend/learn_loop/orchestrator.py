@@ -111,8 +111,13 @@ async def _step_clusters(session, harvest_data: dict, trigger: str) -> list:
 
     from sqlalchemy import select
     from models import SecurityEvent
+    # 2026-10-20 修复（整改报告 §9.49）：原查询**没有 ORDER BY** ——
+    # `IN (...)` 不保证返回顺序 → 同一批事件两次查询的顺序可能不同 →
+    # 聚类（贪心）随之给出不同的「家族」。
+    # 现在取数顺序确定；`build_clusters` 内部另有确定性全序（纵深防御）。
     events = (await session.execute(
         select(SecurityEvent).where(SecurityEvent.id.in_(want_ids))
+        .order_by(SecurityEvent.id)
     )).scalars().all()
     evt_dicts = [
         {
@@ -149,8 +154,11 @@ async def _step_sequences(session, harvest_data: dict, trigger: str) -> dict:
 
     from sqlalchemy import select
     from models import SecurityEvent
+    # 2026-10-20 修复（整改报告 §9.49）：同样补 ORDER BY（case 内另有
+    # created_at 排序，但 created_at 并列时顺序未定义）。
     events = (await session.execute(
         select(SecurityEvent).where(SecurityEvent.id.in_(want_ids))
+        .order_by(SecurityEvent.id)
     )).scalars().all()
 
     by_case: dict = {}

@@ -125,6 +125,8 @@ def live_firewall_singleton(monkeypatch):
     monkeypatch.setattr(fwmod.ssh_firewall, "_exec", fake)
     fwmod.ssh_firewall._connected = True
     fwmod.ssh_firewall._config["host"] = "fw-host"
+    # 本 fixture 专门验证 live 路径；默认值已改为 dry_run，必须显式开启。
+    monkeypatch.setattr(settings, "execution_mode", "live")
     return fwmod.ssh_firewall, fake
 
 
@@ -240,8 +242,8 @@ class TestRollback:
         delfs = fake.delete_commands()
         assert len(delfs) == 4
         for table in ("iptables", "ip6tables"):
-            assert any(f"-D INPUT" in c and c.startswith(table) for c in delfs)
-            assert any(f"-D OUTPUT" in c and c.startswith(table) for c in delfs)
+            assert any("-D INPUT" in c and c.startswith(table) for c in delfs)
+            assert any("-D OUTPUT" in c and c.startswith(table) for c in delfs)
 
     def test_rollback_block_rule(self, fake_adapter):
         adapter, fake = fake_adapter

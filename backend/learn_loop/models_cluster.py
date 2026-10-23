@@ -13,9 +13,22 @@ learn_loop.models_cluster — FP/漏报事件的相似聚类(纯函数)
 
 贪心聚类: 与已有簇代表取 Jaccard, 相似度 >= learn_loop_jaccard 并入,
 否则新建簇。只返回 size >= learn_loop_cluster_min_size 的簇。
+
+2026-10-20 修复（整改报告 §9.49）—— 本模块此前有**两个**顺序依赖：
+
+1. **簇划分依赖到达顺序**：贪心算法把新样本只与「簇代表」比，
+   而簇代表是**已并入成员的并集**（会长大）→ 同一批样本换个顺序进来，
+   划分会变（实测：3 个样本，顺序 [A,B,C] 得 1 个簇，[A,C,B] 得 2 个簇）。
+   修法：**聚类前按确定性全序排序** → 划分成为「事件集合」的函数。
+   ⚠ 聚类算法本身**没动**（仍是贪心/leader）——「家族」的定义
+   （全链接 vs 相似链）是**业务定义**，不单方面代拍（待决项 31）。
+2. **簇号是位置号**：`learn_cluster_{idx}` 由创建顺序决定 →
+   24h 去重键 `label_cluster:{cluster_id}` 会把**另一个家族**的提议静默吞掉。
+   修法：簇号改为**内容寻址**（由成员身份派生）→ 不同家族不会撞号。
 """
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import logging
 
@@ -62,6 +75,53 @@ def event_feature_set(evt: dict) -> set:
     return features
 
 
+def _int_or_none(raw):
+    """能转 int 就转，转不了返回 None（**不抛异常**）。"""
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _member_key(evt: dict, feats: set) -> str:
+    """成员的稳定身份串：id + 特征集指纹（没有 id 也有兜底）。
+
+    修复前 `int(e.get("id"))` 遇到非数字 id 会抛 ValueError →
+    **整次聚类**被一个坏 id 带走（`orchestrator` 只能记 partial 并丢掉全部簇）。
+    """
+    raw_id = evt.get("id")
+    id_part = "" if raw_id is None else str(raw_id)
+    feat_part = hashlib.sha1("|".join(sorted(feats)).encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    return f"{id_part}:{feat_part}"
+
+
+def _sort_key(evt: dict, feats: set) -> tuple:
+    """事件的确定性全序键：先 id（数字优先），再特征集，再成员身份串。
+
+    三个层级合起来对**不同**事件是全序；完全相同的事件互相可替换，
+    顺序无所谓。
+    """
+    id_num = _int_or_none(evt.get("id"))
+    if id_num is not None:
+        id_key = (0, id_num, "")
+    else:
+        raw_id = evt.get("id")
+        id_key = (1, 0, "" if raw_id is None else str(raw_id))
+    return (id_key, tuple(sorted(feats)), _member_key(evt, feats))
+
+
+def _cluster_id_for(member_keys) -> str:
+    """**内容寻址**的簇号：与到达顺序、与簇在结果列表里的位置都无关。
+
+    修复前 `learn_cluster_{idx}` 是**位置号** → 24h 去重键
+    `label_cluster:{cluster_id}` 会把**另一个家族**的提议静默吞掉。
+    """
+    anchor = "|".join(sorted(member_keys))
+    return "learn_cluster_" + hashlib.sha1(anchor.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+
+
 def build_clusters(
     events: list[dict],
     *,
@@ -84,13 +144,19 @@ def build_clusters(
         except Exception:
             threshold = 0.5
 
-    clusters: list[dict] = []
+    # ── 确定性全序：簇划分必须是「事件集合」的函数，不是「到达顺序」的函数 ──
+    prepared = []
     for evt in events:
         if not isinstance(evt, dict):
             continue
         feats = event_feature_set(evt)
         if not feats:
             continue
+        prepared.append((evt, feats))
+    prepared.sort(key=lambda pair: _sort_key(pair[0], pair[1]))
+
+    clusters: list[dict] = []
+    for evt, feats in prepared:
         best_idx = -1
         best_sim = threshold
         for idx, cl in enumerate(clusters):
@@ -103,14 +169,16 @@ def build_clusters(
             cl = clusters[best_idx]
             cl["_features"] |= feats
             cl["_events"].append(evt)
+            cl["_keys"].append(_member_key(evt, feats))
         else:
             clusters.append({
                 "_features": set(feats),
                 "_events": [evt],
+                "_keys": [_member_key(evt, feats)],
             })
 
     result = []
-    for idx, cl in enumerate(clusters):
+    for cl in clusters:
         size = len(cl["_events"])
         if size < min_size:
             continue
@@ -118,9 +186,12 @@ def build_clusters(
         types = Counter(str(e.get("event_type") or "") for e in cl["_events"])
         nets = Counter(_subnet(str(e.get("src_ip") or "")) for e in cl["_events"] if e.get("src_ip"))
         result.append({
-            "cluster_id": f"learn_cluster_{idx}",
+            "cluster_id": _cluster_id_for(cl["_keys"]),
             "size": size,
-            "event_ids": sorted({int(e.get("id")) for e in cl["_events"] if e.get("id") is not None}),
+            "event_ids": sorted({
+                i for i in (_int_or_none(e.get("id")) for e in cl["_events"])
+                if i is not None
+            }),
             "event_type": types.most_common(1)[0][0] if types else "",
             "net": nets.most_common(1)[0][0] if nets else "",
             "feature_count": len(cl["_features"]),

@@ -7,7 +7,6 @@
   4. 短链/重定向 (shortener)
   5. 支付劫持 (payment)
 """
-import re
 import logging
 from urllib.parse import urlparse
 

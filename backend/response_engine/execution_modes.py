@@ -2,11 +2,11 @@
 执行模式路由 (Execution Mode Router)
 
 支持三种全局执行模式:
-  - live:    真实 SSH 执行（默认，当前行为）
-  - dry_run: 走完全部校验链，生成完整命令，但不执行，返回预览
+  - dry_run: 走完全部校验链，生成完整命令，但不执行，返回预览（默认，失败关闭）
+  - live:    真实 SSH 执行（必须由部署环境显式开启）
   - mock:    走完校验链，不执行 SSH，返回仿真结果（集成测试用）
 
-配置: config.py → execution_mode = "live" | "dry_run" | "mock"
+配置: config.py → execution_mode = "dry_run" | "live" | "mock"
 
 调用方式:
     from response_engine.execution_modes import execution_router
@@ -19,7 +19,7 @@
 """
 import logging
 import time
-from typing import Any, Callable, Coroutine, Optional
+from typing import Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +141,9 @@ _DEFAULT_MOCK = {
 class ExecutionModeRouter:
     """执行模式路由器"""
 
-    def __init__(self, mode: str = MODE_LIVE):
-        self._mode = mode if mode in VALID_MODES else MODE_LIVE
+    def __init__(self, mode: str = MODE_DRY_RUN):
+        # 失败关闭：未显式初始化时必须停在 dry_run，而不是 live。
+        self._mode = mode if mode in VALID_MODES else MODE_DRY_RUN
 
     @property
     def mode(self) -> str:

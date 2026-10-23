@@ -13,11 +13,9 @@
 """
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
-import json
-from sqlalchemy import select, desc, and_, or_, delete as sa_delete, text
+from sqlalchemy import select, desc, and_, delete as sa_delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -127,13 +125,22 @@ class KnowledgeBaseManager:
         if severity:
             conditions.append(KnowledgeDoc.severity == severity)
         if threat_type:
+            # 安全修复(2026-10-03): 原实现用 f-string 把值拼进 text():
+            #   text(f"threat_types @> '{json.dumps([threat_type])}'::jsonb")
+            # json.dumps() 转义双引号与反斜杠, 但【不转义单引号 '】,
+            # 因此单引号字面量可被闭合 → SQL 注入。
+            # 改为 bindparams 参数绑定(与 rag/retriever.py 的既有写法一致)。
             conditions.append(
-                text(f"threat_types @> '{json.dumps([threat_type])}'::jsonb")
+                text("threat_types @> CAST(:tt AS jsonb)").bindparams(
+                    tt=json.dumps([threat_type])
+                )
             )
         if tags:
-            for tag in tags:
+            for i, tag in enumerate(tags):
                 conditions.append(
-                    text(f"tags @> '{json.dumps([tag])}'::jsonb")
+                    text(f"tags @> CAST(:tag_{i} AS jsonb)").bindparams(
+                        **{f"tag_{i}": json.dumps([tag])}
+                    )
                 )
 
         stmt = select(KnowledgeDoc)

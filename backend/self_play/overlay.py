@@ -125,7 +125,7 @@ class RuleOverlay:
             "detected": True,
             "hits": hits,
             "rule_ids": [h["rule_id"] for h in hits],
-            "attack_types": list({h["attack_type"] for h in hits if h.get("attack_type")}),
+            "attack_types": sorted({h["attack_type"] for h in hits if h.get("attack_type")}),
         }
 
     def detect_scoring(self, match_id: str, event: dict) -> dict[str, Any]:

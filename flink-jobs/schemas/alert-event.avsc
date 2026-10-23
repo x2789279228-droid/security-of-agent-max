@@ -2,7 +2,7 @@
   "type": "record",
   "name": "AlertEvent",
   "namespace": "com.soc.schema",
-  "doc": "安全告警 Schema — security-alerts topic 的规范消息格式",
+  "doc": "安全告警 Schema — 投影自 backend/schemas/alert_event.schema.json",
   "fields": [
     {"name": "alertId", "type": "string", "doc": "告警唯一标识"},
     {"name": "eventType", "type": "string", "doc": "触发告警的事件类型"},
@@ -12,8 +12,16 @@
     {"name": "message", "type": "string", "doc": "告警描述"},
     {"name": "anomalyScore", "type": "double", "doc": "异常评分 [0, 1]"},
     {"name": "alertType", "type": {"type": "enum", "name": "AlertType", "symbols": ["ANOMALY", "ATTACK_CHAIN", "THRESHOLD"]}, "doc": "告警类型"},
-    {"name": "reasons", "type": {"type": "array", "items": "string"}, "doc": "告警触发原因列表"},
+    {"name": "reasons", "type": {"type": "array", "items": "string"}, "default": [], "doc": "告警触发原因列表"},
     {"name": "timestamp", "type": "long", "doc": "告警时间戳 (epoch millis)"},
-    {"name": "traceId", "type": ["null", "string"], "default": null, "doc": "全链路追踪 ID"}
+    {"name": "traceId", "type": ["null", "string"], "default": null, "doc": "全链路追踪 ID"},
+    {"name": "evidenceEventIds", "type": ["null", {"type": "array", "items": "string"}], "default": null, "doc": "证据事件 ID"},
+    {"name": "evidenceChain", "type": ["null", {"type": "array", "items": {"type": "map", "values": ["null", "string", "long", "double", "boolean"]}}], "default": null, "doc": "证据链快照"},
+    {"name": "timeSpanMs", "type": ["null", "long"], "default": null, "doc": "攻击链时间跨度 (毫秒)"},
+    {"name": "schemaVersion", "type": ["null", "string"], "default": null, "doc": "事件结构版本 (semver)"},
+    {"name": "producer", "type": ["null", "string"], "default": null, "doc": "生产方标识"},
+    {"name": "correlationId", "type": ["null", "string"], "default": null, "doc": "同一业务处理过程的关联 ID"},
+    {"name": "occurredAt", "type": ["null", "long"], "default": null, "doc": "事件产生时间 (epoch millis)"},
+    {"name": "parentEventId", "type": ["null", "string"], "default": null, "doc": "派生告警指向的来源业务事件 ID"}
   ]
 }

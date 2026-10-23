@@ -6,7 +6,7 @@
 - 忠实度: faithfulness / citation_coverage / answer_relevance / unsupported_claim_ratio
 """
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from eval_metrics import (
     lexical_overlap_score,

@@ -6,14 +6,11 @@
   - 资产权重查询 (供 anomaly_detector 加权评分)
   - 资产变更审计 (接入 P0.H audit_trail)
 """
-import hashlib
-import ipaddress
 import logging
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, or_, and_, desc
+from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Asset, AssetChange

@@ -1,3 +1,5 @@
+import type { DependencyHealth } from '../types'
+
 const BASE = '/api'
 
 function authHeaders(): Record<string, string> {
@@ -69,6 +71,14 @@ export const api = {
   treeNodes: () => fetchJSON<any[]>('/tree/nodes'),
 
   serviceStatus: () => fetchJSON<any>('/health'),
+
+  /**
+   * 依赖可达性探针（需鉴权）—— Monitor 健康仪表的数据源。
+   * 注意与上面的 serviceStatus 区分：/health 是静态 {"status":"ok"} 的进程
+   * 存活探针，不探测任何依赖；本端点真实探测 postgres/redis/qdrant，
+   * LLM 给配置完备性。2026-10-03 新增。
+   */
+  dependencyHealth: () => fetchJSON<DependencyHealth>('/health/dependencies'),
 
   // ── 安全审计端点 ──
 
@@ -431,16 +441,19 @@ export const api = {
     return fetchJSON<any[]>(`/events/recent${qs ? `?${qs}` : ''}`)
   },
 
-  /** 创建 SSE 事件流连接；lastEventSeq 用于手动重建连接时通过查询参数补传断点（浏览器仅自动重连时才携带头） */
-  eventsStream: (lastEventSeq?: number) => {
+  /** 创建 SSE 事件流。lastEventId 是 SecurityEvent.id，不是进程内序号。 */
+  eventsStream: (lastEventId?: number, refreshIds?: number[]) => {
     // token 缺失时不要建连:既拿不到认证(401),又会触发 EventSource 的自动重连风暴,
     // 看门狗会把"未登录"误报成"重连中"。交给调用方的 onerror 分支处理。
     const token = localStorage.getItem('sm_token')
     if (!token) return null
     const params = new URLSearchParams()
     params.set('token', token)
-    if (typeof lastEventSeq === 'number' && lastEventSeq > 0) {
-      params.set('last_event_id', String(lastEventSeq))
+    if (typeof lastEventId === 'number' && lastEventId > 0) {
+      params.set('last_event_id', String(lastEventId))
+    }
+    if (refreshIds && refreshIds.length) {
+      params.set('refresh_ids', refreshIds.slice(0, 32).join(','))
     }
     const qs = params.toString()
     return new EventSource(`${BASE}/events/stream${qs ? `?${qs}` : ''}`)

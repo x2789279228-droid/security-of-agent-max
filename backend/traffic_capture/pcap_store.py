@@ -15,7 +15,6 @@ pcap_store.py — PCAP 文件轮转与分层存储
 """
 import asyncio
 import logging
-import os
 import struct
 import time
 from datetime import datetime, timezone, timedelta

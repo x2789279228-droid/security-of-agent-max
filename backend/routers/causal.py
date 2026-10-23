@@ -56,6 +56,11 @@ async def causal_learn(
         "n": result.get("n"),
         "names": result.get("names") or [],
         "directed": result.get("directed") or [],
+        # `directed` 里哪些方向是数据给的、哪些是先验（TACTIC_RANK）给的。
+        # 整改方案 §九.3：先验定的方向**不是**数据支持的因果方向，
+        # 下游拿 `directed` 当因果图用之前必须能分开看。
+        "directed_data": result.get("directed_data") or [],
+        "directed_prior": result.get("directed_prior") or [],
         "edges": result.get("edges") or [],
         "agree_rate": result.get("agree_rate"),
         "candidates": result.get("candidates") or [],

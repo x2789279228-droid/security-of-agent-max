@@ -9,7 +9,7 @@ Audit-LLM 数据结构定义
   - FinalVerdict: Reviewer 的最终裁决
 """
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 # ── 审核深度等级 ──
@@ -100,6 +100,17 @@ class ToolResult:
     data: Any = None
     error: str = ""
     duration_ms: float = 0.0
+    # P1-Executor: 是否被安全层（_pre_execute_check / RBAC / 规则引擎）拒绝。
+    # 修复前工具被拒与工具自身报错在结果里完全一样（都是 success=False），
+    # 于是「因为不安全和因为它崩了」无法区分，终态只能是二元的。
+    security_denied: bool = False
+    # P2-B-4: 是否因超出注册 timeout_ms 被强制取消。
+    # 与 security_denied 分开：超时是可用性问题，不是安全判定。
+    timed_out: bool = False
+    # P3-6: 是否因参数越界被拒绝执行。
+    # 独立于 security_denied：参数被拒既不是安全策略判定，
+    # 也不是工具崩溃，混进同一个 success=False 会让「被拒执行」不可区分。
+    param_rejected: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -110,6 +121,9 @@ class ToolResult:
             "data_preview": str(self.data)[:200] if self.data else None,
             "error": self.error,
             "duration_ms": self.duration_ms,
+            "security_denied": self.security_denied,
+            "timed_out": self.timed_out,
+            "param_rejected": self.param_rejected,
         }
 
 
@@ -131,6 +145,9 @@ class AuditResult:
     grounding_score: float = 1.0          # 程序化 grounding 验证综合分 (0-1)
     kb_verification: dict = field(default_factory=dict)  # 知识库交叉验证结果
     schema_valid: bool = True             # 结构化输出验证是否通过
+    # P0-E-4: schema 校验失败的具体原因。schema_valid=False 时非空，
+    # 用于审计追溯「这条结论因哪个字段非法而被降级」。
+    schema_errors: list[str] = field(default_factory=list)
 
     # PR1 否决闸
     verdict: str = ""                     # confirmed / suspicious / false_positive / insufficient_evidence
@@ -138,9 +155,21 @@ class AuditResult:
     hop_trace: list[dict] = field(default_factory=list)
     non_llm_signals: dict = field(default_factory=dict)
 
+    # P1-Executor: 三类终态（completed / budget_exhausted / security_denied）。
+    # 修复前 Executor 只有「跑完」与「跳过 deep hop」两种隐含状态，
+    # 且预算耗尽在 merge 层塌成与真实全清相同的 verdict 字符串。
+    terminal_state: str = ""
+    terminal_reason: str = ""
+    llm_calls_made: int = 0
+    llm_calls_planned: int = 0
+
     # 深度分析输出（前置合成模式：deep_analyze 在 synthesize 之前执行，
     # 其结论注入到汇总 prompt 中作为额外上下文，亦独立保留供前端展示）
     deep_analysis: str = ""
+
+    # P1: 复核可追溯记录 —— 原始等级 / 重评过程 / 最终采用等级 三者并存。
+    # 没有它就分不清「复核推翻了原结论」与「复核保持沉默」。
+    recheck_audit: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -157,11 +186,22 @@ class AuditResult:
             "grounding_score": self.grounding_score,
             "kb_supported": self.kb_verification.get("supported", 0),
             "schema_valid": self.schema_valid,
+            "schema_errors": list(self.schema_errors or [])[:5],
             "has_deep_analysis": bool(self.deep_analysis),
             "verdict": self.verdict,
             "discarded_claim_count": len(self.discarded_claims),
             "non_llm_signal": bool((self.non_llm_signals or {}).get("has_signal")),
+            "recheck_escalated": bool((self.recheck_audit or {}).get("escalated")),
+            "recheck_demoted": bool((self.recheck_audit or {}).get("demoted")),
+            "original_verdict": (self.recheck_audit or {}).get("original", {}).get("verdict", ""),
             "hop_trace": list(self.hop_trace or []),
+            # P1-Executor: 终态与真实 LLM 调用次数。
+            # "budget_exhausted" 与 "completed" 的 verdict 可能都是
+            # false_positive —— 差异只能从这里读到。
+            "terminal_state": self.terminal_state,
+            "terminal_reason": self.terminal_reason,
+            "llm_calls_made": self.llm_calls_made,
+            "llm_calls_planned": self.llm_calls_planned,
         }
 
 

@@ -112,7 +112,8 @@ def test_embed_many_chunks_by_size():
 
 def test_embed_batch_miss_only_with_cache():
     from summary_compression import embedder
-    import hashlib, json as _json
+    import hashlib
+    import json as _json
     r = embedder.redis
     hit_text = "cached-text"
     key = "embed_cache:db:" + hashlib.md5(hit_text.encode()).hexdigest()

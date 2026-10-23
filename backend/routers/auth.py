@@ -114,7 +114,16 @@ async def login(req: LoginRequest, request: Request):
 
 @router.post("/auth/register")
 async def register(req: RegisterRequest, request: Request):
-    """自助注册 — 默认 role=viewer；不可占用内置 admin 用户名"""
+    """自助注册 — 默认关闭；开启后 role=viewer，不可占用内置 admin 用户名。
+
+    闸门语义：
+      * `allow_self_registration=False`（默认）→ 403，不泄露账号是否存在；
+      * 开启后仍保留用户名/密码校验、admin 用户名拒绝与 best-effort 限流；
+      * 首个管理员账号应由部署脚本/CLI 创建，而不是依赖公开注册。
+    """
+    if not getattr(settings, "allow_self_registration", False):
+        raise HTTPException(status_code=403, detail="自助注册已关闭")
+
     from user_store import (
         create_user,
         get_by_username,
@@ -204,6 +213,8 @@ _is_prod = os.environ.get("SHARED_MEMORY_ENV_NAME", settings.env_name) == "prod"
 
 @router.get("/health")
 async def health():
+    # 进程存活探针。刻意不探测依赖 —— 保持无鉴权/可公开，便于 LB 使用。
+    # 依赖可达性见 /health/dependencies（需鉴权）。
     if _is_prod:
         return {"status": "ok"}
     return {"status": "ok", "services": {
@@ -212,3 +223,21 @@ async def health():
         "kafka": "enabled" if settings.kafka_enabled else "disabled",
         "kafka_bootstrap": settings.kafka_bootstrap if settings.kafka_enabled else "",
     }}
+
+
+@router.get("/health/dependencies")
+async def health_dependencies(user: UserInfo = Depends(get_current_user)):
+    """依赖可达性探针 —— 前端 Monitor 健康仪表的数据源。
+
+    为什么与 /health 分开：
+      - /health 是**静态** {"status": "ok"}，不探测任何依赖，且需保持公开给 LB
+      - 本端点真实探测 postgres / redis / qdrant，并对 LLM 给出配置完备性
+        （不发真实 LLM 请求 —— 该端点会被前端轮询）
+
+    2026-10-03 修复：此前前端 Monitor 的三个健康环硬编码为 'ok'，而
+    setService/setAll 零调用点，即【该数据在全项目中根本不存在】。
+
+    需鉴权：detail 字段含内部地址与错误原文，不宜公开。
+    """
+    from dependency_health import probe_dependencies
+    return await probe_dependencies()

@@ -18,7 +18,6 @@ SecurityGuard 对动作进行多维度安全审查：
 """
 import logging
 
-from .check_result import CheckResult
 from .intent_checker import IntentChecker
 from .sequence_guard import SequenceGuard
 from .rate_limiter import RateLimiter

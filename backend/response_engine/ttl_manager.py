@@ -192,26 +192,42 @@ class TtlManager:
 
             # 读取参数（key 可能已被 Redis EX 自动删除）
             data = await self._redis.get(key)
+            action_name = ""
+            params: dict = {}
             if data:
                 payload = json.loads(data)
                 action_name = payload.get("action_name", "")
                 params = payload.get("params", {})
                 logger.info(f"[TTL] Expiring: {rule_id} ({action_name})")
+            else:
+                # payload 已过期不代表规则已删除：仍必须按 rule_id 尝试回滚。
+                logger.warning(
+                    f"[TTL] Expiring: {rule_id} (payload missing → rollback by rule_id only)"
+                )
 
-                # 执行回滚
-                if self._rollback_fn:
-                    try:
-                        result = await self._rollback_fn(rule_id, action_name, params)
-                        logger.info(
-                            f"[TTL] Auto-rollback {rule_id}: "
-                            f"{'OK' if result.get('success') else 'FAILED'}"
-                        )
-                    except Exception as e:
-                        logger.error(f"[TTL] Auto-rollback {rule_id} error: {e}")
-                else:
-                    logger.warning(f"[TTL] No rollback callback, cannot auto-rollback {rule_id}")
+            # 执行回滚
+            rolled_back = False
+            if self._rollback_fn:
+                try:
+                    result = await self._rollback_fn(rule_id, action_name, params)
+                    rolled_back = bool(result.get("success"))
+                    logger.info(
+                        f"[TTL] Auto-rollback {rule_id}: "
+                        f"{'OK' if rolled_back else 'FAILED'}"
+                    )
+                except Exception as e:
+                    logger.error(f"[TTL] Auto-rollback {rule_id} error: {e}")
+            else:
+                logger.warning(f"[TTL] No rollback callback, cannot auto-rollback {rule_id}")
 
-            # 清理索引（无论回滚是否成功）
+            # 只有回滚成功才清理索引；失败必须保留，下一轮继续重试。
+            # 否则一次 SSH 抖动就会让规则永久留存，而系统以为已解封。
+            if not rolled_back:
+                logger.warning(
+                    f"[TTL] Keep {rule_id} in index for retry (rollback failed)"
+                )
+                continue
+
             await self._redis.zrem(_INDEX_KEY, rule_id)
             await self._redis.delete(key)
 

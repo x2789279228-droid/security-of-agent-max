@@ -12,12 +12,11 @@ KPI 计算器 (KPI Calculator) — P0.B 核心
 快照粒度: daily | weekly
 存储: kpi_snapshots 表 (UNIQUE on (date, period, metric_key, dimensions))
 """
-import json
 import logging
 from datetime import date, datetime, timezone, timedelta
 from typing import Optional
 
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import (

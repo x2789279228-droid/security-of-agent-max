@@ -48,6 +48,15 @@ async def load_priors_into_cache(session) -> None:
         logger.warning(f"load_priors_into_cache failed: {e}")
 
 
+def _record_prior_lookup_failed() -> None:
+    """记录一次先验读取失败 → §9.57。指标不可用时静默忽略。"""
+    try:
+        from core_metrics import record_reputation_prior_lookup_failed
+        record_reputation_prior_lookup_failed()
+    except Exception:
+        pass
+
+
 async def _get_prior_delta(target_type: str, target: str, session=None) -> float:
     """读取有界先验 delta; 任何失败返回 0.0(fail-open)。"""
     try:
@@ -65,7 +74,14 @@ async def _get_prior_delta(target_type: str, target: str, session=None) -> float
             return 0.0
         return float(_PRIOR_CACHE.get((target_type, target), 0.0))
     except Exception as e:
-        logger.debug("prior delta lookup skipped: %s", e)
+        # 2026-10-20 修复（整改报告 §9.57）：原先这里是 **debug** 级日志 ——
+        # 生产默认 INFO → **这次降级根本看不见**。
+        # 而它不是无害的：delta 会**加到主评分上**（clip ±learn_loop_prior_clip），
+        # 一次 DB 抖动就让「重复攻击者」的信誉分少掉一个先验修正，
+        # 可能跨过 clean/suspicious/malicious 的档位 → 处置降级，而没人知道。
+        logger.warning(
+            "[Reputation] 先验 delta 读取失败(降级为 0，评分少一个先验修正): %s", e)
+        _record_prior_lookup_failed()
         return 0.0
 
 
@@ -126,7 +142,11 @@ class ReputationEngine:
         except ValueError:
             pass
 
-        # learn_loop 有界先验(TP/FP 反馈 → delta): fail-open, 不影响主评分
+        # learn_loop 有界先验(TP/FP 反馈 → delta)。
+        # ⚠ 2026-10-20 更正（整改报告 §9.57）：原注释写「fail-open, 不影响主评分」——
+        #   **不准确**：delta 就在下一行**加到主评分上**（clip ±learn_loop_prior_clip），
+        #   所以「读取失败 → delta=0」会让评分**少掉**一个先验修正（可能跨档位）。
+        #   降级现在**可见且可数**（warning + soc_reputation_prior_lookup_failed_total）。
         delta = await _get_prior_delta("ip", ip, session)
         score = min(1.0, max(0.0, min(score, 1.0) + delta))
         if delta:
@@ -173,7 +193,8 @@ class ReputationEngine:
                 score += 0.15
                 factors.append("high_digit_ratio")
 
-        # learn_loop 有界先验(TP/FP 反馈 → delta): fail-open, 不影响主评分
+        # learn_loop 有界先验(TP/FP 反馈 → delta)。⚠ 同上（§9.57）：
+        #   delta **会**加到主评分上，读取失败会让评分少掉一个先验修正。
         delta = await _get_prior_delta("domain", domain, session)
         score = min(1.0, max(0.0, min(score, 1.0) + delta))
         if delta:

@@ -27,11 +27,14 @@
 """
 import asyncio
 import base64
+import hashlib
 import ipaddress
 import logging
+import random
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Optional
+from typing import Callable, Coroutine, Optional
+from urllib.parse import urlsplit
 
 from config import settings
 from .transport import ssh_transport
@@ -265,7 +268,7 @@ def _families_for(host_ip: str, extra: Optional[list] = None) -> list:
 def _marker_for_domain(domain: str) -> str:
     """域名 → 确定性 sinkhole marker(SOC-SH-<sha1 前 10 位>) — 回滚无需额外状态。"""
     import hashlib as _h
-    return f"SOC-SH-{_h.sha1(domain.encode('ascii')).hexdigest()[:10].upper()}"
+    return f"SOC-SH-{_h.sha1(domain.encode('ascii'), usedforsecurity=False).hexdigest()[:10].upper()}"
 
 def _same_host(record_ip: str, target: str) -> bool:
     """记录里的 host/ip 与目标是否同一地址(先字符串相等, 再按 ipaddress 规范化比较)。"""
@@ -309,6 +312,8 @@ async def _ensure_firewall_connected() -> Optional[str]:
                 host=_s.fw_ssh_host, port=_s.fw_ssh_port,
                 username=_s.fw_ssh_user, password=_s.fw_ssh_password,
                 use_sudo=_s.fw_use_sudo,
+                known_hosts=getattr(_s, "fw_ssh_known_hosts", ""),
+                allow_unknown_host=getattr(_s, "fw_ssh_allow_unknown_host", False),
             )
         if not ssh_firewall._connected:
             await asyncio.to_thread(ssh_firewall.connect)
@@ -316,6 +321,51 @@ async def _ensure_firewall_connected() -> Optional[str]:
     except Exception as ce:
         logger.error(f"ssh_firewall auto-connect failed: {ce}")
         return str(ce)
+
+def _auto_unblock_info(
+    action: str,
+    rule_ids: str,
+    duration_minutes: int,
+    *,
+    mechanism: str = "in_process_task",
+    restart_survives: bool = False,
+) -> dict:
+    """自动解封的**机制与局限**（整改报告 §9.53）。
+
+    这段信息要跟着动作结果落进 `response_logs` —— 运维看得到
+    「这次封禁靠的是 Redis TTL（扛重启）还是进程内定时任务（不扛重启）」。
+    """
+    scheduled = bool(rule_ids) and duration_minutes > 0
+    if scheduled and mechanism == "redis_ttl":
+        note = (
+            "自动解封由 Redis TTL + 后台扫描器驱动，进程重启后仍会执行；"
+            "若 Redis 不可用，TTL 注册会失败并回退为进程内任务（此时不扛重启）。"
+        )
+    elif scheduled:
+        note = (
+            "自动解封是**进程内**的定时任务；进程重启 / 发布 / 崩溃会导致这次"
+            "自动解封**静默丢失**（规则将一直留存）—— 整改报告 §9.53。"
+        )
+    else:
+        note = "本次未调度自动解封"
+    return {
+        "scheduled": scheduled,
+        "mechanism": mechanism if scheduled else "",
+        "restart_survives": bool(restart_survives and scheduled),
+        "duration_minutes": duration_minutes,
+        "rule_ids": rule_ids,
+        "note": note,
+    }
+
+
+def _record_auto_unblock_scheduled(action: str) -> None:
+    """记录一次「自动解封已调度」（用的是扛不住重启的机制）→ §9.53。"""
+    try:
+        from core_metrics import record_auto_unblock_scheduled
+        record_auto_unblock_scheduled(action)
+    except Exception:
+        pass
+
 
 async def _auto_rollback(rule_id: str, delay_seconds: int, label: str) -> None:
     """延时后按 rule_id 回滚(隔离 TTL / 封禁 TTL 共用)。"""
@@ -327,6 +377,26 @@ async def _auto_rollback(rule_id: str, delay_seconds: int, label: str) -> None:
     except Exception as e:
         logger.error(f"[auto-rollback] {label} rule_id={rule_id} failed: {e}")
 
+
+async def ttl_rollback(rule_id: str, action_name: str, params: dict) -> dict:
+    """TTL 管理器的回滚回调：只负责按 rule_id 删除真实规则。
+
+    与进程内 `_auto_rollback` 的区别：该回调由 Redis 持久化索引驱动，
+    进程重启后仍会被 `ttl_manager` 扫描到并执行。
+    """
+    from .ssh_firewall import ssh_firewall
+    try:
+        rb = ssh_firewall.rollback(rule_id)
+        return {
+            "success": rb.get("status") == "success",
+            "rule_id": rule_id,
+            "action": action_name,
+            "detail": rb,
+        }
+    except Exception as e:
+        logger.error(f"[ttl-rollback] {rule_id} ({action_name}) failed: {e}")
+        return {"success": False, "rule_id": rule_id, "action": action_name, "error": str(e)}
+
 # ════════════════════════════════════════════
 # 响应动作实现 (真实执行 + 桩回退)
 # ════════════════════════════════════════════
@@ -336,13 +406,23 @@ def _mode() -> str:
     return getattr(settings, "response_transport_mode", "auto")
 
 
-async def _stub_fallback(action: str, **fields) -> dict:
-    """SSH 不可用时的桩回退"""
+async def _stub_fallback(action: str, reason: str = "", **fields) -> dict:
+    """SSH 不可用（或命令被拒）时的桩回退。
+
+    ⚠ `reason` 必须带上**真实原因**（整改方案 §9.45）：
+    修复前这里写死一句「SSH transport requires RESPONSE_SSH_HOST config」——
+    而实际卡点可能是**命令白名单拒绝**（平台没把 platform 转发给 transport），
+    运维照着这句话去查 SSH 配置会**完全走错方向**。
+
+    桩回退**不执行任何动作**，但它**必须说清为什么没执行**。
+    """
+    if not reason:
+        reason = "SSH transport not configured"
     logger.warning(
-        f"[STUB] {action} would execute: {fields}"
-        f" (SSH transport requires RESPONSE_SSH_HOST config)"
+        f"[STUB] {action} would execute: {fields} (reason: {reason})"
     )
-    return {"action": action, "mode": "stub", **fields, "_stub": True}
+    return {"action": action, "mode": "stub", **fields, "_stub": True,
+            "reason": reason}
 
 
 def _ps_cmd(script: str) -> str:
@@ -368,21 +448,45 @@ async def _exec(cmd: str, action: str, platform: str = "windows", **fields) -> d
     rule_id = fields.pop("_rule_id", "")
 
     async def _live_fn(command: str) -> dict:
-        """真实 SSH 执行（保留原有 stub 回退逻辑）"""
+        """真实 SSH 执行（保留原有 stub 回退逻辑）
+
+        ⚠ **platform 必须转发**（整改方案 §9.45）：
+        修复前这里是 `ssh_transport.run(command, powershell=use_powershell)`
+        —— **没传 platform**，于是 `transport.run()` 用它自己的默认值
+        `platform="linux"` 去查白名单。而本路径的命令是 **windows** 形态
+        （`_ps_cmd()` 已 Base64 编码），linux 规则里**没有任何一条能匹配**
+        → **每一个 Windows 响应动作都被白名单拒绝**。
+
+        实测（修复前）：
+            第一道（safe_executor, platform="windows"）→ allowed, WIN-004 ✓
+            第二道（transport.run,  platform="linux"）  → REJECTED ✗
+        → auto 模式下退化成桩，且拒绝原因被换成
+          「SSH transport requires RESPONSE_SSH_HOST config」（**误导**）。
+
+        ⚠ `powershell` 必须是 **False**：命令**已经是** `_ps_cmd()` 产出的
+        最终形态（`powershell -NoProfile ... -EncodedCommand <b64>`），
+        再让 transport 编码一次会变成**双层** powershell ——
+        内层脚本的 `exit N` 会被外层吞掉，**失败的动作会被报成 success**。
+        单层时，远端执行的就是被白名单校验过的那条命令。
+        """
         mode = _mode()
+        reason = ""
         if mode == "ssh" or (mode == "auto" and ssh_transport.enabled):
-            # Linux 目标用 sh(无 PowerShell),Windows 用 PowerShell
-            use_powershell = platform != "linux"
-            result = await ssh_transport.run(command, powershell=use_powershell)
+            result = await ssh_transport.run(
+                command, powershell=False, platform=platform,
+            )
             if result["success"]:
                 logger.info(f"[SSH/{platform}] {action} OK: {result['stdout'][:100]}")
                 return {"action": action, "mode": "ssh", **fields, **result}
-            elif mode == "ssh":
-                logger.error(f"[SSH/{platform}] {action} FAILED: {result['stderr'][:200]}")
+            # ⚠ 白名单拒绝时 `stderr` 是**空串**，只用它会把原因打成空
+            reason = result.get("error") or result.get("stderr") or ""
+            if mode == "ssh":
+                logger.error(f"[SSH/{platform}] {action} FAILED: {reason[:200]}")
                 return {"action": action, "mode": "ssh", "success": False, **fields, **result}
-            else:
-                logger.warning(f"[SSH/{platform}] {action} failed, fallback to stub: {result['stderr'][:100]}")
-        return await _stub_fallback(action, **fields)
+            logger.warning(
+                f"[SSH/{platform}] {action} failed, fallback to stub: {reason[:150]}"
+            )
+        return await _stub_fallback(action, reason=reason, **fields)
 
     return await safe_executor.execute(
         action_name=action,
@@ -406,56 +510,141 @@ async def _exec(cmd: str, action: str, platform: str = "windows", **fields) -> d
 async def _block_ip(src_ip: str, reason: str = "", duration_minutes: int = 60, **kwargs) -> dict:
     """
     封禁源IP — 按地址族走 ssh_firewall(IPv4→iptables INPUT, IPv6→ip6tables INPUT)。
-    支持自动解封: 记录 rule_id, asyncio.create_task 在 duration 后调 ssh_firewall.rollback。
-    直连 ssh_firewall: mock/dry_run 模式不建 SSH, 按 config.execution_mode 路由。
+
+    2026-10-21：**所有**真实封禁都必须经过 SafeExecutor 的检查链
+    （命令白名单 / 参数校验 / 资产保护 / Redis 幂等 / 模式路由 /
+    post-validator / TTL 注册）。此前本函数直连 ssh_firewall，
+    导致 high 级动作可被 operator 绕过审批、无幂等保护、无后置验证。
+
+    TTL 优先用 Redis（`ttl_manager`，可跨进程重启）；仅当 Redis 不可用
+    时才回退到进程内 `create_task`，并在返回值中如实标注“不扛重启”。
     """
     src_ip = _validate_ip(src_ip)
     duration_minutes = _validate_positive_int(duration_minutes, "duration_minutes")
-    rule_name = f"RE_Block_{src_ip.replace('.','_')}"
+    try:
+        addr = ipaddress.ip_address(src_ip)
+    except ValueError as e:
+        return {"action": "block_ip", "success": False, "mode": "invalid",
+                "error": str(e), "src_ip": src_ip}
+    norm_ip = str(addr)
+    family = "ipv6" if addr.version == 6 else "ipv4"
+    table = "ip6tables" if family == "ipv6" else "iptables"
+    rule_id = f"FW-RULE-{random.randint(10000, 99999)}"
+    rule_name = f"RE_Block_{norm_ip.replace('.', '_').replace(':', '_')}"
+    command = (
+        f"{table} -I INPUT -s {norm_ip} -j DROP "
+        f"-m comment --comment '{rule_id}'"
+    )
 
-    exec_mode = _execution_mode()
-    if exec_mode != "live":
+    from .safe_executor import safe_executor
+    from .ssh_firewall import ssh_firewall
+
+    params: dict = {
+        "src_ip": norm_ip,
+        "duration_minutes": duration_minutes,
+        "rule_id": rule_id,
+        "rule_name": rule_name,
+    }
+    for key in ("event_id", "eventId", "grounding_score"):
+        if kwargs.get(key) is not None:
+            params[key] = kwargs[key]
+
+    async def _live_fn(_cmd: str) -> dict:
+        err = await _ensure_firewall_connected()
+        if err:
+            return {
+                "success": False, "mode": "error", "action": "block_ip",
+                "src_ip": norm_ip, "rule_name": rule_name,
+                "error": f"ssh_firewall connect failed: {err}",
+            }
+        fw_result = ssh_firewall.block_ip(
+            norm_ip, duration=duration_minutes * 60, rule_id=rule_id,
+        )
+        success = fw_result.get("status") == "success"
         return {
-            "action": "block_ip", "success": True, "mode": exec_mode,
-            "would_execute": exec_mode == "dry_run",
-            "src_ip": src_ip, "duration_minutes": duration_minutes,
+            "action": "block_ip",
+            "success": success,
+            "mode": "ssh_firewall_paramiko",
+            "src_ip": norm_ip,
+            "duration_minutes": duration_minutes,
             "rule_name": rule_name,
-            "firewall_rule_id": f"FW-RULE-MOCK-{sum(map(ord, src_ip)) % 100000}",
-            "detail": {"message": f"[{exec_mode.upper()}] block_ip 未执行真实封禁"},
+            "firewall_rule_id": fw_result.get("rule_id", rule_id),
+            "family": fw_result.get("family", family),
+            "detail": fw_result,
         }
 
-    from .ssh_firewall import ssh_firewall
-    # ssh_firewall 是单例,可能未 connect 或 configure 不完整 — 首次调用前自动 (re-)configure + connect
-    err = await _ensure_firewall_connected()
-    if err:
-        return {"success": False, "error": f"ssh_firewall connect failed: {err}",
-                "mode": "error", "src_ip": src_ip, "rule_name": rule_name}
-    try:
-        fw_result = ssh_firewall.block_ip(src_ip, duration=duration_minutes * 60)
-    except Exception as e:
-        logger.error(f"[block_ip] ssh_firewall.block_ip failed: {e}")
-        return {"success": False, "error": str(e), "mode": "error", "src_ip": src_ip, "rule_name": rule_name}
+    async def _verify_fn(cmd: str) -> dict:
+        # post_validator 会传只读查询命令；不能复用 _live_fn（否则会再次封禁）。
+        return await asyncio.to_thread(ssh_firewall.run_verify_command, cmd)
 
-    # ssh_firewall 返回 {"status": "success" | "blocked" | "error", "rule_id": ...}
-    success = fw_result.get("status") == "success"
-    fw_rule_id = fw_result.get("rule_id", "")
+    ttl_seconds = duration_minutes * 60
+    result = await safe_executor.execute(
+        action_name="block_ip",
+        command=command,
+        params=params,
+        platform="linux",
+        live_fn=_live_fn,
+        ttl_seconds=ttl_seconds,
+        rule_id=rule_id,
+        verify_fn=_verify_fn,
+        idempotency_key=f"soc:idem:block_ip:{norm_ip}:{duration_minutes}",
+        idempotency_ttl=ttl_seconds or 86400,
+        mode_override=_execution_mode(),
+    )
 
-    result = {
-        "action": "block_ip",
-        "success": success,
-        "mode": "ssh_firewall_paramiko",
-        "src_ip": src_ip,
-        "duration_minutes": duration_minutes,
-        "rule_name": rule_name,
-        "firewall_rule_id": fw_rule_id,
-        "family": fw_result.get("family", ""),
-        "detail": fw_result,
-    }
+    mode = result.get("mode", "")
+    if mode in ("dry_run", "mock", "idempotent_skip"):
+        result.setdefault("action", "block_ip")
+        result.setdefault("src_ip", norm_ip)
+        result.setdefault("duration_minutes", duration_minutes)
+        result.setdefault("rule_name", rule_name)
+        result.setdefault("family", family)
+        if mode == "dry_run":
+            result.setdefault("would_execute", True)
+            result.setdefault("firewall_rule_id", f"FW-RULE-MOCK-{sum(map(ord, norm_ip)) % 100000}")
+        elif mode == "mock":
+            result.setdefault("firewall_rule_id", rule_id)
+        if mode == "idempotent_skip":
+            result["auto_unblock"] = {
+                "scheduled": True,
+                "mechanism": "idempotent_skip",
+                "restart_survives": True,
+                "duration_minutes": duration_minutes,
+                "rule_ids": rule_id,
+                "note": "同一目标/时长的封禁已存在，本次未重复执行；TTL 沿用首次注册。",
+            }
+        else:
+            result["auto_unblock"] = _auto_unblock_info("block_ip", "", 0)
+        return result
 
-    # 自动解封: 通过 ssh_firewall.rollback(rule_id) 删除规则
-    if success and duration_minutes > 0 and fw_rule_id:
-        asyncio.create_task(_auto_rollback(fw_rule_id, duration_minutes * 60, f"[block_ip] {src_ip}"))
-        logger.info(f"[block_ip] auto-unblock scheduled for {src_ip} in {duration_minutes}min (rule_id={fw_rule_id})")
+    # live 结果：SafeExecutor 已在执行成功且 ttl_seconds>0 时注册 Redis TTL。
+    if result.get("success") and duration_minutes > 0:
+        if result.get("ttl_registered"):
+            result["auto_unblock"] = _auto_unblock_info(
+                "block_ip", rule_id, duration_minutes,
+                mechanism="redis_ttl", restart_survives=True,
+            )
+            _record_auto_unblock_scheduled("block_ip")
+            logger.info(
+                f"[block_ip] auto-unblock registered in Redis for {norm_ip} "
+                f"in {duration_minutes}min (rule_id={rule_id})"
+            )
+        else:
+            # Redis 不可用 → 明确降级，不再假装“已调度且扛重启”。
+            asyncio.create_task(
+                _auto_rollback(rule_id, duration_minutes * 60, f"[block_ip] {norm_ip}")
+            )
+            result["auto_unblock"] = _auto_unblock_info(
+                "block_ip", rule_id, duration_minutes,
+                mechanism="in_process_task", restart_survives=False,
+            )
+            _record_auto_unblock_scheduled("block_ip")
+            logger.warning(
+                f"[block_ip] Redis TTL unavailable → in-process auto-unblock for "
+                f"{norm_ip} in {duration_minutes}min (restart will lose it)"
+            )
+    else:
+        result["auto_unblock"] = _auto_unblock_info("block_ip", "", 0)
 
     return result
 
@@ -499,9 +688,10 @@ async def _isolate_host(host_ip: str, reason: str = "", isolation_type: str = "n
                         duration_minutes: int = 0, **kwargs) -> dict:
     """
     隔离主机 — 双栈: 对 host_ip(+extra_ips) 在匹配族表写 INPUT/OUTPUT DROP。
-    透传 ssh_firewall 的 complete/families_applied/families_missing/rule_ids:
-    有请求的族缺失时 success 可为 True 但 complete=False(部分遏制, 不虚报完全隔离)。
-    duration_minutes>0 → 到期自动 restore(默认 0=人工恢复, 维持原行为)。
+
+    2026-10-21：与 block_ip 一样，先经 SafeExecutor（白名单/参数/资产/幂等/
+    模式/post-validator/TTL），再调用 ssh_firewall 的真实写入路径。
+    complete/families_applied/families_missing 原样透传，部分遏制不虚报为完全隔离。
     """
     host_ip = _validate_ip(host_ip)
     duration_minutes = _validate_positive_int(duration_minutes, "duration_minutes")
@@ -511,51 +701,133 @@ async def _isolate_host(host_ip: str, reason: str = "", isolation_type: str = "n
     else:
         extra_list = [str(e) for e in (extra_ips or [])]
 
-    exec_mode = _execution_mode()
-    if exec_mode != "live":
-        fams = _families_for(host_ip, extra_list)
+    try:
+        norm_host = str(ipaddress.ip_address(host_ip))
+        family = "ipv6" if ipaddress.ip_address(norm_host).version == 6 else "ipv4"
+        families = _families_for(norm_host, extra_list)
+    except ValueError as e:
+        return {"action": "isolate_host", "success": False, "mode": "invalid",
+                "host_ip": host_ip, "error": str(e)}
+
+    isolation_id = f"EDR-ISO-{random.randint(10000, 99999)}"
+    table = "ip6tables" if family == "ipv6" else "iptables"
+    # 代表命令：用于白名单/审计展示；真实写入还会覆盖 OUTPUT 与 extra_ips，
+    # 每一条都由 ssh_firewall._exec 的同一套白名单再次校验。
+    command = (
+        f"{table} -I INPUT -s {norm_host} -j DROP "
+        f"-m comment --comment '{isolation_id}'"
+    )
+
+    from .safe_executor import safe_executor
+    from .ssh_firewall import ssh_firewall
+
+    params: dict = {
+        "host_ip": norm_host,
+        "isolation_type": isolation_type,
+        "duration_minutes": duration_minutes,
+        "families": families,
+        "isolation_id": isolation_id,
+    }
+    for key in ("event_id", "eventId", "grounding_score"):
+        if kwargs.get(key) is not None:
+            params[key] = kwargs[key]
+
+    async def _live_fn(_cmd: str) -> dict:
+        err = await _ensure_firewall_connected()
+        if err:
+            return {
+                "success": False, "mode": "error", "action": "isolate_host",
+                "host_ip": norm_host, "error": f"connect failed: {err}",
+            }
+        fw_result = ssh_firewall.isolate_host(
+            norm_host, isolation_type=isolation_type,
+            extra_ips=extra_list or None, isolation_id=isolation_id,
+        )
+        success = fw_result.get("status") == "success"
         return {
-            "action": "isolate_host", "success": True, "mode": exec_mode,
-            "would_execute": exec_mode == "dry_run",
-            "host_ip": host_ip, "isolation_type": isolation_type,
-            "complete": True, "families_applied": fams,
-            "families_missing": [], "rule_ids": ["EDR-ISO-MOCK"],
-            "isolation_id": "EDR-ISO-MOCK",
-            "detail": {"message": f"[{exec_mode.upper()}] isolate_host 未执行真实隔离"},
+            "action": "isolate_host",
+            "success": success,
+            "mode": "ssh_firewall_paramiko",
+            "host_ip": norm_host,
+            "isolation_type": isolation_type,
+            "complete": fw_result.get("complete", success),
+            "families_applied": fw_result.get("families_applied", []),
+            "families_missing": fw_result.get("families_missing", []),
+            "rule_ids": fw_result.get("rule_ids", []),
+            "isolation_id": fw_result.get("isolation_id", isolation_id),
+            "detail": fw_result,
         }
 
-    from .ssh_firewall import ssh_firewall
-    # 自动 connect (同 _block_ip)
-    err = await _ensure_firewall_connected()
-    if err:
-        return {"success": False, "error": f"connect failed: {err}",
-                "mode": "error", "host_ip": host_ip}
-    try:
-        fw_result = ssh_firewall.isolate_host(host_ip, isolation_type=isolation_type,
-                                              extra_ips=extra_list or None)
-    except Exception as e:
-        logger.error(f"[isolate_host] ssh_firewall.isolate_host failed: {e}")
-        return {"success": False, "error": str(e), "mode": "error", "host_ip": host_ip}
-    success = fw_result.get("status") == "success"
-    result = {
-        "action": "isolate_host",
-        "success": success,
-        "mode": "ssh_firewall_paramiko",
-        "host_ip": host_ip,
-        "isolation_type": isolation_type,
-        "complete": fw_result.get("complete", success),
-        "families_applied": fw_result.get("families_applied", []),
-        "families_missing": fw_result.get("families_missing", []),
-        "rule_ids": fw_result.get("rule_ids", []),
-        "isolation_id": fw_result.get("isolation_id", ""),
-        "detail": fw_result,
-    }
-    # 可选隔离 TTL: duration_minutes>0 → 逐条 rule_id 到期自动恢复
-    if success and duration_minutes > 0:
-        for rid in fw_result.get("rule_ids", []):
-            asyncio.create_task(_auto_rollback(rid, duration_minutes * 60, f"[isolate_host] {host_ip}"))
-        logger.info(f"[isolate_host] auto-restore scheduled for {host_ip} in {duration_minutes}min "
-                    f"(rule_ids={fw_result.get('rule_ids', [])})")
+    async def _verify_fn(cmd: str) -> dict:
+        return await asyncio.to_thread(ssh_firewall.run_verify_command, cmd)
+
+    ttl_seconds = duration_minutes * 60
+    result = await safe_executor.execute(
+        action_name="isolate_host",
+        command=command,
+        params=params,
+        platform="linux",
+        live_fn=_live_fn,
+        ttl_seconds=ttl_seconds,
+        rule_id=isolation_id,
+        verify_fn=_verify_fn,
+        idempotency_key=f"soc:idem:isolate_host:{norm_host}:{isolation_type}:{duration_minutes}",
+        idempotency_ttl=ttl_seconds or 86400,
+        mode_override=_execution_mode(),
+    )
+
+    mode = result.get("mode", "")
+    if mode in ("dry_run", "mock", "idempotent_skip"):
+        result.setdefault("action", "isolate_host")
+        result.setdefault("host_ip", norm_host)
+        result.setdefault("isolation_type", isolation_type)
+        result.setdefault("complete", True)
+        result.setdefault("families_applied", families)
+        result.setdefault("families_missing", [])
+        result.setdefault("rule_ids", [isolation_id])
+        result.setdefault("isolation_id", isolation_id)
+        if mode == "dry_run":
+            result.setdefault("would_execute", True)
+        if mode == "idempotent_skip":
+            result["auto_unblock"] = {
+                "scheduled": True,
+                "mechanism": "idempotent_skip",
+                "restart_survives": True,
+                "duration_minutes": duration_minutes,
+                "rule_ids": isolation_id,
+                "note": "同一目标/类型的隔离已存在，本次未重复执行；TTL 沿用首次注册。",
+            }
+        else:
+            result["auto_unblock"] = _auto_unblock_info("isolate_host", "", 0)
+        return result
+
+    if result.get("success") and duration_minutes > 0:
+        if result.get("ttl_registered"):
+            result["auto_unblock"] = _auto_unblock_info(
+                "isolate_host", isolation_id, duration_minutes,
+                mechanism="redis_ttl", restart_survives=True,
+            )
+            _record_auto_unblock_scheduled("isolate_host")
+            logger.info(
+                f"[isolate_host] auto-restore registered in Redis for {norm_host} "
+                f"in {duration_minutes}min (rule_id={isolation_id})"
+            )
+        else:
+            asyncio.create_task(
+                _auto_rollback(isolation_id, duration_minutes * 60,
+                               f"[isolate_host] {norm_host}")
+            )
+            result["auto_unblock"] = _auto_unblock_info(
+                "isolate_host", isolation_id, duration_minutes,
+                mechanism="in_process_task", restart_survives=False,
+            )
+            _record_auto_unblock_scheduled("isolate_host")
+            logger.warning(
+                f"[isolate_host] Redis TTL unavailable → in-process auto-restore for "
+                f"{norm_host} in {duration_minutes}min (restart will lose it)"
+            )
+    else:
+        result["auto_unblock"] = _auto_unblock_info("isolate_host", "", 0)
     return result
 
 
@@ -635,39 +907,79 @@ async def _dns_sinkhole(domain: str = "", ipv4: str = "", ipv6: str = "",
                     "domain": domain, "error": str(e)}
 
     marker_id = str(marker_id or "").strip() or _marker_for_domain(domain)
-    exec_mode = _execution_mode()
-    if exec_mode != "live":
-        return {"action": "dns_sinkhole", "success": True, "mode": exec_mode,
-                "domain": domain, "marker_id": marker_id, "backend": "hosts",
-                "would_execute": exec_mode == "dry_run",
-                "message": f"[{exec_mode.upper()}] dns_sinkhole {domain} 未真实写入"}
 
+    from .safe_executor import safe_executor
     from .ssh_firewall import ssh_firewall
-    err = await _ensure_firewall_connected()
-    if err:
-        return {"action": "dns_sinkhole", "success": False, "mode": "unconfigured",
-                "domain": domain, "marker_id": marker_id, "backend": "unconfigured",
-                "error": f"ssh_firewall connect failed: {err}"}
-    try:
-        fw_res = ssh_firewall.sinkhole_domain(domain=domain,
-                                              ipv4=sink_v4 or None,
-                                              ipv6=sink_v6 or None,
-                                              marker_id=marker_id)
-    except Exception as e:
-        logger.error(f"[dns_sinkhole] ssh_firewall.sinkhole_domain failed: {e}")
-        return {"action": "dns_sinkhole", "success": False, "mode": "error",
-                "domain": domain, "marker_id": marker_id, "backend": "unconfigured",
-                "error": str(e)}
-    sink_ok = bool(fw_res.get("success")) or fw_res.get("status") == "success"
-    result = {
-        "action": "dns_sinkhole",
-        "success": sink_ok,
-        "mode": "ssh_firewall_paramiko",
+
+    params: dict = {
         "domain": domain,
-        "marker_id": fw_res.get("marker_id") or marker_id,
-        "backend": fw_res.get("backend", "unconfigured"),
-        "detail": fw_res,
+        "marker_id": marker_id,
+        "ipv4": sink_v4,
+        "ipv6": sink_v6,
     }
+    for key in ("event_id", "eventId", "grounding_score"):
+        if kwargs.get(key) is not None:
+            params[key] = kwargs[key]
+
+    async def _live_fn(_cmd: str) -> dict:
+        err = await _ensure_firewall_connected()
+        if err:
+            return {
+                "action": "dns_sinkhole", "success": False, "mode": "unconfigured",
+                "domain": domain, "marker_id": marker_id, "backend": "unconfigured",
+                "error": f"ssh_firewall connect failed: {err}",
+            }
+        fw_res = ssh_firewall.sinkhole_domain(
+            domain=domain, ipv4=sink_v4 or None,
+            ipv6=sink_v6 or None, marker_id=marker_id,
+        )
+        sink_ok = bool(fw_res.get("success")) or fw_res.get("status") == "success"
+        return {
+            "action": "dns_sinkhole",
+            "success": sink_ok,
+            "mode": "ssh_firewall_paramiko",
+            "domain": domain,
+            "marker_id": fw_res.get("marker_id") or marker_id,
+            "backend": fw_res.get("backend", "unconfigured"),
+            "detail": fw_res,
+        }
+
+    # sinkhole 的命令由 ssh_firewall 内部按常量模板 + 已校验 domain/IP/marker 拼装，
+    # 无法用 iptables 白名单表达；跳过白名单必须在审计里留痕。
+    result = await safe_executor.execute(
+        action_name="dns_sinkhole",
+        command=f"dns_sinkhole domain={domain} marker={marker_id}",
+        params=params,
+        platform="linux",
+        live_fn=_live_fn,
+        ttl_seconds=0,
+        rule_id=marker_id,
+        idempotency_key=f"soc:idem:dns_sinkhole:{marker_id}",
+        idempotency_ttl=86400,
+        skip_whitelist=True,
+        skip_whitelist_reason=(
+            "dns_sinkhole 使用 ssh_firewall.sinkhole_domain 的常量模板，"
+            "domain/IP/marker 已在入口强校验"
+        ),
+        mode_override=_execution_mode(),
+    )
+
+    mode = result.get("mode", "")
+    if mode in ("dry_run", "mock", "idempotent_skip"):
+        result.setdefault("action", "dns_sinkhole")
+        result.setdefault("domain", domain)
+        result.setdefault("marker_id", marker_id)
+        result.setdefault("backend", "hosts")
+        if mode == "dry_run":
+            result.setdefault("would_execute", True)
+            result.setdefault("message", f"[DRY_RUN] dns_sinkhole {domain} 未真实写入")
+        elif mode == "mock":
+            result.setdefault("message", "[MOCK] dns_sinkhole 已写入")
+        else:
+            result.setdefault("message", "同一 marker 的 sinkhole 已存在，本次未重复执行")
+
+    sink_ok = bool(result.get("success"))
+    result["complete"] = sink_ok
     if sink_ok and resolved_ips:
         blocks = []
         for ip in resolved_ips:
@@ -795,13 +1107,18 @@ async def _send_alert(
 ) -> dict:
     """
     发送告警通知:
-      - webhook:     POST JSON 到指定 URL (默认)
+      - webhook:     POST JSON 到指定 URL（默认；URL 须过安全校验）
       - eventlog:    Windows 事件日志
-      - dingtalk:    钉钉机器人
-      - wework:      企业微信机器人
+      - display:     宿主机桌面弹窗
+
+    ⚠ 整改报告 §9.61：**dingtalk / wework 从未实现**。
+    原 docstring 与 `params_schema` 都在宣传这两个渠道，于是
+    「策略配了钉钉、但平台没有实现」这件事**只留一行 warning**，
+    告警**静默丢失**。现在未实现的渠道**明确失败**并给出原因
+    （`unsupported_channel: <channel>`）→ 写进结构化结果，审计看得见。
 
     channel 参数决定发送方式。
-    webhook_url 可以自定义，否则使用默认值。
+    webhook_url 可以自定义，否则使用默认值（默认只写日志，不外发）。
     """
     if not channel or channel == "webhook":
         if webhook_url:
@@ -823,12 +1140,131 @@ async def _send_alert(
         return await _send_display_notification(title, message)
 
     else:
-        logger.warning(f"[ALERT] Unknown channel={channel}, falling back to log")
-        return {"action": "send_alert", "mode": "stub", "title": title, "message": message, "_stub": True}
+        # 未实现的渠道：此前**静默降级**成 stub（只留一行 warning），
+        # 告警就这么没了。现在明确失败 + 明确原因（进结构化结果）。
+        logger.error(
+            f"[ALERT] 未实现的通知渠道 channel={channel}"
+            f"（本平台只实现了 webhook / eventlog / display）—— 告警未送达"
+        )
+        return {
+            "action": "send_alert", "mode": "stub", "success": False,
+            "error": f"unsupported_channel: {channel}",
+            "title": title, "message": message, "_stub": True,
+        }
 
+
+
+
+def redact_url_for_log(url: str) -> str:
+    """URL → **可关联但不含密钥**的形态（整改报告 §9.63）。
+
+    为什么：告警 webhook 的 URL **通常内嵌密钥** ——
+        Slack    https://hooks.slack.com/services/T00/B00/<SECRET>
+        钉钉     https://oapi.dingtalk.com/robot/send?access_token=<SECRET>
+        企业微信  https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<SECRET>
+    而 `GET /response/logs` 只要**任何登录用户**（无角色门槛）→
+    URL 原样落盘 = 把告警通道的钥匙发给全体登录用户。
+
+    保留 `scheme://host[:port]/<路径首段>`（回答「发到哪台机器、哪条通道」）
+    + 完整 URL 的 `sha256[:12]`（同一个目标在不同日志里仍**可关联**，
+    不需要看到密钥）。**查询串与 userinfo 一律丢弃**。
+    """
+    raw = str(url or "")
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+    except Exception:
+        return "<unparsable-url>"
+    if not parts.scheme or not parts.hostname:
+        # 不是 URL（或没有主机）→ 别乱改形状
+        return raw
+    host = parts.hostname
+    try:
+        if parts.port:
+            host = f"{host}:{parts.port}"
+    except ValueError:
+        pass
+    first = (parts.path or "").strip("/").split("/")[0] if parts.path else ""
+    path = f"/{first}/…" if first else "/"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    return f"{parts.scheme}://{host}{path}#sha256:{digest}"
+
+
+def _check_webhook_url(webhook_url: str) -> tuple[bool, str]:
+    """校验告警 webhook 的目标 URL。返回 `(是否放行, 原因)`。
+
+    口径与沙箱入口**完全一致**（整改方案 §五.2）：
+      · 只允许 http / https；
+      · loopback / link-local / 保留段 / 组播 / 云元数据**一律拒绝**
+        （`allow_private=True` 只放开 RFC1918 私有段 —— 那是内网告警
+        接收方的正常形态）；
+      · 域名解析后的 IP 重新校验（防 DNS 变更绕过）；
+      · **解析失败不阻断**（返回放行 + `dns_resolve_failed`）：
+        此时 HTTP 请求本身也会失败（httpx 同样要解析），结果相同，
+        阻断只会白白吃掉一条告警。
+
+    ⚠ 这是**同步**函数（会做阻塞 DNS 查询）→ 调用方必须放到线程里
+    （`asyncio.to_thread`），别卡住事件循环。
+    """
+    try:
+        from zeroday_detect.sandbox_status import (
+            UrlRejected, validate_submittable_url,
+        )
+    except ImportError:
+        # 校验器不可用 → **不发送**（fail-closed）：
+        # 一条发不出去的安全告警，好过一条发到任意地址的告警。
+        return False, "validator_unavailable"
+    try:
+        validate_submittable_url(webhook_url, allow_private=True, resolve_dns=True)
+    except UrlRejected as e:
+        if e.reason == "dns_resolve_failed":
+            return True, "dns_resolve_failed"
+        return False, e.reason
+    return True, ""
 
 async def _send_webhook(title: str, message: str, severity: str, webhook_url: str) -> dict:
-    """通过通用 Webhook 发送告警"""
+    """通过通用 Webhook 发送告警。
+
+    ⚠ **URL 安全校验（整改报告 §9.61）**
+
+    修复前这里对 `webhook_url` **完全不校验** → `httpx` 直接把请求
+    发到调用方给的任意地址。实测（2026-10-20）：平台会真的向
+    `http://127.0.0.1:<port>/...` 发 POST，并把 `status_code` 带回来
+    （= 内网探测 oracle）；而**同一个平台**的沙箱入口
+    （`zeroday_detect.sandbox_status.validate_submittable_url`）
+    对同一个 URL 是**拒绝**的（`loopback_not_allowed`）。
+    **同一平台、两个面：一个拦一个不拦。**
+
+    现在复用平台既有那套校验（整改方案 §五.2 的口径）：
+      · 只允许 http / https；
+      · **loopback / link-local / 保留段 / 组播 / 云元数据一律拒绝**
+        （`allow_private=True` 只放开 RFC1918 私有段 —— 那是内网告警
+        接收方的正常形态；沙箱那侧的注释写明「loopback 与云元数据
+        在任何模式下都禁」）；
+      · 域名解析后的 IP 重新校验（防 DNS 变更绕过）；
+      · **解析失败不阻断**（此时 HTTP 请求本身也会失败，结果相同），
+        但要留 warning。
+
+    依赖方向说明：校验器住在 `zeroday_detect.sandbox_status`（平台
+    **唯一**的 URL 安全策略所在，纯标准库、无项目内依赖 → 无循环）。
+    局部 import 是为了不让响应引擎在导入期就依赖零日模块。
+    """
+    ok, reason = await asyncio.to_thread(_check_webhook_url, webhook_url)
+    if not ok:
+        logger.error(
+            f"[ALERT] webhook URL 被安全校验拒绝: {reason}（未发出请求）: "
+            f"{redact_url_for_log(webhook_url)}")
+        return {
+            "action": "send_alert", "mode": "webhook", "success": False,
+            "error": f"webhook_url_rejected: {reason}",
+            "rejected": True, "url": redact_url_for_log(webhook_url),
+        }
+    if reason == "dns_resolve_failed":
+        # 解析失败 → 这次请求本来也会失败（httpx 同样要解析），
+        # 所以不阻断发送，但必须留痕。
+        logger.warning(
+            f"[ALERT] webhook 域名解析失败（仍尝试发送）: {webhook_url}")
     try:
         import httpx
         payload = {
@@ -841,7 +1277,7 @@ async def _send_webhook(title: str, message: str, severity: str, webhook_url: st
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(webhook_url, json=payload)
             resp.raise_for_status()
-            logger.info(f"[ALERT] Webhook sent to {webhook_url}: {resp.status_code}")
+            logger.info(f"[ALERT] Webhook sent to {redact_url_for_log(webhook_url)}: {resp.status_code}")
             return {"action": "send_alert", "mode": "webhook", "success": True, "status_code": resp.status_code}
     except Exception as e:
         logger.warning(f"[ALERT] Webhook failed: {e}")
@@ -891,8 +1327,16 @@ async def _send_display_notification(title: str, message: str) -> dict:
 
 # ── 注册所有动作 ──
 
-def _init_registry():
-    response_registry.register(
+def _init_registry(registry=None):
+    """把内置动作注册到 registry（默认 = 模块级全局单例）。
+
+    2026-10-20: 允许传入**独立**的 registry 实例。理由：全局单例一旦被
+    任何代码注册过（哪怕只是测试），「生产动作集」就不再可测 ——
+    守卫会变成顺序依赖（实测踩过：§9.47）。传入独立实例可以在
+    **不触碰全局单例**的前提下构造一份干净的生产动作集。
+    """
+    registry = registry if registry is not None else response_registry
+    registry.register(
         "block_ip", _block_ip,
         description="封禁源IP (通过防火墙/WAF ACL)",
         severity=ACTION_SEVERITY_HIGH,
@@ -905,7 +1349,7 @@ def _init_registry():
             "duration_minutes": "int 封禁时长(默认60)",
         },
     )
-    response_registry.register(
+    registry.register(
         "isolate_host", _isolate_host,
         description="将主机隔离到隔离VLAN",
         severity=ACTION_SEVERITY_CRITICAL,
@@ -919,7 +1363,7 @@ def _init_registry():
             "duration_minutes": "int 隔离时长(默认0=人工恢复)",
         },
     )
-    response_registry.register(
+    registry.register(
         "dns_sinkhole", _dns_sinkhole,
         description="DNS sinkhole: 恶意域名指向黑洞 IP(可同时封禁解析 IP)",
         severity=ACTION_SEVERITY_HIGH,
@@ -934,7 +1378,7 @@ def _init_registry():
             "duration_minutes": "int resolved_ip 封禁时长(默认0=人工解除)",
         },
     )
-    response_registry.register(
+    registry.register(
         "rate_limit", _rate_limit,
         description="对源IP进行带宽限速",
         severity=ACTION_SEVERITY_MEDIUM,
@@ -947,7 +1391,7 @@ def _init_registry():
             "reason": "str 限速原因",
         },
     )
-    response_registry.register(
+    registry.register(
         "kill_session", _kill_session,
         description="强制终止用户登录会话",
         severity=ACTION_SEVERITY_HIGH,
@@ -959,7 +1403,7 @@ def _init_registry():
             "reason": "str 终止原因",
         },
     )
-    response_registry.register(
+    registry.register(
         "send_alert", _send_alert,
         description="发送告警通知到指定渠道",
         severity=ACTION_SEVERITY_LOW,
@@ -969,13 +1413,16 @@ def _init_registry():
             "title": "str (required) 告警标题",
             "message": "str (required) 告警内容",
             "severity": "str 告警级别",
-            "channel": "str 通知渠道(webhook/dingtalk/wechat)",
+            "channel": "str 通知渠道(webhook/eventlog/display)",
+            "webhook_url": "str 可选，webhook 渠道的目标 URL"
+                            "（须过 URL 安全校验：拒绝 loopback/link-local/"
+                            "云元数据/非 http(s)）",
         },
     )
-    logger.info(f"Response registry initialized with {len(response_registry._actions)} actions")
+    logger.info(f"Response registry initialized with {len(registry._actions)} actions")
     try:
         from response_engine.containment import register_containment_actions
-        register_containment_actions(response_registry)
+        register_containment_actions(registry)
     except Exception as e:
         logger.warning("containment actions not registered: %s", e)
 

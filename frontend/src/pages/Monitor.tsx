@@ -34,13 +34,25 @@ const DEMO_EVENT = {
 }
 
 // 0.1s 扫描规则：健康=松绿、告警=柿黄、异常=朱砂；标签颜色随健康度走
+// 2026-10-03: key 与后端 /health/dependencies 返回的探测项对齐（postgres/redis/qdrant/llm），
+// 避免"前端叫 pgvector、后端探的是 qdrant"这种对不上的展示。
 const serviceMeta: Record<string, { label: string; desc: string }> = {
-  pgvector: { label: 'pgvector', desc: '向量检索' },
-  redis: { label: 'Redis', desc: '滑动窗口' },
-  llm: { label: 'LLM', desc: '摘要压缩' },
+  postgres: { label: 'PostgreSQL', desc: '事件与审计存储' },
+  redis: { label: 'Redis', desc: '滑动窗口 / 限流' },
+  qdrant: { label: 'Qdrant', desc: '向量检索' },
+  llm: { label: 'LLM', desc: '审计与摘要（配置态）' },
 }
 
 const SERVICE_TONE: Record<string, { gauge: 'ok' | 'warn' | 'error'; bar: string; text: string; dot: string; glow: string; badge: string }> = {
+  // unknown 必须是中性灰，不能借用 ok 的绿色 —— 否则"还没探测"看起来像"正常"
+  unknown: {
+    gauge: 'warn',
+    bar: 'bg-line',
+    text: 'text-ink-faint',
+    dot: 'bg-line',
+    glow: '',
+    badge: 'border-line text-ink-faint',
+  },
   ok: {
     gauge: 'ok',
     bar: 'bg-ok',
@@ -88,10 +100,36 @@ let lastStatsAt = 0
 
 export default function Monitor() {
   const services = useServiceStore((s) => s.services)
+  const serviceDetails = useServiceStore((s) => s.details)
   const streamStatus = useEventStreamStore((s) => s.status)
 
   // 连接生命周期托管（引用计数单例通道，含断点续传与保活监测）
   useEventStreamLifecycle()
+
+  // ── 依赖健康探测（2026-10-03 新增）──
+  // 修复前：services 初值硬编码 'ok'，且 setService/setAll 零调用点，
+  // 健康环无论依赖是否可用都显示绿色 NOMINAL。
+  // 现在真实轮询 /health/dependencies；首屏与失败均显示 UNKNOWN，不伪装正常。
+  const setServiceAll = useServiceStore((s) => s.setAll)
+  const setUnprobed = useServiceStore((s) => s.setUnprobed)
+  useEffect(() => {
+    let alive = true
+    const tick = async () => {
+      try {
+        const r = await api.dependencyHealth()
+        if (alive) setServiceAll(r.services)
+      } catch {
+        // 探测请求本身失败（401/网络/后端 5xx）→ 回落 UNKNOWN，不沿用上次结果
+        if (alive) setUnprobed()
+      }
+    }
+    void tick()
+    const t = setInterval(tick, 10_000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [setServiceAll, setUnprobed])
 
   // 首屏 hydration：进行中 + 最近完成 + 可展示思维链（SSE 窗口可能只剩自博弈行）
   const [hydratedPipelines, setHydratedPipelines] = useState<any[]>([])
@@ -309,8 +347,11 @@ export default function Monitor() {
       {/* 服务状态卡 — 顶部细线 + 健康环 + 状态点 */}
       <div className="mb-10 border border-line bg-paper">
         {Object.entries(services).map(([id, health], i) => {
-          const tone = SERVICE_TONE[health] ?? SERVICE_TONE.alert
+          const tone = SERVICE_TONE[health] ?? SERVICE_TONE.unknown
           const meta = serviceMeta[id] ?? { label: id, desc: id }
+          const detail = serviceDetails[id]
+          const badgeText =
+            health === 'ok' ? 'NOMINAL' : health === 'error' ? 'ALERT' : 'UNKNOWN'
           return (
             <motion.div
               key={id}
@@ -326,7 +367,7 @@ export default function Monitor() {
                 <HealthGauge health={tone.gauge} />
                 <span
                   className={`absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 ${tone.dot} ${
-                    health === 'ok' ? '' : 'animate-pulse'
+                    health === 'error' ? 'animate-pulse' : ''
                   }`}
                   aria-hidden
                 />
@@ -339,9 +380,15 @@ export default function Monitor() {
                   {meta.label}
                 </p>
                 <p className="text-xs text-ink-soft mt-0.5">{meta.desc}</p>
+                {/* 探针 detail：让"为什么红"当场可见，而不是只给一个色块 */}
+                {detail && (
+                  <p className="mt-1 font-mono text-[11px] text-ink-faint break-all" title={detail}>
+                    {detail}
+                  </p>
+                )}
               </div>
               <span className={`border px-3 py-1 font-mono text-[11px] tracking-[0.18em] uppercase ${tone.badge}`}>
-                {health === 'ok' ? 'NOMINAL' : health === 'warn' ? 'WARN' : 'ALERT'}
+                {badgeText}
               </span>
             </motion.div>
           )

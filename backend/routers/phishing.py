@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from config import settings
-from models import get_session, PhishingRecord, PhishingDrill, PhishingDrillRecord
+from models import get_session, PhishingRecord
 from auth import get_current_user, RequireRole, UserInfo
 
 from phishing_guard import phishing_guard
@@ -270,7 +270,8 @@ async def phishing_detect_email_llm(
         summary=verdict.summary, suggested_actions=verdict.suggested_actions,
         raw_input=req.model_dump(),
     )
-    session.add(record); await session.commit()
+    session.add(record)
+    await session.commit()
     return {**verdict.to_dict(), "llm_async": settings.llm_phishing_enabled}
 
 
@@ -295,7 +296,7 @@ async def data_security_classify(
     手动触发数据安全大模型分类（运营人工复核 / 测试）.
     主体 LLM 调用阻塞返结果（控制台测试用），生产路径由 http_linker 异步派发.
     """
-    from data_security import classify_and_broadcast, classify_session
+    from data_security import classify_session
 
     if not settings.llm_data_security_enabled:
         return {

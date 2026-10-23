@@ -27,12 +27,14 @@
 import json
 import logging
 import os
+import time
+import uuid
 from collections import OrderedDict
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass, asdict, fields as dataclass_fields
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select, desc, and_, text
+from sqlalchemy import select, desc, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,6 +75,42 @@ class StoredEvent:
     correlation_id: str = ""
     created_at: str = ""
     analyzed: bool = False
+    idempotent: bool = False
+    event_id: str = ""
+    parent_event_id: str = ""
+    trace_id: str = ""
+
+
+@dataclass
+class _HotCacheEntry:
+    """热缓存条目：业务快照 + 代次 + 写入时刻（monotonic）。"""
+    data: dict
+    gen: int
+    cached_at: float
+
+
+_STORED_EVENT_FIELDS = {f.name for f in dataclass_fields(StoredEvent)}
+
+
+def _identity_for_store(event_data: dict, correlation_id: str = "") -> tuple[dict, Optional[str], str, str, str]:
+    """盖章并抽出落库用的业务身份。已有 eventId 保留。"""
+    from event_identity import ensure_identity, resolve
+    data = ensure_identity(event_data if isinstance(event_data, dict) else {})
+    ident = resolve(data)
+    eid = ident.event_id[:64] if ident.event_id else None
+    corr = (correlation_id or ident.correlation_id or "")[:128]
+    parent = (ident.parent_event_id or "")[:64]
+    tid = (ident.trace_id or "")[:128]
+    if corr:
+        data["_correlation_id"] = corr
+        data.setdefault("correlationId", corr)
+    if parent:
+        data["_parent_event_id"] = parent
+        data.setdefault("parentEventId", parent)
+    if tid:
+        data["_trace_id"] = tid
+        data.setdefault("traceId", tid)
+    return data, eid, corr, parent, tid
 
 
 class EventStore:
@@ -92,63 +130,256 @@ class EventStore:
             os.path.dirname(__file__), "event_archive"
         )
         os.makedirs(self.data_dir, exist_ok=True)
-        # 热缓存 LRU：此前是无上限 dict，持续写入永不淘汰，长跑内存持续膨胀。
-        # 容量可由 EVENT_STORE_HOT_CACHE_MAX 调整；超容时按最久未访问淘汰。
-        self._hot_cache: "OrderedDict[int, dict]" = OrderedDict()
-        self._hot_cache_max = int(os.environ.get("EVENT_STORE_HOT_CACHE_MAX", "2000"))
+        # 热缓存 LRU：容量上限 + TTL 兜底。TTL 不能替代失效广播。
+        env_max = os.environ.get("EVENT_STORE_HOT_CACHE_MAX")
+        if env_max:
+            self._hot_cache_max = int(env_max)
+        else:
+            self._hot_cache_max = int(
+                getattr(settings, "event_store_hot_cache_max", 2000) or 2000
+            )
+        ttl = float(getattr(settings, "event_store_hot_cache_ttl_s", 0) or 0)
+        if ttl <= 0:
+            # 流水线状态新鲜度：对齐最短审计车道超时（P2）。
+            ttl = float(getattr(settings, "audit_timeout_p2_s", 20.0) or 20.0)
+        self._hot_cache_ttl_s = ttl
+        self._hot_cache: "OrderedDict[int, _HotCacheEntry]" = OrderedDict()
+        self._generations: "OrderedDict[int, int]" = OrderedDict()
+        self._origin = uuid.uuid4().hex
         self._initialized = False
         # Redis 跨进程失效通道: Temporal worker 写回后通知 backend 丢弃热缓存
         self._redis = None
         self._invalidate_channel = "soc:event_store:invalidate"
         self._invalidate_listener_task = None
 
-    def _cache_put(self, event_id: int, data: dict) -> None:
-        """写入热缓存并执行 LRU 淘汰。"""
-        self._hot_cache[event_id] = data
-        self._hot_cache.move_to_end(event_id)
+    def _now(self) -> float:
+        return time.monotonic()
+
+    def current_generation(self, event_id: int) -> int:
+        return int(self._generations.get(int(event_id), 0))
+
+    def _bump_generation(self, event_id: int) -> int:
+        eid = int(event_id)
+        nxt = self.current_generation(eid) + 1
+        self._generations[eid] = nxt
+        self._generations.move_to_end(eid)
+        max_gen = max(int(self._hot_cache_max) * 2, 64)
+        while len(self._generations) > max_gen:
+            old_id, _ = self._generations.popitem(last=False)
+            self._hot_cache.pop(old_id, None)
+        return nxt
+
+    def _unpack_entry(self, event_id: int, cached) -> Optional[_HotCacheEntry]:
+        if isinstance(cached, _HotCacheEntry):
+            return cached
+        if isinstance(cached, dict):
+            return _HotCacheEntry(
+                data=cached,
+                gen=self.current_generation(event_id),
+                cached_at=self._now(),
+            )
+        return None
+
+    def _cache_data(self, event_id: int) -> Optional[dict]:
+        cached = self._hot_cache.get(int(event_id))
+        if cached is None:
+            return None
+        entry = self._unpack_entry(int(event_id), cached)
+        return None if entry is None else entry.data
+
+    def _entry_expired(self, entry: _HotCacheEntry) -> bool:
+        ttl = float(self._hot_cache_ttl_s or 0)
+        if ttl <= 0:
+            return False
+        return (self._now() - float(entry.cached_at)) > ttl
+
+    def _drop_local(self, event_id: int) -> None:
+        self._hot_cache.pop(int(event_id), None)
+
+    def _cache_metric(self, result: str) -> None:
+        try:
+            from core_metrics import record_cache
+            record_cache("event_store", result)
+        except Exception:
+            pass
+
+    def _stored_from_cache(self, data: dict) -> StoredEvent:
+        payload = {k: v for k, v in data.items() if k in _STORED_EVENT_FIELDS}
+        return StoredEvent(**payload)
+
+    def _cache_put(
+        self,
+        event_id: int,
+        data: dict,
+        *,
+        expected_gen: Optional[int] = None,
+    ) -> bool:
+        """写入热缓存。expected_gen 与当前代次不一致则拒绝，避免失效后把旧快照写回。"""
+        eid = int(event_id)
+        current = self.current_generation(eid)
+        if expected_gen is not None and int(expected_gen) != current:
+            return False
+        payload = dict(data)
+        payload.pop("_cache_gen", None)
+        payload.pop("_cached_at", None)
+        self._hot_cache[eid] = _HotCacheEntry(
+            data=payload,
+            gen=current,
+            cached_at=self._now(),
+        )
+        self._hot_cache.move_to_end(eid)
         while len(self._hot_cache) > self._hot_cache_max:
             self._hot_cache.popitem(last=False)
+        return True
 
     def set_redis(self, redis_client) -> None:
         """接入 Redis，启用跨进程热缓存失效广播。"""
         self._redis = redis_client
         logger.info("EventStore: Redis invalidate channel enabled")
 
-    def invalidate(self, event_id: int, *, broadcast: bool = True) -> None:
-        """审计/响应写回后丢弃热缓存，避免 get_by_id 读到入库时的陈旧快照。
+    def notify_committed(self, *event_ids: int, broadcast: bool = True) -> None:
+        """数据库事务已提交之后调用：抬升代次、丢本进程缓存、再通知其他进程。
 
-        broadcast=True 时同步通过 Redis pub/sub 通知其他进程(backend API)丢弃同 ID。
-        Temporal worker 与 FastAPI 不共享内存，缺广播会导致流水线报告 API 永远 pending。
+        禁止在 commit 前调用，否则其他进程会把尚未提交的旧行重新读进缓存。
+        """
+        for event_id in event_ids:
+            if event_id is None:
+                continue
+            self.invalidate(int(event_id), broadcast=broadcast)
+
+    async def commit_then_invalidate(
+        self,
+        session: AsyncSession,
+        *event_ids: int,
+        broadcast: bool = True,
+    ) -> None:
+        """标准顺序：先提交数据库，再失效本进程缓存并广播。"""
+        await session.commit()
+        self.notify_committed(*event_ids, broadcast=broadcast)
+
+    async def apply_event_update(
+        self,
+        session: AsyncSession,
+        event_id: int,
+        *,
+        analyzed: Optional[bool] = None,
+        raw_data: Optional[dict] = None,
+        merge_raw: Optional[dict] = None,
+        status: Optional[str] = None,
+        mutator=None,
+        commit: bool = True,
+        broadcast: bool = True,
+    ) -> Optional[SecurityEvent]:
+        """改变事件状态的统一入口。默认 commit 成功后才发失效通知。"""
+        evt = await session.get(SecurityEvent, int(event_id))
+        if evt is None:
+            return None
+        if analyzed is not None:
+            evt.analyzed = analyzed
+        if status is not None:
+            evt.status = status
+        if raw_data is not None:
+            evt.raw_data = raw_data
+        elif merge_raw is not None:
+            evt.raw_data = {**(evt.raw_data or {}), **merge_raw}
+        if mutator is not None:
+            mutator(evt)
+        if commit:
+            await self.commit_then_invalidate(
+                session, int(event_id), broadcast=broadcast
+            )
+        return evt
+
+    def invalidate(self, event_id: int, *, broadcast: bool = True) -> None:
+        """事务提交后丢弃热缓存并抬升代次。
+
+        broadcast=True 时通过 Redis pub/sub 通知其他进程。
+        必须在数据库 commit 成功之后调用。
         """
         if event_id is None:
             return
         eid = int(event_id)
-        self._hot_cache.pop(eid, None)
-        if broadcast and self._redis is not None:
+        gen = self._bump_generation(eid)
+        self._drop_local(eid)
+        if broadcast:
+            self._publish_invalidate(eid, gen)
+
+    def _publish_invalidate(self, event_id: int, gen: int) -> None:
+        if self._redis is None:
+            return
+        try:
+            import asyncio
+            pub = getattr(self._redis, "publish", None)
+            if pub is None:
+                return
+            payload = json.dumps({
+                "id": int(event_id),
+                "gen": int(gen),
+                "origin": self._origin,
+            })
+            result = pub(self._invalidate_channel, payload)
+            if asyncio.iscoroutine(result):
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(result)
+                except RuntimeError:
+                    pass
+        except Exception as e:
+            logger.debug(f"EventStore invalidate broadcast failed: {e}")
             try:
-                # redis.asyncio: fire-and-forget create_task; sync redis: publish 直接调
-                import asyncio
-                pub = getattr(self._redis, "publish", None)
-                if pub is None:
-                    return
-                result = pub(self._invalidate_channel, str(eid))
-                if asyncio.iscoroutine(result):
-                    try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(result)
-                    except RuntimeError:
-                        pass
-            except Exception as e:
-                logger.debug(f"EventStore invalidate broadcast failed: {e}")
+                from core_metrics import record_cache_invalidate_failure
+                record_cache_invalidate_failure("event_store")
+            except Exception:
+                pass
+
+    def _parse_invalidate_payload(self, data):
+        if isinstance(data, bytes):
+            data = data.decode()
+        if isinstance(data, (int, float)):
+            return int(data), None, None
+        if not isinstance(data, str):
+            return None, None, None
+        text = data.strip()
+        if not text:
+            return None, None, None
+        if text.startswith("{"):
+            obj = json.loads(text)
+            return int(obj["id"]), obj.get("gen"), obj.get("origin")
+        return int(text), None, None
+
+    def _apply_remote_invalidate(
+        self,
+        event_id: int,
+        remote_gen: Optional[int] = None,
+        origin: Optional[str] = None,
+    ) -> None:
+        if origin and origin == self._origin:
+            return
+        eid = int(event_id)
+        local = self.current_generation(eid)
+        if remote_gen is None:
+            self._bump_generation(eid)
+        else:
+            if int(remote_gen) < local:
+                return
+            self._generations[eid] = int(remote_gen)
+            self._generations.move_to_end(eid)
+        self._drop_local(eid)
 
     def update_hot_cache(self, event_id: int, **fields) -> None:
         """就地更新热缓存字段；不存在则忽略（下次 get_by_id 走 DB）。"""
         if event_id is None:
             return
-        cached = self._hot_cache.get(int(event_id))
-        if not cached:
+        eid = int(event_id)
+        cached = self._hot_cache.get(eid)
+        if cached is None:
             return
-        cached.update(fields)
+        entry = self._unpack_entry(eid, cached)
+        if entry is None:
+            return
+        entry.data.update(fields)
+        entry.cached_at = self._now()
+        self._hot_cache[eid] = entry
 
     async def start_invalidate_listener(self) -> None:
         """订阅 Redis 失效通道，丢弃本进程热缓存。backend / worker 均可调用。"""
@@ -166,15 +397,15 @@ class EventStore:
                 async for msg in pubsub.listen():
                     if not msg or msg.get("type") != "message":
                         continue
-                    data = msg.get("data")
                     try:
-                        if isinstance(data, bytes):
-                            data = data.decode()
-                        eid = int(data)
-                    except (TypeError, ValueError):
+                        eid, remote_gen, origin = self._parse_invalidate_payload(
+                            msg.get("data")
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError, KeyError):
                         continue
-                    # 本进程收到广播时不再二次广播
-                    self._hot_cache.pop(eid, None)
+                    if eid is None:
+                        continue
+                    self._apply_remote_invalidate(eid, remote_gen, origin)
             except Exception as e:
                 logger.warning(f"EventStore invalidate listener stopped: {e}")
 
@@ -202,10 +433,11 @@ class EventStore:
           跨运行时重放/Exactly-Once 下同一条事件只落库一次。
           (替代原 kafka_consumer 的 Redis 24h 去重)
         """
-        # 写入 PostgreSQL（通过 SecurityEvent 模型）
+        event_data, event_id, correlation_id, parent_event_id, trace_id = _identity_for_store(
+            event_data, correlation_id
+        )
         event_type = event_data.get("event", event_data.get("type", "UNKNOWN"))
         severity = event_data.get("severity", "info")
-        event_id = event_data.get("eventId", "") or None
 
         # 幂等检查: eventId 已落库 → 直接返回已存在记录 (不重复插入)
         if event_id:
@@ -214,9 +446,10 @@ class EventStore:
                 logger.info(
                     f"[Idempotent] eventId={event_id} 已存在 (#{existing.id}), 跳过重复入库"
                 )
+                existing.idempotent = True
                 return existing
 
-        evt = SecurityEvent(
+        evt_kwargs = dict(
             event_id=event_id,
             session_id=session_id,
             event_type=event_type,
@@ -235,6 +468,13 @@ class EventStore:
             anomaly_score=anomaly_score,
             analyzed=False,
         )
+        if hasattr(SecurityEvent, "correlation_id"):
+            evt_kwargs["correlation_id"] = correlation_id or None
+        if hasattr(SecurityEvent, "parent_event_id"):
+            evt_kwargs["parent_event_id"] = parent_event_id or None
+        if hasattr(SecurityEvent, "trace_id"):
+            evt_kwargs["trace_id"] = trace_id or None
+        evt = SecurityEvent(**evt_kwargs)
         session.add(evt)
         try:
             await session.commit()
@@ -247,6 +487,7 @@ class EventStore:
             if event_id:
                 existing = await self.get_by_upstream_id(session, event_id)
                 if existing is not None:
+                    existing.idempotent = True
                     return existing
             raise
         await session.refresh(evt)
@@ -273,14 +514,19 @@ class EventStore:
             anomaly_score=anomaly_score,
             correlation_id=correlation_id,
             created_at=evt.created_at.isoformat(),
+            event_id=event_id or "",
+            parent_event_id=parent_event_id,
+            trace_id=trace_id,
         )
 
         # 缓存到 hot cache (LRU)
         self._cache_put(evt.id, asdict(stored))
 
-        logger.info(f"Stored event #{evt.id}: {event_type}/{severity} "
-                    f"anomaly={anomaly_score:.3f} "
-                    f"correlation={correlation_id or 'none'}")
+        logger.info(
+            "Stored event #%s event_id=%s: %s/%s anomaly=%.3f correlation=%s",
+            evt.id, event_id or "-", event_type, severity, anomaly_score,
+            correlation_id or "none",
+        )
 
         return stored
 
@@ -309,16 +555,19 @@ class EventStore:
         parsed = []          # 每行预处理信息, 与 rows 平行
         eids = []
         for event_data, session_id, anomaly_score, correlation_id in rows:
-            event_id = event_data.get("eventId", "") or None
-            eid = str(event_id) if event_id is not None else None
+            event_data, eid, corr, parent, tid = _identity_for_store(
+                event_data, correlation_id
+            )
             if eid:
                 eids.append(eid)
             parsed.append({
                 "event_data": event_data,
                 "session_id": session_id,
                 "anomaly_score": anomaly_score,
-                "correlation_id": correlation_id,
+                "correlation_id": corr,
                 "event_id": eid,
+                "parent_event_id": parent,
+                "trace_id": tid,
                 "event_type": event_data.get("event", event_data.get("type", "UNKNOWN")),
                 "severity": event_data.get("severity", "info"),
             })
@@ -338,7 +587,7 @@ class EventStore:
         for i, p in enumerate(parsed):
             if p["event_id"] is not None and p["event_id"] in existing_by_eid:
                 continue  # 已存在 → 复用旧行, 不重复插入
-            evt = SecurityEvent(
+            evt_kwargs = dict(
                 event_id=p["event_id"],
                 session_id=p["session_id"],
                 event_type=p["event_type"],
@@ -357,6 +606,13 @@ class EventStore:
                 anomaly_score=p["anomaly_score"],
                 analyzed=False,
             )
+            if hasattr(SecurityEvent, "correlation_id"):
+                evt_kwargs["correlation_id"] = p["correlation_id"] or None
+            if hasattr(SecurityEvent, "parent_event_id"):
+                evt_kwargs["parent_event_id"] = p["parent_event_id"] or None
+            if hasattr(SecurityEvent, "trace_id"):
+                evt_kwargs["trace_id"] = p["trace_id"] or None
+            evt = SecurityEvent(**evt_kwargs)
             session.add(evt)
             new_evts.append(evt)
             new_idx.append(i)
@@ -402,6 +658,10 @@ class EventStore:
                     correlation_id=p["correlation_id"],
                     created_at=evt.created_at.isoformat() if evt.created_at else "",
                     analyzed=bool(evt.analyzed),
+                    idempotent=False,
+                    event_id=p["event_id"] or "",
+                    parent_event_id=p["parent_event_id"],
+                    trace_id=p["trace_id"],
                 )
                 self._cache_put(evt.id, asdict(stored))
             else:
@@ -410,7 +670,8 @@ class EventStore:
                     # commit 后旧查询对象属性过期(async session) → 重建前 refresh
                     await session.refresh(db_evt)
                 stored = self._to_stored(db_evt)
-                self._cache_put(stored.id, asdict(stored))
+                stored.idempotent = True
+                # 复用旧行时不把 SELECT 时的快照写回热缓存，避免覆盖更新后的代次。
             results.append(stored)
 
         logger.info(
@@ -524,7 +785,9 @@ class EventStore:
         return events
 
     def _to_stored(self, evt: SecurityEvent) -> StoredEvent:
+        from event_identity import resolve
         raw = evt.raw_data or {}
+        ident = resolve(raw)
         anomaly_score = (
             evt.anomaly_score if evt.anomaly_score is not None
             else raw.get("_anomaly_score", 0.0)
@@ -539,9 +802,21 @@ class EventStore:
             message=evt.message or "",
             raw_data=raw,
             anomaly_score=anomaly_score,
-            correlation_id=raw.get("_correlation_id", ""),
+            correlation_id=(
+                getattr(evt, "correlation_id", None)
+                or ident.correlation_id
+                or raw.get("_correlation_id", "")
+                or ""
+            ),
             created_at=evt.created_at.isoformat() if evt.created_at else "",
             analyzed=bool(evt.analyzed),
+            event_id=getattr(evt, "event_id", None) or ident.event_id or "",
+            parent_event_id=(
+                getattr(evt, "parent_event_id", None)
+                or ident.parent_event_id
+                or ""
+            ),
+            trace_id=getattr(evt, "trace_id", None) or ident.trace_id or "",
         )
 
     async def get_by_id(
@@ -558,21 +833,36 @@ class EventStore:
         必须回源 DB,否则 /audit-llm/pipeline 会永远返回空报告。
         """
         cached = self._hot_cache.get(event_id)
+        if cached is None and not prefer_db:
+            self._cache_metric("miss")
         if cached is not None and not prefer_db:
-            # 已完成审计的缓存可信; 未完成的可能是跨进程写回前的陈旧快照 → 回源
-            if cached.get("analyzed") and (cached.get("raw_data") or {}).get("_audit_llm"):
+            entry = self._unpack_entry(event_id, cached)
+            if entry is not None and self._entry_expired(entry):
+                self._drop_local(event_id)
+                self._cache_metric("expired")
+            elif (
+                entry is not None
+                and entry.gen == self.current_generation(event_id)
+                and entry.data.get("analyzed")
+                and (entry.data.get("raw_data") or {}).get("_audit_llm")
+            ):
                 self._hot_cache.move_to_end(event_id)
-                return StoredEvent(**cached)
-            # fall through to DB revalidation
+                self._cache_metric("hit")
+                return self._stored_from_cache(entry.data)
+            else:
+                self._cache_metric("miss")
+            # 未分析、代次不匹配、或 TTL 到期 → 回源 DB
 
+        gen_at_read = self.current_generation(event_id)
         evt = await session.get(SecurityEvent, event_id)
         if not evt:
             return None
 
         stored = self._to_stored(evt)
-        # 回填/刷新热缓存(带 LRU 淘汰),避免持续穿透
+        # 回填热缓存；若读期间已被失效，代次检查会拒绝把旧快照写回
         try:
-            self._cache_put(event_id, asdict(stored))
+            if not self._cache_put(event_id, asdict(stored), expected_gen=gen_at_read):
+                self._cache_metric("stale")
         except Exception:
             pass
         return stored

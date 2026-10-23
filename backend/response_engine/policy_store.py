@@ -19,6 +19,24 @@ DEFAULT_POLICIES_DIR = os.path.join(os.path.dirname(__file__), "policies")
 
 _VALID_SEVERITIES = {"info", "low", "medium", "high", "critical"}
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_POLICY_PATCH_KEYS = frozenset({
+    "match", "threat_type", "category", "min_confidence", "min_severity",
+    "enabled", "role", "description", "actions", "auto_execute",
+    "require_approval", "priority", "cooldown_minutes", "name", "id",
+    "rule_id",
+})
+
+
+def unknown_policy_patch_keys(patch: dict) -> list[str]:
+    """补丁里不在策略 schema 内的键。以下划线开头的内部字段忽略。"""
+    unknown: list[str] = []
+    for key in (patch or {}):
+        name = str(key)
+        if name.startswith("_"):
+            continue
+        if name not in _POLICY_PATCH_KEYS:
+            unknown.append(name)
+    return sorted(unknown)
 
 
 def _ensure_dir(policies_dir: str) -> None:
@@ -147,18 +165,45 @@ def normalize_policy_dict(data: dict) -> dict:
     }
 
 
-def load_all(policies_dir: str = DEFAULT_POLICIES_DIR) -> list[dict]:
+def load_all_with_errors(
+    policies_dir: str = DEFAULT_POLICIES_DIR,
+) -> tuple[list[dict], list[dict]]:
+    """加载全部策略 → (可用策略, **失败清单**)。
+
+    2026-10-20 修复（整改报告 §9.56）：此前 `load_all` 把「文件解析失败」
+    与「策略校验不过」都变成一行 warning + 跳过 → **策略集静默变小**：
+    一条有语法错的策略文件 = 那条策略**根本不存在**，
+    而它本该拦住的威胁因此**不被拦**，却没有任何「降级」信号。
+    （整库失败反而有可见回退 —— code defaults —— 两者不对称。）
+
+    失败清单每项：`{"path": 路径, "reason": "parse"|"invalid", "detail": 说明}`。
+    """
     out: list[dict] = []
+    failures: list[dict] = []
     for path in _files(policies_dir):
         raw = _load_raw(path)
         if not raw:
+            failures.append({
+                "path": path, "reason": "parse",
+                "detail": "文件不是映射或解析失败",
+            })
             continue
         errs = validate_policy_dict(raw)
         if errs:
             logger.warning(f"[PolicyStore] invalid {path}: {errs}")
+            failures.append({
+                "path": path, "reason": "invalid",
+                "detail": "; ".join(errs)[:300],
+            })
             continue
         out.append(normalize_policy_dict(raw))
-    return out
+    return out, failures
+
+
+def load_all(policies_dir: str = DEFAULT_POLICIES_DIR) -> list[dict]:
+    """加载全部策略（只要能用的）—— 失败清单请用 load_all_with_errors()。"""
+    policies, _failures = load_all_with_errors(policies_dir)
+    return policies
 
 
 def to_yaml_dict(normalized: dict) -> dict:
@@ -223,6 +268,12 @@ def list_policies(policies_dir: str = DEFAULT_POLICIES_DIR) -> list[dict]:
             "priority": p.get("priority", 10),
             "cooldown_minutes": p.get("cooldown_minutes", 30),
             "min_confidence": p.get("min_confidence", 0.5),
+            "match": {
+                "threat_type": p.get("threat_type", ""),
+                "min_confidence": p.get("min_confidence", 0.5),
+                "min_severity": p.get("min_severity", "medium"),
+                **({"category": p["category"]} if p.get("category") else {}),
+            },
             "actions": p.get("actions", []),
             "enabled": p.get("enabled", True),
             "role": p.get("role", ""),
@@ -293,6 +344,25 @@ def create_policy(
     }
 
 
+def merge_policy_patch(raw: dict, content: dict) -> dict:
+    """把更新补丁合进已有策略。嵌套 match 做字段合并，禁止整段覆盖丢掉 threat_type。"""
+    patch = content or {}
+    merged = {k: v for k, v in (raw or {}).items() if k != "match"}
+    for key, value in patch.items():
+        if key == "match":
+            continue
+        merged[key] = value
+    match = dict((raw or {}).get("match") or {})
+    nested = patch.get("match")
+    if isinstance(nested, dict):
+        match.update(nested)
+    for key in ("threat_type", "category", "min_confidence", "min_severity"):
+        if key in patch:
+            match[key] = patch[key]
+    merged["match"] = match
+    return merged
+
+
 def update_policy(
     rule_id: str,
     content: dict,
@@ -303,14 +373,11 @@ def update_policy(
     path = _find_path_by_id_or_name(policies_dir, rule_id)
     if not path:
         return {"success": False, "error": f"策略不存在: {rule_id}"}
+    unknown = unknown_policy_patch_keys(content or {})
+    if unknown:
+        return {"success": False, "error": f"不支持的字段: {', '.join(unknown)}"}
     raw = _load_raw(path) or {}
-    merged = {**raw, **content}
-    # 允许扁平字段覆盖 match.*
-    match = dict(merged.get("match") or {})
-    for key in ("threat_type", "category", "min_confidence", "min_severity"):
-        if key in content:
-            match[key] = content[key]
-    merged["match"] = match
+    merged = merge_policy_patch(raw, content or {})
     # 禁止静默改 id
     merged["id"] = raw.get("id") or merged.get("id") or ""
     if "name" not in content:

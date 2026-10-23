@@ -127,8 +127,25 @@ def test_pipeline_tracer_captures_otel_trace_id():
         assert sp.trace_id == format(exported.get_span_context().trace_id, "032x")
         assert sp.stage == "executor"
     finally:
-        # 还原全局 provider (避免影响其它测试)
-        otel_trace.set_tracer_provider(old_provider)
+        # 2026-10-03: 这里的"还原"原本是一句谎言 ——
+        # OTel 的全局 TracerProvider 是一次性的，provider 一旦被设置，
+        # set_tracer_provider 的第二次调用会被静默忽略(日志:
+        # "Overriding of current TracerProvider is not allowed")，
+        # 所以既没还原成功，也没让本用例的注入生效。
+        # 根因是 app.py 在 import 期无条件 setup_otel()。现已改为
+        # 尊重 settings.otel_enabled，conftest 设 SHARED_MEMORY_OTEL_ENABLED=0，
+        # 因此本用例可以安全地独占设置 provider。
+        # 这里不再假装能还原 —— 只在"本用例确实是设置者"时给出可读提示。
+        if otel_trace.get_tracer_provider() is provider:
+            pass  # 仍是我们设的那个，符合预期
+        else:
+            import warnings
+            warnings.warn(
+                "全局 TracerProvider 已被其它代码抢占，本用例未真正生效；"
+                "检查是否有测试在 import 阶段触发了 setup_otel()",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
 
 # ── kafka_consumer header 提取 ──

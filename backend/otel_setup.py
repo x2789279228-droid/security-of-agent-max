@@ -4,7 +4,10 @@ otel_setup.py — OpenTelemetry SDK 初始化 (标准 trace 体系)
 职责:
   - 初始化 TracerProvider + OTLP exporter → otel-collector (默认 :4317 gRPC)
   - 注册 FastAPI / httpx 自动 instrumentation (HTTP 头提取/注入, 响应头回传 traceparent)
-  - 提供 get_tracer() / trace context 工具 (W3C traceparent 解析)
+  - 提供 trace context 工具 (W3C traceparent 解析)。
+    §十一.2 删除了零引用的 _tracer()：HTTP 中间件 (line ~102) 与
+    observability/pipeline_tracer.py 本就直接调 otel_trace.get_tracer()
+    并各自带不同的 tracer 名，_tracer 只是从未被用到的第三份写法。
 
 采集策略: SDK 侧 AlwaysOn 全量导出, 采样在 otel-collector 尾部采样完成
 (告警/审计 100%, 普通事件按比率), 兼顾保真与存储成本。
@@ -31,10 +34,6 @@ except ImportError:
 
 # W3C traceparent 文本传播器 (供手动提取/注入)
 TRACE_PROPAGATOR = TraceContextTextMapPropagator() if HAS_OTEL else None
-
-
-def _tracer():
-    return otel_trace.get_tracer("soc-backend", "2.0.0")
 
 
 def setup_otel(app=None):

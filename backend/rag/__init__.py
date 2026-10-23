@@ -26,7 +26,7 @@ from .evidence_verifier import evidence_verifier, EvidenceVerifier
 from .seeder import seed_knowledge_base
 from .mitre_importer import import_enterprise_attack, MITREImportResult
 from .capec_importer import import_capec, CAPECImportResult
-from .import_status import get_import_status, set_import_status, ImportStatus
+from .import_status import get_import_status, set_import_status, ImportStatus  # noqa: F401 (重导出)
 
 __all__ = [
     "kb_manager", "KnowledgeBaseManager",

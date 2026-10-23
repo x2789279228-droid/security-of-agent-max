@@ -1,0 +1,19 @@
+{
+  "eventId": "11111111-2222-4333-8444-555555555555",
+  "sourceId": "soc-simulator",
+  "apiKey": "soc-simulator-2024",
+  "eventType": "BRUTE_FORCE",
+  "severity": "high",
+  "srcIp": "203.0.113.10",
+  "dstIp": "198.51.100.8",
+  "protocol": "tcp",
+  "message": "repeated failed logins",
+  "confidence": 80.0,
+  "timestamp": 1750000000000,
+  "traceId": "11111111-2222-4333-8444-555555555555",
+  "schemaVersion": "1.0.0",
+  "producer": "contracts.fixture",
+  "correlationId": "corr-brute-1",
+  "occurredAt": 1750000000000,
+  "rawData": {"user": "admin"}
+}

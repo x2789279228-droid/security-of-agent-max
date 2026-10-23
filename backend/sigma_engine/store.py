@@ -7,8 +7,7 @@ sigma_engine.store — 规则文件(backend/sigma_engine/rules/*.yml) CRUD
 import logging
 import os
 import re
-import uuid
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import yaml
 

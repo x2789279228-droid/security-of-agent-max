@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import BaseAgent
 from sliding_window import sliding_window
-from summary_compression import embedder, summary
+from summary_compression import embedder
 from vector_store import vector_store
 
 logger = logging.getLogger(__name__)

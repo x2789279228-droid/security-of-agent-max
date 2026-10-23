@@ -25,11 +25,11 @@
 import logging
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from .response_registry import response_registry, APPROVAL_REQUIRED
+from .response_registry import response_registry
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,13 @@ class ResponsePolicy:
         return False
 
     def to_dict(self) -> dict:
+        match = {
+            "threat_type": self.threat_type,
+            "min_confidence": self.min_confidence,
+            "min_severity": self.min_severity,
+        }
+        if self.category:
+            match["category"] = self.category
         return {
             "id": self.policy_id,
             "name": self.name,
@@ -148,6 +155,7 @@ class ResponsePolicy:
             "actions": self.actions,
             "min_confidence": self.min_confidence,
             "min_severity": self.min_severity,
+            "match": match,
             "auto_execute": self.auto_execute,
             "require_approval": self.require_approval,
             "priority": self.priority,
@@ -378,6 +386,16 @@ DEFAULT_POLICIES = [
 ]
 
 
+def _record_policy_load_failed(errors: list) -> None:
+    """记录策略文件加载失败 → §9.56。指标不可用时静默忽略。"""
+    try:
+        from core_metrics import record_response_policy_load_failed
+        for e in errors:
+            record_response_policy_load_failed(str(e.get("reason") or "unknown"))
+    except Exception:
+        pass
+
+
 class PolicyEngine:
     """响应策略引擎"""
 
@@ -425,6 +443,9 @@ class PolicyEngine:
             self.yaml_reload_interval_sec = 30
         self._uncertain_policy: Optional[ResponsePolicy] = None
         self._load_source: str = "code"
+        # 2026-10-20（§9.56）：**文件级**加载失败清单（整库失败有 code defaults 回退，
+        # 文件级失败此前只留一行 warning → 策略集静默变小）。
+        self._load_errors: list[dict] = []
 
     def _policies_dir_resolved(self) -> str:
         if self._policies_dir:
@@ -445,11 +466,13 @@ class PolicyEngine:
         uncertain: Optional[ResponsePolicy] = None
         source = "code"
 
+        load_errors: list[dict] = []
         try:
-            rows = policy_store.load_all(directory)
+            rows, load_errors = policy_store.load_all_with_errors(directory)
         except Exception as e:
             logger.warning(f"Policy YAML load failed ({directory}): {e}; using code defaults")
             rows = []
+            load_errors = [{"path": directory, "reason": "load_failed", "detail": str(e)[:300]}]
 
         if rows:
             source = "yaml"
@@ -476,10 +499,20 @@ class PolicyEngine:
             reload_taxonomy()
         except Exception as e:
             logger.debug(f"Taxonomy reload skipped: {e}")
+        self._load_errors = load_errors
+        if load_errors:
+            # 失败必须**可见**：少了几条策略 = 有几条响应规则**根本没生效**。
+            logger.error(
+                f"[ResponsePolicy] {len(load_errors)} 个策略文件加载失败"
+                f"（其余 {len(self._policies)} 条已加载）: "
+                + "; ".join(f"{e.get('path')}:{e.get('reason')}" for e in load_errors[:5])
+            )
+            _record_policy_load_failed(load_errors)
         logger.info(
             f"Loaded {len(self._policies)} response policies "
             f"(source={source}, uncertain_template="
-            f"{'yes' if uncertain else 'code-fallback'})"
+            f"{'yes' if uncertain else 'code-fallback'}, "
+            f"failed_files={len(load_errors)})"
         )
         return len(self._policies)
 

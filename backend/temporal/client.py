@@ -16,7 +16,7 @@ P3 (2026-q3 D-A/D-B):
 import asyncio
 import logging
 from datetime import timedelta
-from typing import Any, Dict, Optional, Union
+from typing import Any, Union
 
 from config import settings
 

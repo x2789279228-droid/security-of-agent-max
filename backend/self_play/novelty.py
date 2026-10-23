@@ -37,7 +37,7 @@ def tokenize(*parts: str) -> set[str]:
 def fingerprint(event_type: str, message: str = "", mitre_id: str = "", protocol: str = "") -> str:
     toks = sorted(tokenize(event_type, message, mitre_id, protocol))
     raw = "|".join([event_type.upper(), protocol.lower(), mitre_id.upper(), *toks])
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
 
 
 def jaccard(a: Iterable[str], b: Iterable[str]) -> float:

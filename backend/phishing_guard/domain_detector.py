@@ -206,7 +206,7 @@ def _check_dga(domain_base: str) -> list[PhishingIndicator]:
     # 高熵 + 无元音 → 疑似 DGA
     vowels = set("aeiou")
     vowel_ratio = sum(1 for c in domain_base if c in vowels) / length
-    has_digits = any(c.isdigit() for c in domain_base)
+    any(c.isdigit() for c in domain_base)
 
     if entropy > 3.5 and vowel_ratio < 0.15 and length >= 8:
         indicators.append(PhishingIndicator(

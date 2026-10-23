@@ -6,7 +6,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -179,18 +179,33 @@ async def guard_approvals(
     return mcp_guard.approvals.list_all(page=page, page_size=page_size)
 
 class GuardCallRequest(BaseModel):
+    """MCP Guard 网关调用请求体。
+
+    安全约束（B-1 修复）：本模型**刻意不包含** user_role / caller 字段。
+    调用主体的身份与授权上下文必须来自可信的应用认证机制（JWT），
+    而不能由请求体或模型自行声明 —— 否则任意已认证用户只要在 body 里
+    填 "user_role":"admin" 即可越过 RBAC 调用 isolate_host 等高危工具。
+
+    Pydantic 默认忽略多余字段，因此旧客户端继续发送这两个字段时会被静默
+    丢弃（fail-closed），而不是被采信。
+    """
+    model_config = ConfigDict(extra="ignore")
+
     tool_name: str
     arguments: dict = {}
-    user_role: str = "security_operator"
     reason: str = ""
-    caller: str = ""
     session_id: str = ""
     trace_id: str = ""
     event_id: int = 0
 
+
 @router.post("/guard/call")
 async def guard_call(req: GuardCallRequest, user: UserInfo = Depends(get_current_user)):
-    """通过 MCP Guard 网关调用安全工具（4 层检查）"""
+    """通过 MCP Guard 网关调用安全工具（4 层检查）
+
+    授权上下文一律取自 JWT 认证主体（user.role / user.username），
+    请求体中的任何身份字段都不参与授权判定。
+    """
     if not settings.mcp_guard_enabled:
         raise HTTPException(400, "MCP Guard is disabled")
     try:
@@ -203,9 +218,10 @@ async def guard_call(req: GuardCallRequest, user: UserInfo = Depends(get_current
             GuardReq(
                 tool_name=req.tool_name,
                 arguments=req.arguments,
-                user_role=req.user_role,
+                # 授权与审计身份唯一可信来源 = 已验证的 JWT 主体
+                user_role=user.role,
                 reason=req.reason,
-                caller=req.caller or getattr(user, "username", "") or "human_api",
+                caller=user.username or "human_api",
                 source="api",
                 session_id=req.session_id,
                 trace_id=req.trace_id,
@@ -326,7 +342,7 @@ async def run_audit_llm_pipeline(
                     "completed_at": datetime.now(timezone.utc).isoformat(),
                 }, event_id),
             }
-            await session.commit()
+            await event_store.commit_then_invalidate(session, event_id)
 
         return {
             "event_id": event_id,
@@ -459,7 +475,9 @@ async def get_evidence_trail(
 @router.get("/cad/status")
 async def cad_status(user: UserInfo = Depends(get_current_user)):
     """获取 CAD 审计角色状态（含熔断器）"""
-    cb_status = circuit_breaker.get_status()
+    # P1-D-2: 必须从 DB 取权威状态。修复前直接读本进程内存 ——
+    # 而熔断是在 Temporal worker 进程里触发的，API 进程永远显示 CLOSED。
+    cb_status = await cad_agent.check_circuit_breaker()
     return {
         "circuit_breaker": cb_status,
         "context_audit_interval_s": 3600,
@@ -474,7 +492,7 @@ async def trigger_context_audit(user: UserInfo = Depends(RequireRole("admin"))):
 @router.get("/cad/circuit-breaker")
 async def get_circuit_breaker(user: UserInfo = Depends(get_current_user)):
     """查询熔断器状态"""
-    return circuit_breaker.get_status()
+    return await cad_agent.check_circuit_breaker()
 
 @router.post("/cad/circuit-breaker/reset")
 async def reset_circuit_breaker(
@@ -483,7 +501,7 @@ async def reset_circuit_breaker(
     user: UserInfo = Depends(RequireRole("admin")),
 ):
     """人工重置熔断器"""
-    result = circuit_breaker.reset()
+    result = await cad_agent.reset_circuit_breaker()
     await log_from_request(
         session, request, user, action="circuit_breaker.reset",
         target_type="circuit_breaker", target_id="cad",

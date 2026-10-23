@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "compatibility": "FULL",
+  "description": "跨运行时 Schema 权威目录。JSON Schema 是校验事实源；Avro 与 Java POJO 是投影，由 CI 对齐。",
+  "envelope": {
+    "name": "event_envelope",
+    "version": "1.0.0",
+    "schema": "backend/schemas/envelope.schema.json"
+  },
+  "schemas": [
+    {
+      "name": "security_event",
+      "version": "1.0.0",
+      "json_schema": "backend/schemas/security_event.schema.json",
+      "avro": "flink-jobs/schemas/security-event.avsc",
+      "java_model": "flink-jobs/src/main/java/com/soc/model/SecurityEvent.java",
+      "baseline": "contracts/baseline/security_event.schema.json",
+      "subjects": [
+        "security-events-enriched-value",
+        "security-events-ingest-value",
+        "security-audit-queue-value",
+        "security-logs-raw-value",
+        "security-logs-validated-value"
+      ],
+      "topics": [
+        "security-events-enriched",
+        "security-events-ingest",
+        "security-audit-queue",
+        "security-logs-raw",
+        "security-logs-validated"
+      ],
+      "runtime_extensions": ["anomalyScore", "anomalyReasons"],
+      "compatibility": "FULL"
+    },
+    {
+      "name": "alert_event",
+      "version": "1.0.0",
+      "json_schema": "backend/schemas/alert_event.schema.json",
+      "avro": "flink-jobs/schemas/alert-event.avsc",
+      "java_model": "flink-jobs/src/main/java/com/soc/model/AlertEvent.java",
+      "baseline": "contracts/baseline/alert_event.schema.json",
+      "subjects": [
+        "security-alerts-value"
+      ],
+      "topics": [
+        "security-alerts"
+      ],
+      "runtime_extensions": [],
+      "compatibility": "FULL"
+    }
+  ]
+}
