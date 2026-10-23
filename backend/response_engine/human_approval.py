@@ -13,11 +13,10 @@
   - 策略明确 require_approval = true
   - 熔断器处于 tripped 状态
 """
-import json
+import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
@@ -90,12 +89,139 @@ class ApprovalTicket:
 
 
 class ApprovalQueue:
-    """审批队列"""
+    """审批队列
+
+    内存为主路径（同步 API 合同不变），DB 为 write-behind 持久层：
+      - submit/approve/reject 后异步写 approval_tickets 表（失败只告警不阻断，
+        内存工单继续工作 —— 落库的价值在重启恢复，不在热路径）；
+      - set_session_factory() + restore() 由 app lifespan 在 init_db 后调用，
+        把上次进程未决的 PENDING 工单拉回内存（此前重启即丢全部待办）。
+    """
 
     def __init__(self, default_timeout_minutes: int = 30):
         self._tickets: dict[str, ApprovalTicket] = {}
         self._default_timeout = default_timeout_minutes
         self._auto_approve_timeout_minutes = 10  # 超时自动批准（高危不自动）
+        self._session_factory = None             # models.async_session，由 lifespan 注入
+        self._persist_tasks: set = set()         # 在途落库任务（测试可 drain）
+        # write-behind 竞态防护: submit 后立刻 approve 时, 两个 persist 任务并发,
+        # 后者 get 不到未提交的行 → INSERT 撞 UNIQUE。锁内 get+upsert 保证串行正确。
+        self._persist_lock = asyncio.Lock()
+
+    # ── 持久化（write-behind） ──
+
+    def set_session_factory(self, session_factory) -> None:
+        """注入 DB session 工厂后启用落库；不注入则维持纯内存（向后兼容测试）。"""
+        self._session_factory = session_factory
+
+    @staticmethod
+    def _fill_record(rec, t: ApprovalTicket) -> None:
+        rec.policy_name = t.policy_name
+        rec.threat_info = t.threat_info
+        rec.actions = t.actions
+        rec.actions_digest = t.actions_digest
+        rec.sig = t.sig
+        rec.status = t.status.value
+        rec.created_at = t.created_at
+        rec.expires_at = t.expires_at
+        rec.approved_by = t.approved_by
+        rec.approved_at = t.approved_at
+        rec.reject_reason = t.reject_reason
+        rec.result = t.result
+        rec.priority = t.priority
+        rec.match_status = t.match_status
+
+    def _persist_async(self, ticket: ApprovalTicket) -> None:
+        """调度一次落库。无事件循环（同步测试场景）时静默跳过。"""
+        if self._session_factory is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._persist(ticket))
+        self._persist_tasks.add(task)
+        task.add_done_callback(self._persist_tasks.discard)
+
+    async def _persist(self, ticket: ApprovalTicket) -> None:
+        from models import ApprovalTicketRecord
+        try:
+            async with self._persist_lock:
+                async with self._session_factory() as s:
+                    rec = await s.get(ApprovalTicketRecord, ticket.id)
+                    if rec is None:
+                        rec = ApprovalTicketRecord(id=ticket.id)
+                        s.add(rec)
+                    self._fill_record(rec, ticket)
+                    await s.commit()
+        except Exception as e:
+            # 落库失败不阻断审批主路径（内存工单仍可用），但要显式留痕
+            logger.error(f"[APPROVAL] persist ticket {ticket.id[:8]} failed: {e}")
+
+    async def drain_persistence(self) -> None:
+        """等待在途落库任务完成（测试与优雅停机用）。"""
+        if self._persist_tasks:
+            await asyncio.gather(*list(self._persist_tasks), return_exceptions=True)
+
+    async def restore(self) -> int:
+        """启动恢复：非终态工单从 DB 拉回内存；已过期直接置 EXPIRED 落库。"""
+        if self._session_factory is None:
+            return 0
+        from models import ApprovalTicketRecord
+        from sqlalchemy import select
+        restored = 0
+        async with self._session_factory() as s:
+            rows = (await s.execute(
+                select(ApprovalTicketRecord).where(
+                    ApprovalTicketRecord.status == ApprovalStatus.PENDING.value
+                )
+            )).scalars().all()
+            for r in rows:
+                t = ApprovalTicket(
+                    id=r.id,
+                    threat_info=dict(r.threat_info or {}),
+                    policy_name=r.policy_name or "",
+                    actions=list(r.actions or []),
+                    actions_digest=r.actions_digest or "",
+                    sig=r.sig or "",
+                    status=ApprovalStatus.PENDING,
+                    created_at=float(r.created_at or 0),
+                    expires_at=float(r.expires_at or 0),
+                    priority=r.priority or "p2",
+                    match_status=r.match_status or "",
+                )
+                if t.is_expired:
+                    r.status = ApprovalStatus.EXPIRED.value
+                    continue
+                self._tickets[t.id] = t
+                restored += 1
+            await s.commit()
+        if restored:
+            logger.warning(
+                f"[APPROVAL] restored {restored} pending ticket(s) from DB "
+                f"(此前进程重启会丢失全部待办)"
+            )
+        return restored
+
+    async def cleanup_db(self, max_age_hours: int = 72) -> int:
+        """删除终态且超过保留期的工单行（内存 cleanup 的 DB 对应物）。"""
+        if self._session_factory is None:
+            return 0
+        from models import ApprovalTicketRecord
+        from sqlalchemy import delete
+        terminal = [s.value for s in ApprovalStatus]
+        cutoff = time.time() - max_age_hours * 3600
+        async with self._session_factory() as s:
+            res = await s.execute(
+                delete(ApprovalTicketRecord).where(
+                    ApprovalTicketRecord.created_at < cutoff,
+                    ApprovalTicketRecord.status != ApprovalStatus.PENDING.value,
+                )
+            )
+            await s.commit()
+        # terminal 仅用于可读性说明；真正的条件是"非 PENDING 且过期"
+        _ = terminal
+        return res.rowcount or 0
 
     def submit(
         self,
@@ -133,6 +259,7 @@ class ApprovalQueue:
         # 控制面签名: approve 时用 id|exp|digest|policy 重验; 外部审批人须回传该 sig
         ticket.sig = sign_approval(ticket.id, ticket.expires_at, digest, policy_name or "")
         self._tickets[ticket.id] = ticket
+        self._persist_async(ticket)
 
         logger.warning(
             f"[APPROVAL] Ticket #{ticket.id[:8]} submitted: "
@@ -177,6 +304,7 @@ class ApprovalQueue:
         ticket.status = ApprovalStatus.APPROVED
         ticket.approved_by = approved_by
         ticket.approved_at = time.time()
+        self._persist_async(ticket)
         logger.warning(f"[APPROVAL] Ticket #{ticket_id[:8]} APPROVED by {approved_by}")
         return ticket
 
@@ -196,6 +324,7 @@ class ApprovalQueue:
         ticket.status = ApprovalStatus.REJECTED
         ticket.reject_reason = reason
         ticket.approved_by = rejected_by  # reuse field
+        self._persist_async(ticket)
         logger.warning(f"[APPROVAL] Ticket #{ticket_id[:8]} REJECTED by {rejected_by}: {reason}")
         return ticket
 
