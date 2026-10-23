@@ -2,6 +2,7 @@ package com.soc.job;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import com.soc.model.SecurityEvent;
+import com.soc.util.EventEnvelope;
 import com.soc.util.KafkaConfig;
 import com.soc.util.TraceIdHeaderProvider;
 import com.soc.util.TraceUtil;
@@ -62,12 +63,34 @@ public class LogValidationJob {
     private static final OutputTag<String> REJECTED_TAG =
             new OutputTag<String>("rejected-logs") {};
 
-    /** 合法 API Key 白名单 */
-    private static final Set<String> VALID_API_KEYS = new HashSet<>(Arrays.asList(
-            "soc-syslog-2024",
-            "soc-api-2024",
-            "soc-simulator-2024"
-    ));
+    /**
+     * 合法 API Key 白名单。
+     *
+     * 2026-10-23 安全修复：删除源码内置的演示密钥 —— 公开仓库里谁能读到源码，
+     * 谁就能伪装成合法日志源。现在从环境变量 VALID_API_KEYS（逗号分隔）读取，
+     * 由 docker-compose 注入（演示默认值见 .env.example）。未配置时白名单为空
+     * （fail-closed：所有数据源被拒），作业本身照常启动，只打 ERROR。
+     */
+    private static final Set<String> VALID_API_KEYS = loadValidApiKeys();
+
+    private static Set<String> loadValidApiKeys() {
+        String csv = System.getenv("VALID_API_KEYS");
+        Set<String> keys = new HashSet<>();
+        if (csv != null && !csv.trim().isEmpty()) {
+            for (String k : csv.split(",")) {
+                if (!k.trim().isEmpty()) {
+                    keys.add(k.trim());
+                }
+            }
+        }
+        if (keys.isEmpty()) {
+            LOG.error("VALID_API_KEYS 未配置 —— API Key 白名单为空，所有数据源将被拒绝。"
+                    + "请设置环境变量 VALID_API_KEYS（逗号分隔），或经 docker-compose 注入。");
+        } else {
+            LOG.info("VALID_API_KEYS loaded: {} key(s)", keys.size());
+        }
+        return keys;
+    }
 
     /** 数字严重级别到文本的映射 */
     private static final Map<String, String> SEVERITY_MAP = new HashMap<>();
@@ -227,7 +250,7 @@ public class LogValidationJob {
                     emitParseRejected(ctx, value, "EMPTY_MESSAGE", "消息为空");
                     return;
                 }
-                SecurityEvent event = getMapper().readValue(value, SecurityEvent.class);
+                SecurityEvent event = EventEnvelope.parseSecurityEvent(getMapper(), value);
                 if (event.getEventId() == null || event.getEventId().isEmpty()) {
                     event.setEventId(UUID.randomUUID().toString());
                 }
@@ -383,6 +406,7 @@ public class LogValidationJob {
             }
 
             // ========== 验证通过 ==========
+            EventEnvelope.stamp(event, EventEnvelope.PRODUCER_LOGVAL);
             validCounter.inc();
             // 附上本 span 的 traceparent 供下游 (AnomalyDetection/Python) 继承
             Map<String, Object> raw = event.getRawData();
