@@ -13,7 +13,6 @@
           → Reviewer    (复核结论完整性)
 """
 import asyncio
-import json
 import logging
 import time
 from collections import OrderedDict
@@ -24,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from models import SecurityEvent
 from event_store import event_store
-from anomaly_detector import anomaly_detector
 from sliding_window import sliding_window
 from memory_tree import memory_tree
 from event_bus import event_bus
@@ -278,9 +276,61 @@ class LogIngestor:
 
         编排: 优先走 Temporal Workflow(AuditPipelineWorkflow) 获得可靠性/长任务/可视化;
         不可用/失败时降级回本进程 async 兜底(带 900s 整体超时)。
+
+        跨进程认领(2026-10-23 第二阶段): 入口先 SET NX EX 抢占
+        soc:audit:claim:{event_id} —— 修复前 analyzed 预检是 check-then-act,
+        多进程部署时同一事件会被两个进程同时审计(双倍 LLM 成本 + 结论互覆)。
+        Redis 不可用时 fail-open(互斥退化为尽力而为), 与旧行为一致。
+        TTL 见 settings.audit_claim_ttl_s; 到期自动释放, 无需显式删除
+        (成功路径 DB analyzed=True 兜底, 失败路径等 TTL 过后可重试)。
         """
-        # 案例自动聚合: 不挡 LLM 准入,后台短租 OLTP 连接
-        asyncio.create_task(self._auto_create_case_bg(event_id))
+        claim_ttl = int(getattr(settings, "audit_claim_ttl_s", 120) or 120)
+        from distributed_lock import try_acquire
+        _claimed = await try_acquire(f"soc:audit:claim:{int(event_id)}", claim_ttl)
+        if _claimed is False:
+            try:
+                from metrics import AUDIT_CLAIM
+                AUDIT_CLAIM.labels(result="contended").inc()
+            except Exception:
+                pass
+            logger.info(
+                "[Audit-LLM] event #%s being audited by another worker, skip",
+                event_id,
+            )
+            return
+        if _claimed:
+            try:
+                from metrics import AUDIT_CLAIM
+                AUDIT_CLAIM.labels(result="claimed").inc()
+            except Exception:
+                pass
+        # _claimed is None → Redis 不可用, fail-open 继续(与旧行为一致)
+        try:
+            from models import SecurityEvent, async_session as db_session
+            async with db_session() as session:
+                existing = await session.get(SecurityEvent, int(event_id))
+                if existing is not None and bool(existing.analyzed):
+                    logger.info("[Audit-LLM] skip already analyzed event #%s", event_id)
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception as precheck_err:
+            logger.debug("[Audit-LLM] analyzed precheck skipped for #%s: %s", event_id, precheck_err)
+
+        # 案例自动聚合: 不挡 LLM 准入。后台名额满了就跳过，不额外堆积任务。
+        #
+        # 测试环境（env_name=test）改为同步等待：测试用 sqlite :memory:
+        # 单连接，后台任务与测试轮询并发 session 会互相 commit/rollback，
+        # 产生 "UPDATE security_cases expected 1 row, 0 matched" 的假失败。
+        if (getattr(settings, "env_name", "") or "").lower() in ("test", "testing"):
+            await self._auto_create_case_bg(event_id)
+        else:
+            from capacity import background_task_gate, schedule_bounded
+            await schedule_bounded(
+                self._auto_create_case_bg(event_id),
+                gate=background_task_gate(),
+                label=f"case-{event_id}",
+            )
 
         # ── 审计分流 (LLM 通道分层) ──
         # 废除全局 budget 一刀切: P0 始终可走最小 LLM; 低优降级 tools_only/rule_close
@@ -587,6 +637,8 @@ class LogIngestor:
                 ),
                 timeout=max(8.0, timeout_s),
             )
+        except asyncio.CancelledError:
+            raise
         except asyncio.TimeoutError:
             logger.error(
                 f"[Audit-LLM] Pipeline TIMEOUT ({timeout_s:.0f}s) for event #{event_id}"
@@ -780,8 +832,6 @@ class LogIngestor:
         self._track_audit_status(event_id, "running", use_fallback=use_fallback_semaphore)
         if True:
             from agents import decomposer, tool_builder, executor, reviewer
-            from agents.agent_cad import cad_agent
-            from models import async_session as db_session
             from trace_hook import set_trace_context, clear_trace_context
 
             set_trace_context(
@@ -791,12 +841,9 @@ class LogIngestor:
                 log_data=log_data,
             )
             from observability.thought_events import (
-                attach_to_audit,
-                emit_cad,
                 emit_executor,
                 emit_plan,
                 emit_rag_chunks,
-                emit_response,
                 emit_review,
                 emit_signals,
                 emit_tool_map,
@@ -895,6 +942,12 @@ class LogIngestor:
                             "tool_calls": len(tool_calls),
                             "audit": audit_result.to_dict(),
                             "verdict": verdict.to_dict(),
+                            # P1-Executor: 终态随轮次一起进合并层，
+                            # 使「未跑完的轮」在 merge 里可见（而不是被当作
+                            # 「这一轮没发现威胁」）。
+                            "terminal_state": getattr(audit_result, "terminal_state", "") or "completed",
+                            "llm_calls_made": int(getattr(audit_result, "llm_calls_made", 0) or 0),
+                            "llm_calls_planned": int(getattr(audit_result, "llm_calls_planned", 0) or 0),
                             "missed_threats": [
                                 {
                                     "description": mt.get("description", "")[:200],
@@ -1084,6 +1137,13 @@ class LogIngestor:
             "response_blocked": bool(merged.get("response_blocked")),
         }, event_id)
 
+        # P0-C-6 / D-1 / D-3: 监督结论必须在**响应决策之前**拿到。
+        # 修复前 CAD 跑在 commit 之后，tripped 的唯一后果是一行 logger.critical，
+        # 而自动响应闸门完全不看它 —— 熔断反而不会阻止误封。
+        cad_report_for_gate = None
+        supervision_ok_for_gate = True
+        supervision_error_for_gate = ""
+
         async with db_session() as session:
             db_evt = await session.get(SecurityEvent, event_id)
             if db_evt:
@@ -1101,6 +1161,7 @@ class LogIngestor:
                         cad_report = await cad_agent.audit_pipeline(
                             session, event_id, db_evt.raw_data["_audit_llm"]
                         )
+                    cad_report_for_gate = cad_report
                     emit_cad(cad_report, event_id=event_id, session_id=session_id)
                     from observability.thought_events import merge_thought_into_raw, snapshot
                     db_evt.raw_data = merge_thought_into_raw({
@@ -1112,14 +1173,19 @@ class LogIngestor:
                             "duration_ms": cad_report["duration_ms"],
                         },
                     }, snapshot(event_id))
-                    await session.commit()
+                    await event_store.commit_then_invalidate(session, event_id)
                     if cad_report["circuit_breaker"]["tripped"]:
                         logger.critical(
                             f"[CAD] CIRCUIT BREAKER for event #{event_id}: "
                             f"{cad_report['circuit_breaker']['reason']}"
                         )
                 except Exception as cad_err:
+                    # P0-D-3: 监督系统自身异常是一类独立结果，不等于「没发现问题」。
+                    # 修复前这里只 warning，熔断器保持 CLOSED、响应照常下发，
+                    # 监督层在最需要它的时刻静默消失且无告警。
                     logger.warning(f"[CAD] audit_pipeline failed: {cad_err}")
+                    supervision_ok_for_gate = False
+                    supervision_error_for_gate = str(cad_err)
 
         self._track_audit_status(event_id, "completed", quality="llm")
         try:
@@ -1153,6 +1219,21 @@ class LogIngestor:
         })
 
         _verdict = merged.get("verdict")
+        # P0-C-6 / D-1 / D-3: 统一自动响应闸门。
+        # 修复前此处内联 4 字段判定，不看 needs_human_review / schema_valid /
+        # CAD 熔断 / 监督异常 —— 「强制人审未完成」照样下发封禁。
+        from veto_gates import evaluate_auto_response_gate
+        _auto_gate = evaluate_auto_response_gate(
+            merged,
+            cad_report=cad_report_for_gate,
+            supervision_ok=supervision_ok_for_gate,
+            supervision_error=supervision_error_for_gate,
+        )
+        if _auto_gate.blocking_factors:
+            logger.warning(
+                f"[AutoResponseGate] event #{event_id} BLOCKED: "
+                f"factors={_auto_gate.blocking_factors} reason={_auto_gate.reason}"
+            )
         if merged.get("response_blocked"):
             emit_response(
                 {
@@ -1164,12 +1245,7 @@ class LogIngestor:
                 },
                 event_id=event_id, session_id=session_id,
             )
-        if (
-            merged.get("threat_detected")
-            and _verdict in ("confirmed", "suspicious")
-            and merged.get("confidence", 0) >= 0.4
-            and not merged.get("response_blocked")
-        ):
+        if _auto_gate.allowed:
             try:
                 from response_engine import get_orchestrator
                 _resp_orch = get_orchestrator()
@@ -1190,7 +1266,12 @@ class LogIngestor:
                     "event_id": event_id,
                     "policy_name": f"audit_llm_rounds_{len(all_rounds)}",
                     "response_source": "audit_llm",
-                    "allow_blocking": True,
+                    # P1-C-5: 重新审查 suspicious 的自动封禁资格。
+                    # confirmed = 结论被确认（含强非 LLM 背书）；suspicious 表示
+                    # 「有信号但不足以确认」，此时只允许告警，不允许封禁/隔离。
+                    # 该值由 on_threat_detected 从 threat_info 读取（P1 同时
+                    # 修好了此前被忽略的接线问题）。
+                    "allow_blocking": str(_verdict) == "confirmed",
                 }
 
                 async def _audit_response(threat_info: dict, evt_id: int, sid: str):
@@ -1272,24 +1353,68 @@ class LogIngestor:
     ) -> dict:
         """Batch ingest.
 
+        先按 http_ingest_max_batch 切块。超过绝对上限或 reject 策略时抛 BatchRejected。
         sqlite / 单条: 串行 ingest, 复用调用方 session (内存库测试语义)。
-        其它: ingest_pipeline.run_many (detect 并行 + store_batch 单事务)。
+        其它: 每块一次 ingest_pipeline.run_many，块内检测再按 audit_batch_concurrency 限流。
         """
+        from capacity import GateTimeout, IngestCapacityError, chunk_list, ensure_batch_allowed
+
+        chunk_size = ensure_batch_allowed(len(logs))
+        parts = chunk_list(logs, chunk_size)
         _url = str(getattr(settings, "database_url", "") or "")
         _sqlite = _url.startswith("sqlite")
-        if _sqlite or len(logs) <= 1:
-            results = []
-            for log_data in logs:
-                results.append(await self.ingest(session, session_id, log_data))
-            return {"status": "batch_ingested", "count": len(results),
-                    "session_id": session_id}
+        accepted = 0
+        retrying = 0
+        failed = 0
 
-        # P1: 非 sqlite 多事件 → 事件驱动流水线 (detect 全批并行 + store_batch 单事务,
-        # 单 session 单 commit); sqlite/单条路径走串行 ingest 保留测试语义
-        from ingest_pipeline import run_many
-        await run_many(session, [(session_id, d) for d in logs], ingestor=self)
-        return {"status": "batch_ingested", "count": len(logs),
-                "session_id": session_id}
+        def _tally(process_status: str) -> None:
+            nonlocal accepted, retrying, failed
+            if process_status == "success":
+                accepted += 1
+            elif process_status == "retrying":
+                retrying += 1
+            else:
+                failed += 1
+
+        for part in parts:
+            try:
+                if _sqlite or len(part) <= 1:
+                    for log_data in part:
+                        try:
+                            result = await self.ingest(session, session_id, log_data)
+                        except GateTimeout:
+                            raise
+                        except Exception:
+                            retrying += 1
+                            continue
+                        st = str((result or {}).get("process_status") or "")
+                        if not st:
+                            http_status = str((result or {}).get("status") or "review_queued")
+                            st = "success" if http_status not in ("retrying", "failed", "dlq") else http_status
+                        _tally(st)
+                else:
+                    from ingest_pipeline import run_many
+                    chunk_results = await run_many(
+                        session, [(session_id, d) for d in part], ingestor=self,
+                    )
+                    if not chunk_results:
+                        retrying += len(part)
+                    else:
+                        for rr in chunk_results:
+                            _tally(str(getattr(rr, "process_status", "success") or "success"))
+                        if len(chunk_results) < len(part):
+                            retrying += len(part) - len(chunk_results)
+            except GateTimeout as exc:
+                raise IngestCapacityError(exc.gate, accepted, len(logs)) from exc
+        status = "batch_ingested" if retrying == 0 and failed == 0 else "partial"
+        return {
+            "status": status,
+            "count": accepted,
+            "retrying": retrying,
+            "failed": failed,
+            "chunks": len(parts),
+            "session_id": session_id,
+        }
 
     async def get_status(
         self, session: AsyncSession, session_id: str
