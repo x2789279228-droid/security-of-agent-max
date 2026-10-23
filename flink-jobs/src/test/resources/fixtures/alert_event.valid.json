@@ -1,0 +1,17 @@
+{
+  "alertId": "ALERT-fixture-1",
+  "eventType": "BRUTE_FORCE",
+  "severity": "high",
+  "srcIp": "203.0.113.10",
+  "dstIp": "198.51.100.8",
+  "message": "brute force anomaly",
+  "anomalyScore": 0.86,
+  "alertType": "ANOMALY",
+  "reasons": ["login burst"],
+  "timestamp": 1750000003000,
+  "traceId": "corr-alert-1",
+  "schemaVersion": "1.0.0",
+  "producer": "contracts.fixture",
+  "correlationId": "corr-alert-1",
+  "occurredAt": 1750000003000
+}
