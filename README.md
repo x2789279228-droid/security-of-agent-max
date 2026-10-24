@@ -276,8 +276,16 @@ bash tools/gen-htpasswd.sh admin your-flink-ui-password
 ### 2. 启动全部服务
 
 ```bash
-docker-compose up -d --build
+docker compose --profile full up -d --build
 ```
+
+> **Profile 说明（2026-10-24 生产化）**: Kafka 拆为两档 ——
+> `full`（默认推荐，3 broker KRaft，RF=3/minISR=2，含 kafka-init 建号建 topic）与
+> `lite`（单 broker 兜底）。**必须显式带 `--profile full`（或 `--profile lite`）**，
+> 否则不会启动任何 Kafka，backend/Flink 将连不上 broker。
+> 可选叠加：`--profile edge`（Vector 边缘磁盘缓冲）、
+> `-f docker-compose.ha.yml`（Flink JM 高可用），见 docs/upgrade/PROD-PROFILE-2026-10-24.md。
+> `.env` 需含 `KAFKA_BOOTSTRAP_SERVERS=kafka-1:9092,kafka-2:9092,kafka-3:9092`（full 默认值见 .env.example）。
 
 > **说明**: `--build` 是必须的，因为 `soc-backend` / `soc-frontend` / `soc-flink` 三个自研镜像托管在**私有 GHCR**，源码提交包**不依赖远程镜像**。`docker-compose.yml` 已移除 `image:` 行，每个 service 都走本地 Dockerfile build。首次启动会本地构建这三个镜像，约 **5-15 分钟**（取决于机器 CPU 与网络）；之后 `docker compose up -d` 会复用本地缓存，不再重新 build。
 

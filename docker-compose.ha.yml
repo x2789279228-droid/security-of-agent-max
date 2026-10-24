@@ -1,0 +1,195 @@
+# ════════════════════════════════════════════════════════════════
+# Flink JobManager HA overlay (生产化第二批, 可选 profile 式叠加)
+#
+# 机制: standalone HA —— ZooKeeper 选主 + HA 存储指向共享的 flink_state 卷。
+# 规模: 笔记本 (1 ZK + 2 JM); 拓扑/机制与生产一致 (生产路径为 K8s Flink Operator)。
+#
+# 演示: 杀掉**在位** JobManager → 备 JM 几十秒内接管, 三个核心作业从 HA 存储
+#       的最近 checkpoint 恢复, 全程零丢失零重复 (配合 demo/production-drill.sh)。
+# 零丢失升级: 升级前先 bash tools/flink-savepoint.sh, 再用输出的路径
+#       FLINK_RESTORE_SAVEPOINT=... ./submit-jobs.sh 重提。
+#
+# 用法:
+#   docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d \
+#     zookeeper flink-jobmanager flink-jobmanager-standby \
+#     flink-taskmanager-1 flink-taskmanager-2 flink-taskmanager-3
+# (需先启动基础栈; 内存增量 ~1.5GB: ZK ~400MB + 备 JM ~1GB)
+# ════════════════════════════════════════════════════════════════
+
+# HA 追加配置 (JM/TM 共用; cluster-id 三端一致)
+x-ha-properties: &ha-properties
+  high-availability.type: zookeeper
+  high-availability.zookeeper.quorum: zookeeper:2181
+  # HA 元数据(选主/作业图/提交指针)放共享卷 —— 两个 JM 必须都能读
+  high-availability.storageDir: file:///var/flink-state/ha
+  high-availability.cluster-id: soc-cluster
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: soc-zookeeper
+    restart: always
+    environment:
+      ZOOKEEPER_CLIENT_PORT: "2181"
+      ZOOKEEPER_TICK_TIME: "2000"
+      ZOOKEEPER_AUTO_PURGE_INTERVAL: "24"
+      ZOOKEEPER_SNAP_RETAIN_COUNT: "3"
+    volumes:
+      - zk_data:/var/lib/zookeeper/data
+      - zk_log:/var/lib/zookeeper/log
+    healthcheck:
+      # ruok 必须写入 socket 再读回 —— 只读不写会永久阻塞, healthcheck 永远不 healthy
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/2181; printf ruok >&3; cat <&3' | grep -q imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ── 在位 JobManager: 追加 HA 配置 (overlay 合并 environment, 仅覆盖本键) ──
+  flink-jobmanager:
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        # ── 状态后端: RocksDB + 持久化 checkpoint (与基础栈一致) ──
+        state.backend.type: rocksdb
+        state.checkpoint-storage: filesystem
+        state.checkpoints.dir: file:///var/flink-state/checkpoints
+        state.savepoints.dir: file:///var/flink-state/savepoints
+        state.backend.incremental: true
+        # ── Checkpoint / 容错 (与基础栈一致) ──
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.interval: 60s
+        execution.checkpointing.min-pause: 30s
+        execution.checkpointing.timeout: 10min
+        execution.checkpointing.max-concurrent-checkpoints: 1
+        execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+        execution.checkpointing.num-retained: 3
+        restart-strategy.type: fixed-delay
+        restart-strategy.fixed-delay.delay: 10s
+        restart-strategy.fixed-delay.attempts: 3
+        parallelism.default: 3
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+        # ── HA (本 overlay 追加) ──
+        high-availability.type: zookeeper
+        high-availability.zookeeper.quorum: zookeeper:2181
+        high-availability.storageDir: file:///var/flink-state/ha
+        high-availability.cluster-id: soc-cluster
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+  # ── 备 JobManager: 同镜像同状态卷, ZK 选主竞争者 ──
+  flink-jobmanager-standby:
+    build:
+      context: ./flink-jobs
+      dockerfile: Dockerfile
+    container_name: soc-flink-jobmanager-standby
+    restart: always
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager-standby
+        state.backend.type: rocksdb
+        state.checkpoint-storage: filesystem
+        state.checkpoints.dir: file:///var/flink-state/checkpoints
+        state.savepoints.dir: file:///var/flink-state/savepoints
+        state.backend.incremental: true
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.interval: 60s
+        execution.checkpointing.min-pause: 30s
+        execution.checkpointing.timeout: 10min
+        execution.checkpointing.max-concurrent-checkpoints: 1
+        execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+        execution.checkpointing.num-retained: 3
+        restart-strategy.type: fixed-delay
+        restart-strategy.fixed-delay.delay: 10s
+        restart-strategy.fixed-delay.attempts: 3
+        parallelism.default: 3
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+        high-availability.type: zookeeper
+        high-availability.zookeeper.quorum: zookeeper:2181
+        high-availability.storageDir: file:///var/flink-state/ha
+        high-availability.cluster-id: soc-cluster
+      # 与基础栈 JM 相同的连接配置 (作业提交/恢复用)
+      KAFKA_BOOTSTRAP: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
+      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}
+      KAFKA_SASL_USERNAME: ${KAFKA_APP_USER:-soc-app}
+      KAFKA_SASL_PASSWORD: ${KAFKA_APP_PASSWORD:-}
+      KAFKA_SSL_CA_FILE: /etc/kafka/secrets/ca-cert.pem
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      VALID_API_KEYS: ${VALID_API_KEYS:?VALID_API_KEYS 必填 — 复制 .env.example 为 .env 并设置私有数据源密钥(逗号分隔)}
+    volumes:
+      # 共享状态卷: HA 元数据 + checkpoint 对两个 JM 同时可见 (standalone HA 前提)
+      - flink_state:/var/flink-state
+      - ./certs/kafka/ca-cert.pem:/etc/kafka/secrets/ca-cert.pem:ro
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      kafka-1:
+        condition: service_healthy
+        required: false
+
+  # ── TaskManager ×3: 追加 HA 配置 (经 ZK 发现在位 JM) ──
+  flink-taskmanager-1:
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 5
+        state.backend.type: rocksdb
+        state.checkpoint-storage: filesystem
+        state.checkpoints.dir: file:///var/flink-state/checkpoints
+        state.backend.incremental: true
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+        high-availability.type: zookeeper
+        high-availability.zookeeper.quorum: zookeeper:2181
+        high-availability.storageDir: file:///var/flink-state/ha
+        high-availability.cluster-id: soc-cluster
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+  flink-taskmanager-2:
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 5
+        state.backend.type: rocksdb
+        state.checkpoint-storage: filesystem
+        state.checkpoints.dir: file:///var/flink-state/checkpoints
+        state.backend.incremental: true
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+        high-availability.type: zookeeper
+        high-availability.zookeeper.quorum: zookeeper:2181
+        high-availability.storageDir: file:///var/flink-state/ha
+        high-availability.cluster-id: soc-cluster
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+  flink-taskmanager-3:
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 5
+        state.backend.type: rocksdb
+        state.checkpoint-storage: filesystem
+        state.checkpoints.dir: file:///var/flink-state/checkpoints
+        state.backend.incremental: true
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9250
+        high-availability.type: zookeeper
+        high-availability.zookeeper.quorum: zookeeper:2181
+        high-availability.storageDir: file:///var/flink-state/ha
+        high-availability.cluster-id: soc-cluster
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+
+volumes:
+  zk_data:
+  zk_log:

@@ -429,57 +429,71 @@ _PERSIST_STAT_INTERVAL = 30.0  # 每 30 秒最多刷一次统计
 _last_stat_flush = 0.0
 
 
+# P1: fire-and-forget 任务必须持有强引用 — 裸 create_task 无引用可能被 GC,
+# 且 DB 刷写无超时, 连接池绑到已关闭的事件循环时任务会永远挂起
+# (实测卡死 asyncio.run 的 _cancel_all_tasks)。
+_bg_tasks: set = set()
+_BG_TIMEOUT_S = 10
+
+
+def _spawn_background(coro) -> None:
+    """带超时 + 强引用的后台任务孵化(统计刷写/拒绝落库共用)。"""
+    import asyncio
+
+    async def _bounded():
+        try:
+            await asyncio.wait_for(coro, timeout=_BG_TIMEOUT_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.debug(f"[SourceRegistry] background task failed: {e}")
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+    task = loop.create_task(_bounded())
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
 def asyncio_create_task_refresh_stats(api_key_hash: str, ds: DataSource):
     """异步把 last_seen/total_events 刷到 DB（节流）"""
     global _last_stat_flush
-    import asyncio
     now = time.time()
     if now - _last_stat_flush < _PERSIST_STAT_INTERVAL:
         return
     _last_stat_flush = now
 
     async def _flush():
-        try:
-            from models import async_session, DataSource as DM
-            async with async_session() as s:
-                stmt = select(DM).where(DM.api_key_hash == api_key_hash)
-                row = (await s.execute(stmt)).scalars().first()
-                if row:
-                    from datetime import datetime, timezone
-                    row.last_seen = datetime.now(timezone.utc)
-                    row.total_events = ds.total_events
-                    await s.commit()
-        except Exception as e:
-            logger.debug(f"[SourceRegistry] stat flush failed: {e}")
+        from models import async_session, DataSource as DM
+        async with async_session() as s:
+            stmt = select(DM).where(DM.api_key_hash == api_key_hash)
+            row = (await s.execute(stmt)).scalars().first()
+            if row:
+                from datetime import datetime, timezone
+                row.last_seen = datetime.now(timezone.utc)
+                row.total_events = ds.total_events
+                await s.commit()
 
-    try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(_flush())
-    except RuntimeError:
-        pass
+    _spawn_background(_flush())
 
 
 def asyncio_create_task_persist_rejection(entry: dict):
     """异步把拒绝记录持久化到 data_source_rejections"""
-    import asyncio
-
     async def _persist():
-        try:
-            from models import async_session, DataSourceRejection as DR
-            async with async_session() as s:
-                s.add(DR(
-                    api_key_prefix=entry["api_key_prefix"],
-                    reason=entry["reason"],
-                ))
-                await s.commit()
-        except Exception as e:
-            logger.debug(f"[SourceRegistry] rejection persist failed: {e}")
+        from models import async_session, DataSourceRejection as DR
+        async with async_session() as s:
+            s.add(DR(
+                api_key_prefix=entry["api_key_prefix"],
+                reason=entry["reason"],
+            ))
+            await s.commit()
 
-    try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(_persist())
-    except RuntimeError:
-        pass
+    _spawn_background(_persist())
 
 
 source_registry = SourceRegistry()

@@ -59,6 +59,7 @@ class KafkaProducerWrapper:
             logger.info("Kafka producer: disabled (kafka_enabled=False or aiokafka missing)")
             return
         try:
+            from kafka_security import aiokafka_security_kwargs
             self._producer = AIOKafkaProducer(
                 bootstrap_servers=settings.kafka_bootstrap,
                 value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
@@ -66,6 +67,7 @@ class KafkaProducerWrapper:
                 acks="all",
                 # broker 已落盘但响应超时的重试不得产生重复消息。
                 enable_idempotence=True,
+                **aiokafka_security_kwargs(),
             )
             await self._producer.start()
             self._started = True
@@ -191,8 +193,15 @@ class KafkaProducerWrapper:
             return
         try:
             import json
+            tf_ms = 0
+            try:
+                tf_ms = int(hit.get("timeframe_ms") or 0)
+            except (TypeError, ValueError):
+                tf_ms = 0
             payload = {
                 "src_ip": hit.get("src_ip", ""),
+                # 聚合分组键 (规则声明的 field 取值; 缺省回退 src_ip)
+                "group_key": str(hit.get("group_key") or hit.get("src_ip") or ""),
                 "rule_id": hit.get("rule_id", ""),
                 "threshold": int(hit.get("threshold", 0) or 0),
                 "timestamp": int(hit.get("timestamp", 0) or 0),
@@ -204,11 +213,33 @@ class KafkaProducerWrapper:
                 # confidence=0.0 → 匹配不到任何策略 → 永不处置。
                 # 已用 try 兜底成数值，避免上游传字符串把消费端 int()/float() 打挂。
                 "confidence": _as_float(hit.get("confidence"), 0.45),
+                # ── P0-1 阈值语义契约：Flink 按 op 比较、按规则 timeframe 建窗。
+                # 白名单漏掉这些键，Flink 只能回退硬编码（>= / 5m），
+                # op:'>' 与 timeframe:1m 的声明就在这条边界上被静默剥掉。
+                "op": str(hit.get("op") or ">="),
+                "func": str(hit.get("func") or "count"),
+                "field": str(hit.get("field") or "src_ip"),
+                "timeframe": str(hit.get("timeframe") or ""),
+                "timeframe_ms": tf_ms,
+                "rule_version": str(hit.get("rule_version") or ""),
+                "event_id": str(hit.get("event_id") or ""),
+                "dst_ip": str(hit.get("dst_ip") or ""),
             }
         except Exception as e:
             logger.warning(f"Kafka publish_sigma_hit failed: {e}")
             return
-        await self._send_bounded(
+        # 残留修复(2026-10-24): 发送前按 sigma_hit 契约自检 (warning-only ——
+        # 候选丢了聚合就永远不触发, 所以校验失败**照发**但必须留痕可查)。
+        try:
+            errs = schema_registry.validate(settings.kafka_topic_sigma_hit, payload)
+            if errs:
+                logger.warning(
+                    "sigma-hit contract drift topic=%s rule=%s err=%s",
+                    settings.kafka_topic_sigma_hit, payload.get("rule_id"),
+                    errs[0])
+        except Exception:
+            pass
+        return await self._send_bounded(
             settings.kafka_topic_sigma_hit,
             payload["src_ip"],
             json.dumps(payload),

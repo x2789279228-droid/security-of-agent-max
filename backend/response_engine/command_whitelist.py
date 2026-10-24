@@ -62,9 +62,11 @@ LINUX_RULES: list[WhitelistRule] = [
     WhitelistRule(
         rule_id="LX-006",
         # v4 修复(2026-09-01):按 comment 删除规则,支持 response_registry._unblock_ip
-        # 模式: iptables -D <chain> -s <ip> -j <target> -m comment --comment '<name>'
-        pattern=r"^(sudo\s+)?iptables\s+-D\s+(INPUT|OUTPUT)\s+-[sd]\s+\d{1,3}(\.\d{1,3}){3}\s+-j\s+(DROP|ACCEPT|REJECT)(\s+-m\s+comment\s+--comment\s+'[A-Za-z0-9_\-]+')?$",
-        desc="iptables 按 comment 删除规则（解封）",
+        # v5(2026-10-24):允许纯 comment 匹配删除 — 回滚兜底(行号删除有并发竞态)
+        # 模式: iptables -D <chain> -s <ip> -j <target> [-m comment --comment '<name>']
+        #       iptables -D <chain> -m comment --comment '<name>'
+        pattern=r"^(sudo\s+)?iptables\s+-D\s+(INPUT|OUTPUT)\s+(-[sd]\s+\d{1,3}(\.\d{1,3}){3}\s+-j\s+(DROP|ACCEPT|REJECT)(\s+-m\s+comment\s+--comment\s+'[A-Za-z0-9_\-]+')?|-m\s+comment\s+--comment\s+'[A-Za-z0-9_\-]+')$",
+        desc="iptables 按 comment 删除规则（解封/回滚）",
     ),
     WhitelistRule(
         rule_id="LX-003",
@@ -118,8 +120,9 @@ LINUX_RULES: list[WhitelistRule] = [
     ),
     WhitelistRule(
         rule_id="LX-012",
-        pattern=r"^(sudo\s+)?ip6tables\s+-D\s+(INPUT|OUTPUT)\s+-[sd]\s+[0-9a-fA-F:]+\s+-j\s+(DROP|ACCEPT|REJECT)(\s+-m\s+comment\s+--comment\s+'[A-Za-z0-9_\-]+')?$",
-        desc="ip6tables 按匹配删除规则（解封）",
+        # v5(2026-10-24): 与 LX-006 对齐, 允许纯 comment 匹配删除(回滚兜底)
+        pattern=r"^(sudo\s+)?ip6tables\s+-D\s+(INPUT|OUTPUT)\s+(-[sd]\s+[0-9a-fA-F:]+\s+-j\s+(DROP|ACCEPT|REJECT)(\s+-m\s+comment\s+--comment\s+'[A-Za-z0-9_\-]+')?|-m\s+comment\s+--comment\s+'[A-Za-z0-9_\-]+')$",
+        desc="ip6tables 按匹配删除规则（解封/回滚）",
     ),
     WhitelistRule(
         rule_id="LX-013",

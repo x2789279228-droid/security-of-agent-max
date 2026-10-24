@@ -205,19 +205,36 @@ class ReputationEngine:
         result.level = self._classify(result.score)
         return result
 
+    _geoip_reader = None  # P2: 单例 — 修复前每个 IP 都重新打开一次 mmdb 文件
+    _geoip_failed = False
+
     def _lookup_geoip(self, ip: str) -> Optional[dict]:
         """GeoIP 查询（可选依赖 geoip2）"""
+        if self.__class__._geoip_failed:
+            return None
         try:
             import geoip2.database
-            # 需要 MaxMind GeoLite2 数据库文件
-            reader = geoip2.database.Reader("/data/geoip/GeoLite2-Country.mmdb")
-            response = reader.country(ip)
+        except ImportError:
+            # 可选依赖缺失 → 静默降级(不闩死: 测试可能注入 fake 模块)
+            return None
+        if self.__class__._geoip_reader is None:
+            try:
+                # 需要 MaxMind GeoLite2 数据库文件
+                self.__class__._geoip_reader = geoip2.database.Reader(
+                    "/data/geoip/GeoLite2-Country.mmdb")
+            except Exception:
+                self.__class__._geoip_failed = True
+                return None
+        try:
+            response = self.__class__._geoip_reader.country(ip)
             return {
                 "country": response.country.iso_code,
                 "country_name": response.country.name,
-                "asn": response.country.iso_code,
+                # P2: 修复前 asn 字段填的是 country.iso_code — 张冠李戴,
+                # 下游按 ASN 聚合即错。Country 库不含 ASN, 如实留空。
+                "asn": "",
             }
-        except (ImportError, FileNotFoundError, Exception):
+        except Exception:
             return None
 
     def _classify(self, score: float) -> str:

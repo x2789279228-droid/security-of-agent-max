@@ -1,0 +1,76 @@
+# ════════════════════════════════════════════════════════════════
+# 夜间检测回测 (detection-as-code: 规则改动每晚自动回归)
+#
+# 职责:
+#   1. 标定集口径守卫 —— tests/test_p3_detection_calibration.py:
+#      良性样本不得携带执行类动作 / 已登记缺口不得回退 / 待聚合候选
+#      不得算进确定性检出。规则 YAML 或检测引擎的任何回归当晚变红。
+#   2. 生成完整回测报告 (per-rule precision/recall、异常阈值扫描、
+#      攻击链检出) 存为 artifact, 供"规则变更 PR 带回测结果"引用。
+#
+# 触发: 每日 UTC 18:00 (北京时间 02:00) + 手动 workflow_dispatch
+# ════════════════════════════════════════════════════════════════
+name: Nightly detection backtest
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-backtest
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: Detection calibration & report
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SHARED_MEMORY_SKIP_DOTENV: "1"
+      # 与 tests/conftest.py 同口径: 策略目录指向仓库内真实路径
+      RESPONSE_POLICIES_DIR: ${{ github.workspace }}/backend/response_engine/policies
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend deps
+        run: pip install -r requirements.lock pytest pytest-asyncio
+
+      - name: 标定集口径守卫 (回归即失败)
+        run: pytest -q tests/test_p3_detection_calibration.py
+
+      - name: 生成回测报告 (human + json)
+        run: |
+          python eval_datasets/evaluate_detection.py | tee ../backtest.txt
+          python eval_datasets/evaluate_detection.py --json > ../backtest.json
+
+      - name: 报告摘要 (job summary)
+        if: always()
+        run: |
+          {
+            echo "## 夜间检测回测 ($(date -u +%F))"
+            echo '```'
+            cat ../backtest.txt 2>/dev/null | head -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload 回测 artifact (保留 90 天)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: detection-backtest-${{ github.run_id }}
+          path: |
+            backtest.txt
+            backtest.json
+          retention-days: 90

@@ -297,12 +297,24 @@ async def log_from_request(
     )
 
 
+_flush_lock: Optional[asyncio.Lock] = None
+
+
 async def flush_fallback(session: AsyncSession) -> int:
     """冲刷离线缓冲到 DB。
 
     调用方: scheduler._audit_trail_flush_loop (每 60s) 与 POST /audit-trail/flush。
     提交成功后再出队; commit 失败则条目留在内存,下一轮重试。
+    P2: 两个入口可并发 flush — 不加锁时双双快照同一批条目, 重复入库且哈希链分叉。
     """
+    global _flush_lock
+    if _flush_lock is None:
+        _flush_lock = asyncio.Lock()
+    async with _flush_lock:
+        return await _flush_fallback_locked(session)
+
+
+async def _flush_fallback_locked(session: AsyncSession) -> int:
     if not _fallback_buffer:
         return 0
     batch = list(_fallback_buffer)
@@ -341,16 +353,21 @@ async def flush_fallback(session: AsyncSession) -> int:
 async def verify_chain(session: AsyncSession) -> dict:
     """校验整条审计哈希链。
 
-    按 id 升序遍历, 用每行字段 + prev_hash 重算 row_hash 并与库中值比对。
+    按 id 升序遍历:
+      1. 用每行字段 + prev_hash 重算 row_hash 并与库中值比对(行内完整性);
+      2. 比对 row.prev_hash == 前一行.row_hash(**链接完整性**)。
     返回: {"ok": bool, "checked": int, "first_break_id": Optional[int]}
       - 空表: ok=True, checked=0, first_break_id=None
       - 断点: first_break_id=首个不匹配行 id, checked=断点前通过行数
       注: 空 row_hash/prev_hash 的行(旧数据或 fail-open 落库)会计为断点。
+    P1: 修复前只做行内重算、从不比对相邻链接 — 删除/重排整行完全不可检出,
+    防篡改承诺失效。
     """
     from models import AuditTrail
     stmt = select(AuditTrail).order_by(AuditTrail.id)
     rows = (await session.execute(stmt)).scalars().all()
     checked = 0
+    prev_row_hash: Optional[str] = None
     for row in rows:
         recomputed = _compute_row_hash(
             actor=row.actor, action=row.action,
@@ -361,6 +378,10 @@ async def verify_chain(session: AsyncSession) -> dict:
         )
         if recomputed != (row.row_hash or ""):
             return {"ok": False, "checked": checked, "first_break_id": row.id}
+        # 链接完整性: 本行声称的 prev_hash 必须等于前一行的 row_hash
+        if prev_row_hash is not None and (row.prev_hash or "") != prev_row_hash:
+            return {"ok": False, "checked": checked, "first_break_id": row.id}
+        prev_row_hash = row.row_hash or ""
         checked += 1
     return {"ok": True, "checked": checked, "first_break_id": None}
 

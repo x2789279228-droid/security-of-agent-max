@@ -27,17 +27,20 @@ for _i in 1 2 3 4 5 6 7 8 9 10 15 20 30; do
 done
 
 if [ "$_mount_ready" = "1" ]; then
-    mkdir -p "$SSH_DST" /root/.ssh
+    mkdir -p "$SSH_DST"
     cp "$SSH_SRC/id_rsa" "$SSH_DST/id_rsa"
     cp "$SSH_SRC/id_rsa.pub" "$SSH_DST/id_rsa.pub" 2>/dev/null
     cp "$SSH_SRC/known_hosts" "$SSH_DST/known_hosts" 2>/dev/null
-    chmod 700 "$SSH_DST" /root/.ssh
+    chmod 700 "$SSH_DST"
     chmod 600 "$SSH_DST/id_rsa"
     chmod 644 "$SSH_DST/id_rsa.pub" 2>/dev/null
-    # 兼容仍指向 /root/.ssh/id_rsa 的旧配置
-    cp "$SSH_DST/id_rsa" /root/.ssh/id_rsa
-    chmod 600 /root/.ssh/id_rsa
-    echo "[entrypoint] SSH key copied to $SSH_DST and /root/.ssh (after ${_i}s)"
+    # 兼容仍指向 /root/.ssh/id_rsa 的旧配置 — 镜像以 appuser 运行时
+    # /root 不可写, 此分支必然 EACCES; 仅在确有权限时执行。
+    if mkdir -p /root/.ssh 2>/dev/null && [ -w /root/.ssh ]; then
+        cp "$SSH_DST/id_rsa" /root/.ssh/id_rsa
+        chmod 600 /root/.ssh/id_rsa
+    fi
+    echo "[entrypoint] SSH key copied to $SSH_DST (after ${_i}s)"
 else
     echo "[entrypoint] No SSH key found at $SSH_SRC/id_rsa after 30s retries (stub mode)"
 fi

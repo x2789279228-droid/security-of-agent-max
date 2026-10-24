@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 _KEY_PREFIX = "soc:ttl:"
 _INDEX_KEY = "soc:ttl:index"
+_RETRY_PREFIX = "soc:ttl-retry:"
+_RETRY_BACKOFF_BASE_S = 300
+_RETRY_BACKOFF_MAX_S = 3600
+_RETRY_MAX_ATTEMPTS = 10
 
 
 class TtlManager:
@@ -175,7 +179,13 @@ class TtlManager:
             await asyncio.sleep(self._scan_interval)
 
     async def _process_expired(self):
-        """处理已到期的 TTL 条目"""
+        """处理已到期的 TTL 条目
+
+        P2: 多副本部署时修复前各自扫到同一批过期规则并发回滚; 回滚失败每
+        scan_interval 无退避无限重试。现在:
+          · 先 `zrem` 原子认领(抢不到 = 其他副本已处理, 跳过);
+          · 失败按指数退避重新入索引(300s 起, 封顶 1h), 超限升级为 error 日志。
+        """
         if not self._redis:
             return
 
@@ -189,6 +199,11 @@ class TtlManager:
         for rule_id_raw in expired:
             rule_id = rule_id_raw.decode() if isinstance(rule_id_raw, bytes) else rule_id_raw
             key = f"{_KEY_PREFIX}{rule_id}"
+
+            # 原子认领: 从索引移除才算认领成功 — 并发扫描的其余副本直接跳过
+            claimed = await self._redis.zrem(_INDEX_KEY, rule_id)
+            if not claimed:
+                continue
 
             # 读取参数（key 可能已被 Redis EX 自动删除）
             data = await self._redis.get(key)
@@ -220,16 +235,28 @@ class TtlManager:
             else:
                 logger.warning(f"[TTL] No rollback callback, cannot auto-rollback {rule_id}")
 
-            # 只有回滚成功才清理索引；失败必须保留，下一轮继续重试。
+            # 失败按指数退避重新入索引重试; 成功才清理。
             # 否则一次 SSH 抖动就会让规则永久留存，而系统以为已解封。
             if not rolled_back:
-                logger.warning(
-                    f"[TTL] Keep {rule_id} in index for retry (rollback failed)"
-                )
+                retry_key = f"{_RETRY_PREFIX}{rule_id}"
+                retries = int(await self._redis.incr(retry_key) or 0)
+                await self._redis.expire(retry_key, 86400)
+                delay = min(_RETRY_BACKOFF_BASE_S * (2 ** max(0, retries - 1)), _RETRY_BACKOFF_MAX_S)
+                if retries >= _RETRY_MAX_ATTEMPTS:
+                    logger.error(
+                        f"[TTL] rule {rule_id} rollback failed {retries} times — "
+                        f"远端规则可能仍存在, 需人工回滚(保留索引条目, 退避 {delay}s)"
+                    )
+                else:
+                    logger.warning(
+                        f"[TTL] Keep {rule_id} in index for retry "
+                        f"(attempt {retries}, backoff {delay}s)"
+                    )
+                await self._redis.zadd(_INDEX_KEY, {rule_id: now + delay})
                 continue
 
-            await self._redis.zrem(_INDEX_KEY, rule_id)
             await self._redis.delete(key)
+            await self._redis.delete(f"{_RETRY_PREFIX}{rule_id}")
 
     async def recover_on_startup(self):
         """
@@ -254,12 +281,20 @@ class TtlManager:
                 logger.warning(
                     f"[TTL] Recovery: {rule_id} key lost, triggering immediate rollback"
                 )
+                rolled_back = False
                 if self._rollback_fn:
                     try:
-                        await self._rollback_fn(rule_id, "unknown", {})
+                        result = await self._rollback_fn(rule_id, "unknown", {})
+                        rolled_back = bool((result or {}).get("success"))
                     except Exception as e:
                         logger.error(f"[TTL] Recovery rollback {rule_id} error: {e}")
-                await self._redis.zrem(_INDEX_KEY, rule_id)
+                if rolled_back:
+                    await self._redis.zrem(_INDEX_KEY, rule_id)
+                else:
+                    # 回滚失败/未配置回调 → 保留索引，让扫描器继续重试。
+                    logger.warning(
+                        f"[TTL] Recovery: keep {rule_id} in index (rollback failed)"
+                    )
             else:
                 recovered += 1
 

@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 _TOKEN = uuid.uuid4().hex  # 进程唯一, release 时校验防止误删他人的锁
 
+_RELEASE_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
 
 async def _default_client():
     """取进程共享的 Redis 客户端（sliding_window 装配的那个）。"""
@@ -64,9 +71,19 @@ async def release(key: str, client=None) -> None:
     if c is None:
         return
     try:
-        res = c.delete(key)
-        if hasattr(res, "__await__"):
-            await res
+        # 只有值等于本进程 token 才删除；否则可能删掉另一个进程刚拿到的锁。
+        if hasattr(c, "eval"):
+            res = c.eval(_RELEASE_LUA, 1, key, _TOKEN)
+            if hasattr(res, "__await__"):
+                await res
+            return
+        current = c.get(key)
+        if hasattr(current, "__await__"):
+            current = await current
+        if current in (_TOKEN, _TOKEN.encode()):
+            res = c.delete(key)
+            if hasattr(res, "__await__"):
+                await res
     except Exception as e:
         logger.debug("release(%s) failed: %s", key, e)
 

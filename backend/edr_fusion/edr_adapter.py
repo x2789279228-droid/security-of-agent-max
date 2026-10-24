@@ -209,12 +209,16 @@ class EdrAdapter:
                 logger.warning("未配置 EDR Kafka Topic")
                 return
 
+            # Kafka 安全参数与主链路同源 (kafka_security.aiokafka_security_kwargs):
+            # 漏掉会在 SASL_SSL 模式下认证失败/保持明文 —— "一半加密一半明文"
+            from kafka_security import aiokafka_security_kwargs
             consumer = AIOKafkaConsumer(
                 *topics,
                 bootstrap_servers=settings.kafka_bootstrap,
                 group_id="soc-edr",
                 value_deserializer=lambda m: json.loads(m.decode("utf-8")),
                 auto_offset_reset="latest",
+                **aiokafka_security_kwargs(),
             )
             await consumer.start()
             logger.info("EDR Kafka 消费者启动: topics=%s", topics)

@@ -106,7 +106,13 @@ async def store_iocs(session, entries: list[dict], source: str = "") -> dict:
         if not isinstance(entry, dict):
             stats["skipped"] += 1
             continue
-        norm = _normalize(entry, source)
+        try:
+            norm = _normalize(entry, source)
+        except Exception as e:
+            # 单条坏数据（tags/context 不是预期类型等）不能拖垮整批。
+            logger.error("IOC 规范化失败 (%r): %s", entry, e)
+            stats["errors"] += 1
+            continue
         if not norm:
             stats["skipped"] += 1
             continue

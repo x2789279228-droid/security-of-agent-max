@@ -1,6 +1,7 @@
 """LDAP/AD account disable. Live requires ldap_url; mock/dry_run does not bind."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from config import settings
@@ -22,7 +23,14 @@ ACCOUNTDISABLE = 2
 
 
 def _mode() -> str:
-    return (getattr(settings, "execution_mode", "live") or "live").lower()
+    # 失败关闭：空/缺失配置按 dry_run，不得回落到 live。
+    try:
+        from response_engine.preview import preview_mode
+        if preview_mode.get():
+            return "dry_run"
+    except Exception:
+        pass
+    return (getattr(settings, "execution_mode", "dry_run") or "dry_run").lower()
 
 
 def ldap_configured() -> bool:
@@ -83,6 +91,49 @@ def _unconfigured(action: str, **extra) -> dict:
             "error": "ldap unconfigured", "backend": BACKEND_LDAP, **extra}
 
 
+def _sync_modify_uac(account: str, *, disable: bool, override_protected: bool = False) -> dict:
+    """同步 LDAP UAC 位修改(在 to_thread 里跑 — ldap3 是同步网络 IO)。
+
+    P1: 修复前 disable 的 bind/search/modify 直接跑在事件循环上, AD 慢一点
+    整个后端 API/告警链路一起停摆。enable 此前恒返回失败却标 reversible=True
+    (审批人以为可恢复) — 现实现真实启用路径, 两条车道对称。
+    """
+    import ldap3
+
+    action = "disable_account" if disable else "enable_account"
+    url = settings.ldap_url
+    bind_dn = settings.ldap_bind_dn
+    password = settings.ldap_bind_password
+    base = settings.ldap_base_dn
+    server = ldap3.Server(url, get_info=ldap3.NONE, connect_timeout=10)
+    conn = ldap3.Connection(server, user=bind_dn, password=password,
+                            auto_bind=True, receive_timeout=15)
+    try:
+        filt = build_ldap_filter(account)
+        conn.search(base, filt,
+                    attributes=["distinguishedName", "userAccountControl", "objectSid"])
+        if not conn.entries:
+            return {"action": action, "success": False, "mode": "live",
+                    "error": "account not found", "account": account}
+        entry = conn.entries[0]
+        found_dn = str(entry.distinguishedName)
+        if disable and is_protected_account(account, dn=found_dn) and not override_protected:
+            return {"action": action, "success": False, "mode": "denied",
+                    "error": "protected account", "account": account, "dn": found_dn}
+        uac = int(entry.userAccountControl.value)
+        new_uac = (uac | ACCOUNTDISABLE) if disable else (uac & ~ACCOUNTDISABLE)
+        ok = conn.modify(found_dn, {"userAccountControl": [(ldap3.MODIFY_REPLACE, [new_uac])]})
+        return {
+            "action": action, "success": bool(ok), "mode": "live",
+            "account": account, "dn": found_dn, "backend": BACKEND_LDAP,
+        }
+    finally:
+        try:
+            conn.unbind()
+        except Exception:
+            pass
+
+
 async def disable_account(
     account: str = "",
     domain: str = "",
@@ -108,36 +159,15 @@ async def disable_account(
     if not ldap_configured():
         return _unconfigured("disable_account", account=acct, domain=domain)
     try:
-        import ldap3  # optional
+        import ldap3  # noqa: F401 — 仅探测可用性
     except ImportError:
         return {**_unconfigured("disable_account", account=acct),
                 "error": "ldap3 not installed"}
-    url = settings.ldap_url
-    bind_dn = settings.ldap_bind_dn
-    password = settings.ldap_bind_password
-    base = settings.ldap_base_dn
     try:
-        server = ldap3.Server(url, get_info=ldap3.NONE)
-        conn = ldap3.Connection(server, user=bind_dn, password=password, auto_bind=True)
-        # 值必须转义：否则过滤器的**结构**可被改写（§9.62）。
-        # 受保护账户的复查仍用**原始** acct（转义后的值不是账户名）。
-        filt = build_ldap_filter(acct)
-        conn.search(base, filt, attributes=["distinguishedName", "userAccountControl", "objectSid"])
-        if not conn.entries:
-            return {"action": "disable_account", "success": False, "mode": "live",
-                    "error": "account not found", "account": acct}
-        entry = conn.entries[0]
-        found_dn = str(entry.distinguishedName)
-        if is_protected_account(acct, dn=found_dn) and not override_protected:
-            return {"action": "disable_account", "success": False, "mode": "denied",
-                    "error": "protected account", "account": acct, "dn": found_dn}
-        uac = int(entry.userAccountControl.value)
-        new_uac = uac | ACCOUNTDISABLE
-        ok = conn.modify(found_dn, {"userAccountControl": [(ldap3.MODIFY_REPLACE, [new_uac])]})
-        return {
-            "action": "disable_account", "success": bool(ok), "mode": "live",
-            "account": acct, "dn": found_dn, "backend": BACKEND_LDAP,
-        }
+        result = await asyncio.to_thread(
+            _sync_modify_uac, acct, disable=True, override_protected=override_protected,
+        )
+        return result
     except Exception as e:
         logger.warning("disable_account ldap failed: %s", e)
         return {"action": "disable_account", "success": False, "mode": "error",
@@ -151,8 +181,17 @@ async def enable_account(account: str = "", dn: str = "", **kwargs) -> dict:
                 "account": acct, "backend": BACKEND_LDAP}
     if not ldap_configured():
         return _unconfigured("enable_account", account=acct)
-    return {"action": "enable_account", "success": False, "mode": "error",
-            "error": "live enable requires ldap bind", "account": acct}
+    try:
+        import ldap3  # noqa: F401 — 仅探测可用性
+    except ImportError:
+        return {**_unconfigured("enable_account", account=acct),
+                "error": "ldap3 not installed"}
+    try:
+        return await asyncio.to_thread(_sync_modify_uac, acct, disable=False)
+    except Exception as e:
+        logger.warning("enable_account ldap failed: %s", e)
+        return {"action": "enable_account", "success": False, "mode": "error",
+                "error": str(e), "account": acct}
 
 
 def register(registry) -> None:

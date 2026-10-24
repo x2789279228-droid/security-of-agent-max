@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     kafka_topic_audit_results: str = "security-audit-results"
     kafka_topic_cep_partial: str = "security-cep-partial"
     kafka_topic_cep_patterns: str = "security-cep-patterns"
+    # Suricata EVE JSON topic (ids_connector 消费; 空串 = 用连接器缺省 "suricata-eve")
+    suricata_eve_topic: str = ""
     kafka_topic_sigma_hit: str = "security-sigma-hit"   # pySigma 聚合候选 → Flink 阈值窗口
     kafka_topic_behavior_alerts: str = "security-behavior-alerts"  # L4 Flink 行为基线
     # Kafka 三解耦: HTTP 网关处理队列 (Python 权威检测的排队消费通道)
@@ -126,6 +128,15 @@ class Settings(BaseSettings):
     # Kafka topic security-logs-dlq 的 broker 保留时间仍按部署配置，默认与这里一致。
     dlq_retention_days: int = 30
     kafka_enabled: bool = False              # True=Kafka 模式, False=兼容旧 HTTP 直连模式
+    # ── Kafka 客户端安全（生产化: 内部链路 SASL_SSL; 默认 PLAINTEXT 保持演示兼容）──
+    # 见 kafka_security.aiokafka_security_kwargs(); 所有 producer/consumer 构造点
+    # 都必须展开 **aiokafka_security_kwargs(), 防止"一半加密一半明文"。
+    kafka_security_protocol: str = "PLAINTEXT"   # PLAINTEXT | SASL_SSL
+    kafka_sasl_mechanism: str = "SCRAM-SHA-512"
+    kafka_sasl_username: str = ""                # 容器内默认 soc-app (compose 注入)
+    kafka_sasl_password: str = ""
+    kafka_ssl_ca_file: str = ""                  # 容器内 CA PEM 路径 (/etc/kafka/secrets/ca-cert.pem)
+    kafka_ssl_check_hostname: bool = False       # bootstrap 用容器名, 证书带全 SAN 后可开
     # Confluent Schema Registry (跨运行时 Schema 契约, 见 schema_registry.py)
     schema_registry_url: str = "http://schema-registry:8081"
     # Flink JobManager REST (管道状态聚合, 见 routers/kafka.py)

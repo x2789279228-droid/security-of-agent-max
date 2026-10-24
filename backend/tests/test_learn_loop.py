@@ -511,7 +511,12 @@ class TestLearnLoop:
                         await s.commit()
                     async with sm() as s:
                         from learn_loop.orchestrator import run_cycle
-                        result = await run_cycle(s, trigger="daily")
+                        # 窗口是 [ws, we)；插入与 run_cycle 落在同一微秒时
+                        # created_at == we 会被半开区间排除（实测约 40% flake）。
+                        result = await run_cycle(
+                            s, trigger="daily",
+                            window_end=datetime.now(timezone.utc) + timedelta(seconds=1),
+                        )
                     assert result["status"] == "completed", result
                     assert result["actions_proposed"] >= 1, result
                     assert result["actions_auto_applied"] >= 1, result

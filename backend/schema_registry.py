@@ -33,12 +33,18 @@ _SCHEMAS_DIR = Path(__file__).parent / "schemas"
 # 目录不可用时的兜底 topic → 文件映射
 _FALLBACK_TOPIC_MAP = {
     "security-events-enriched": "security_event.schema.json",
-    # Python 权威检测主通道：此前不在 catalog 里，生产/消费侧校验同时失效。
-    "security-events-ingest": "security_event.schema.json",
+    # Python 权威检测主通道。P0-3：网关投递的是**传输包装**
+    # (uuid/eventId/body/...)，不是扁平业务事件 —— 修复前绑到
+    # security_event.schema.json 会在发送前校验失败 → produced=0 →
+    # 网关整批 503 not_durable。
+    "security-events-ingest": "ingest_wrapper.schema.json",
     "security-audit-queue": "security_event.schema.json",
     "security-logs-raw": "security_event.schema.json",
     "security-logs-validated": "security_event.schema.json",
     "security-alerts": "alert_event.schema.json",
+    # 残留修复(2026-10-24): sigma 候选此前无 schema 绑定, 契约只靠测试 ——
+    # 运行时无门禁, 键名漂移(如 op 丢失)会让 Flink 悄悄回退硬编码语义。
+    "security-sigma-hit": "sigma_hit.schema.json",
 }
 
 try:

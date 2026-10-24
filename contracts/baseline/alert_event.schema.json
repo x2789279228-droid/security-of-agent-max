@@ -11,7 +11,7 @@
     "dstIp": { "type": ["string", "null"] },
     "message": { "type": "string" },
     "anomalyScore": { "type": "number", "description": "异常评分 [0, 1]" },
-    "alertType": { "type": "string", "enum": ["ANOMALY", "ATTACK_CHAIN", "THRESHOLD"] },
+    "alertType": { "type": "string", "enum": ["ANOMALY", "ATTACK_CHAIN", "THRESHOLD", "SIGMA_AGGREGATE"] },
     "reasons": { "type": "array", "items": { "type": "string" } },
     "evidenceEventIds": { "type": ["array", "null"] },
     "evidenceChain": { "type": ["array", "null"] },

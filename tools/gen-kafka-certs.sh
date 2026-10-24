@@ -14,7 +14,9 @@ DAYS=365
 PASSWORD="${KAFKA_SSL_PASSWORD:-soc-kafka-2024}"
 
 # 公网主机(IP 或域名, 来自 .env 的 KAFKA_PUBLIC_HOST), 外部日志源经 SASL_SSL 连接时校验用
-SAN="DNS:kafka,DNS:localhost,IP:127.0.0.1"
+# 生产化 profile: 3-broker 集群的容器名 kafka-1/2/3 也必须进 SAN ——
+# backend/Flink/kafka_exporter 以 bootstrap "kafka-1:9093,..." 连接时校验主机名。
+SAN="DNS:kafka,DNS:kafka-1,DNS:kafka-2,DNS:kafka-3,DNS:localhost,IP:127.0.0.1"
 if [ -n "${KAFKA_PUBLIC_HOST:-}" ]; then
   if echo "$KAFKA_PUBLIC_HOST" | grep -qE '^[0-9.]+$'; then
     SAN="$SAN,IP:$KAFKA_PUBLIC_HOST"

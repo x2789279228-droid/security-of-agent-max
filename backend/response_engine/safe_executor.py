@@ -153,11 +153,14 @@ class SafeExecutor:
             执行结果 dict，包含 mode, verified, blocked 等字段
         """
         start_time = time.time()
+        from .response_executor import redact_action_params
         audit = {
             "action": action_name,
             "platform": platform,
             "command_preview": command[:200],
-            "params": {k: v for k, v in params.items() if k != "password"},
+            # P2: 与 ActionResult 同一口径脱敏 — 修复前只剔除字面 "password" 键,
+            # token/secret 类参数会原样进 audit 并随结果落库。
+            "params": redact_action_params(params if isinstance(params, dict) else {}),
             "checks": {},
         }
 
@@ -286,7 +289,7 @@ class SafeExecutor:
         # 同一事务的**另一侧**（回滚幂等 `RollbackStore`）是「内存为主、
         # Redis 兜底」→ 同一故障下保护仍在；而**执行侧**是纯 Redis →
         # 保护整体消失（要不要补内存兜底属**收紧型**改动 → 待决项 34）。
-        idempotent_hit, idem_state = await self._idempotency_check(
+        idempotent_hit, idem_state = await self._idempotency_acquire(
             action_name, params, rule_id, key_override=idempotency_key)
         audit["checks"]["idempotency"] = {"hit": idempotent_hit, "state": idem_state}
         if idem_state == "unavailable":
@@ -339,7 +342,20 @@ class SafeExecutor:
                 "重复封禁(require_idempotency_for_live=true, §9.52)",
                 audit,
             )
+        if idem_state == "in_progress":
+            logger.warning(
+                "[SafeExecutor] %s 已有执行在途（幂等占位锁），本次不重复执行",
+                action_name,
+            )
+            return {
+                "success": True, "mode": "in_progress", "action": action_name,
+                "message": "同一动作已有执行在途，本次跳过",
+                "idempotent": True, "audit": audit,
+            }
         if effective_mode != MODE_LIVE:
+            # dry_run/mock 没有真实副作用，释放占位锁，避免阻塞后续真实请求。
+            await self._idempotency_release(
+                action_name, params, rule_id, key_override=idempotency_key)
             if effective_mode == "mock":
                 result = execution_router._mock(action_name, params)
             else:
@@ -350,6 +366,8 @@ class SafeExecutor:
 
         # ── ⑥ 最小权限 + 真实执行 ──
         if not live_fn:
+            await self._idempotency_release(
+                action_name, params, rule_id, key_override=idempotency_key)
             return self._blocked_result(
                 action_name, "no_executor", "live 模式需要 live_fn", audit
             )
@@ -358,6 +376,8 @@ class SafeExecutor:
             result = await live_fn(command)
         except Exception as e:
             logger.error(f"[SafeExecutor] Execution error: {action_name} → {e}")
+            await self._idempotency_release(
+                action_name, params, rule_id, key_override=idempotency_key)
             audit["checks"]["execution"] = {"error": str(e)}
             return {
                 "success": False,
@@ -377,6 +397,19 @@ class SafeExecutor:
 
         # ── ⑦ 执行后验证 ──
         exec_success = result.get("success", False)
+        # P1: 超时 = 结果未知(to_thread 里的 SSH 仍可能完成并写入远端规则)。
+        # 此时必须保留幂等占位锁 — 释放后告警重放会触发重复封禁。
+        outcome_unknown = bool(result.get("outcome") == "unknown")
+        if not exec_success and outcome_unknown:
+            logger.warning(
+                "[SafeExecutor] %s 执行超时且结果未知 — 保留幂等占位锁(防重复副作用), 需人工核实远端状态",
+                action_name,
+            )
+            audit["checks"]["execution"] = {"outcome": "unknown", "note": "idempotency placeholder retained"}
+        elif not exec_success:
+            # 执行失败：释放占位锁，允许告警重试/重新封禁。
+            await self._idempotency_release(
+                action_name, params, rule_id, key_override=idempotency_key)
         if exec_success:
             verify_report = await post_validator.verify(
                 action_name=action_name,
@@ -392,12 +425,18 @@ class SafeExecutor:
 
         # ── ⑧ TTL 自动解封 ──
         if exec_success and ttl_seconds > 0 and rule_id:
-            ttl_result = await ttl_manager.register(
-                rule_id=rule_id,
-                action_name=action_name,
-                params=params,
-                ttl_seconds=ttl_seconds,
-            )
+            try:
+                ttl_result = await ttl_manager.register(
+                    rule_id=rule_id,
+                    action_name=action_name,
+                    params=params,
+                    ttl_seconds=ttl_seconds,
+                )
+            except Exception as e:
+                # 规则已真实写入；TTL 注册失败不能让整体抛异常掩盖执行成功，
+                # 但必须如实记录（后续靠幂等标记/人工回滚兜底）。
+                logger.error(f"[SafeExecutor] TTL register failed: {e}")
+                ttl_result = {"registered": False, "reason": f"ttl_register_error: {e}"}
             result["ttl_registered"] = ttl_result.get("registered", False)
             result["ttl_expires_at"] = ttl_result.get("expires_at", 0)
             audit["checks"]["ttl"] = ttl_result
@@ -495,6 +534,83 @@ class SafeExecutor:
             logger.warning(f"[SafeExecutor] Idempotency check error: {e}")
             return False, "unavailable"
         return bool(exists), "evaluated"
+
+    async def _idempotency_acquire(
+        self, action_name: str, params: dict, rule_id: str,
+        key_override: str = "", lock_ttl: int = 60,
+    ) -> tuple[bool, str]:
+        """原子占位：SET NX 拿执行锁，避免并发重复执行。
+
+        返回 (已执行过?, state)：
+          * (True, "evaluated")  —— 已有完成标记；
+          * (False, "in_progress") —— 另一个协程/进程正在执行；
+          * (False, "evaluated") —— 本次拿到锁，可执行；
+          * (False, "unavailable") —— Redis 不可用。
+        """
+        if not self._redis:
+            return False, "unavailable"
+        key = key_override or self._idem_key(action_name, params, rule_id)
+        try:
+            try:
+                acquired = await self._redis.set(
+                    key, "in_progress", nx=True, ex=max(10, int(lock_ttl)),
+                )
+            except TypeError:
+                # fake / 旧客户端不支持 nx：退化为 exists+set（测试路径）。
+                if await self._redis.exists(key):
+                    return True, "evaluated"
+                await self._redis.set(key, "in_progress", ex=max(10, int(lock_ttl)))
+                acquired = True
+            if acquired:
+                return False, "evaluated"
+            try:
+                value = await self._redis.get(key)
+            except Exception:
+                value = None
+            if value in ("1", b"1"):
+                return True, "evaluated"
+            return False, "in_progress"
+        except Exception as e:
+            logger.warning(f"[SafeExecutor] Idempotency acquire error: {e}")
+            return False, "unavailable"
+
+    async def _idempotency_release(
+        self, action_name: str, params: dict, rule_id: str,
+        key_override: str = "",
+    ) -> None:
+        """执行失败时释放占位锁，允许重试。"""
+        if not self._redis:
+            return
+        key = key_override or self._idem_key(action_name, params, rule_id)
+        try:
+            await self._redis.delete(key)
+        except Exception as e:
+            logger.warning(f"[SafeExecutor] Idempotency release error: {e}")
+
+    async def clear_idempotency_for_target(self, action_name: str, target: str) -> int:
+        """手动解封/恢复后清除该目标的完成标记，允许下一次真实再封禁。
+
+        匹配 `soc:idem:{action}:{target}:*`。Redis 不可用时返回 0。
+        """
+        if not self._redis or not target:
+            return 0
+        pattern = f"{_IDEM_PREFIX}{action_name}:{target}:*"
+        removed = 0
+        try:
+            scan_iter = getattr(self._redis, "scan_iter", None)
+            if scan_iter is not None:
+                async for key in scan_iter(match=pattern):
+                    await self._redis.delete(key)
+                    removed += 1
+            else:
+                # fake/旧客户端没有 scan_iter：尝试 keys（仅测试/小数据量）。
+                keys = await self._redis.keys(pattern)
+                for key in keys or []:
+                    await self._redis.delete(key)
+                    removed += 1
+        except Exception as e:
+            logger.warning(f"[SafeExecutor] clear idempotency failed: {e}")
+        return removed
 
     async def _idempotency_mark(
         self, action_name: str, params: dict, rule_id: str, ttl: int = 86400,

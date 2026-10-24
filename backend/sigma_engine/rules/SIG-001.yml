@@ -31,3 +31,4 @@ x-soc-aggregation:
   op: '>'
   threshold: 5
   timeframe: 5m
+x-soc-version: 13

@@ -229,7 +229,16 @@ class AuditWorkerPool:
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
-                return "direct"
+                # P2: 无事件循环时任务永远没有执行者 — 修复前返回 "direct"
+                # (成功语义), 死信重放把它当终态, 形成假闭环。
+                # 如实持久化(失败则 rejected), 调用方不得当成已接受。
+                from audit_triage import score_event as _score_now
+                _triage = _score_now(log_data or {}, float(getattr(anomaly_report, "anomaly_score", 0) or 0))
+                _job = self._make_job(
+                    session_id, event_id, log_data, anomaly_report, _triage.tier, int(_triage.priority),
+                )
+                kind = await self._persist_volatile(_job, reason_prefix="no_loop")
+                return "rejected" if kind == "lost" else "spilled"
             # 测试/延迟启动: 懒启动,避免无界 create_task
             await self.start()
 
@@ -487,7 +496,16 @@ class AuditWorkerPool:
         try:
             await t
         except asyncio.CancelledError:
-            raise
+            # P0-1: stuck reaper(scheduler) / stop() 会取消 job task, CancelledError
+            # 若穿透到 _loop 会把整个 worker 协程杀掉且无人重启, 审计池静默缩到 0。
+            # 仅当 worker 自身也在被取消(stop 关闭路径)时才向上传播;
+            # 内部 job 被取消视为一次普通失败, worker 继续消费下一条。
+            if asyncio.current_task().cancelling() > 0:
+                raise
+            logger.warning(
+                "AuditWorker job event_id=%s cancelled externally (stuck reap?), continuing",
+                eid,
+            )
         else:
             from audit_spill import drop_event
             drop_event(eid)

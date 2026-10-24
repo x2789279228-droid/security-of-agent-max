@@ -95,6 +95,14 @@ async def shutdown_platform() -> None:
         logger.error("Shutdown: redis close failed: %s", exc)
 
     try:
+        # 审批 write-behind 必须在 DB dispose 之前排空，否则已批准工单
+        # 的 DB 状态可能仍是 pending（重启后可被重复审批/执行）。
+        from response_engine.human_approval import approval_queue
+        await approval_queue.drain_persistence()
+    except Exception as exc:
+        logger.error("Shutdown: approval persistence drain failed: %s", exc)
+
+    try:
         from models import dispose_engines
         await dispose_engines()
     except Exception as exc:

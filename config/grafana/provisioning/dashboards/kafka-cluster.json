@@ -1,0 +1,147 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["soc", "kafka"],
+  "time": { "from": "now-30m", "to": "now" },
+  "title": "SOC Kafka 集群 (生产化 full)",
+  "uid": "soc-kafka-cluster",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Broker 存活数 (期望 3)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "A", "expr": "kafka_brokers" }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Under-Replicated 分区",
+      "description": "RF=3/minISR=2 语义下 >0 即降级: 杀 broker 演练时亮起, 重启后归零",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "A", "expr": "sum(kafka_topic_partition_under_replicated_partition)" }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "最大消费组积压 (lag)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 5000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "A", "expr": "max(kafka_consumergroup_lag)" }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "topic 总数",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "refId": "A", "expr": "count(count by (topic)(kafka_topic_partitions))" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "ISR (min by topic) — 跌破 2 即写入风险",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 8, "lineWidth": 1 },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 2 }]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{
+        "refId": "A",
+        "expr": "min by (topic) (kafka_topic_partition_in_sync_replica)",
+        "legendFormat": "{{topic}}"
+      }]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "消费组积压 (lag by group)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 8, "lineWidth": 1 } }, "overrides": [] },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (consumergroup) (kafka_consumergroup_lag)",
+        "legendFormat": "{{consumergroup}}"
+      }]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "写入速率 (offset 增速/s, by topic)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 8, "lineWidth": 1 }, "unit": "ops" }, "overrides": [] },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (topic) (rate(kafka_topic_partition_current_offset[1m]))",
+        "legendFormat": "{{topic}}"
+      }]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "topic 消息总量 (high-watermark)",
+      "description": "累计已写入消息数 (offset 高水位); 保留期结束后回落",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 8, "lineWidth": 1 } }, "overrides": [] },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (topic) (kafka_topic_partition_current_offset)",
+        "legendFormat": "{{topic}}"
+      }]
+    }
+  ]
+}

@@ -89,6 +89,15 @@ def test_batch_202_forwards_api_key(monkeypatch, client):
         captured.append({"session_id": session_id, "api_key": api_key, "events": list(events)})
         return len(events)
 
+    # P0-3/P0-5: batch 与单条共用鉴权 —— 无效 key 会被 403 拒绝。
+    # 本测试验证的是「有效 key 的值被原样转发到入队层」，先注册合法来源。
+    from source_registry import source_registry
+
+    class _Src:
+        name = "sim"
+
+    monkeypatch.setattr(source_registry, "authenticate",
+                        lambda k: _Src() if k == "abc" else None)
     monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     monkeypatch.setattr(models, "get_session", _no_get_session)
@@ -107,6 +116,26 @@ def test_batch_202_forwards_api_key(monkeypatch, client):
     assert captured[0]["api_key"] == "abc"
     assert captured[0]["session_id"] == "sb"
     assert len(captured[0]["events"]) == 2
+
+
+def test_batch_403_for_invalid_api_key(monkeypatch, client):
+    """P0-3/P0-5: 无效 key 的 batch 请求必须 403，且不得触达入队层。"""
+    from source_registry import source_registry
+
+    async def forbidden_enqueue(session_id, api_key, events):
+        raise AssertionError("无效 key 不得写入 Kafka")
+
+    monkeypatch.setattr(source_registry, "authenticate", lambda k: None)
+    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_enqueue_ingest", forbidden_enqueue)
+    monkeypatch.setattr(models, "get_session", _no_get_session)
+
+    resp = client.post(
+        "/api/logs/ingest/batch",
+        json={"logs": [{"event": "PORT_SCAN"}], "session_id": "sbad"},
+        headers={"X-API-Key": "forged"},
+    )
+    assert resp.status_code == 403
 
 
 def test_batch_202_without_api_key_header(monkeypatch, client):

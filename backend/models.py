@@ -1170,6 +1170,36 @@ class CadCircuitState(Base):
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+async def assert_schema_current() -> None:
+    """PG 启动自检：Alembic 未开启时，缺少新表/列必须拒绝启动。"""
+    url = str(settings.database_url or "")
+    if not url.startswith("postgresql"):
+        return
+    from sqlalchemy import inspect as _inspect
+
+    required_tables = {"approval_tickets", "audit_dead_letters"}
+    required_columns = {"correlation_id", "parent_event_id", "trace_id"}
+
+    def _check(sync_conn):
+        insp = _inspect(sync_conn)
+        tables = set(insp.get_table_names())
+        missing_tables = sorted(required_tables - tables)
+        missing_cols = []
+        if "security_events" in tables:
+            cols = {c.get("name") for c in insp.get_columns("security_events")}
+            missing_cols = sorted(required_columns - cols)
+        if missing_tables or missing_cols:
+            raise RuntimeError(
+                "数据库 schema 落后：缺少表 "
+                f"{missing_tables or '无'}，security_events 缺少列 "
+                f"{missing_cols or '无'}。请运行 `alembic upgrade head`，"
+                "或设置 SHARED_MEMORY_AUTO_MIGRATE=true 后重启。"
+            )
+
+    async with engine_oltp.connect() as conn:
+        await conn.run_sync(_check)
+
+
 async def init_db():
     """建表（幂等）。
 

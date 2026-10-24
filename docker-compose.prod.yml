@@ -62,14 +62,19 @@ services:
   redis:
     ports: []
 
-  kafka:
+  # 2026-10-24: full profile 下 Kafka 集群为 kafka-1/2/3 —— 覆盖必须指向 kafka-1,
+  # 否则 prod overlay 静默不生效, 调试端口仍暴露。
+  kafka-1:
     ports:
-      # 生产仅保留外部日志源接入的 SASL_SSL 9093; 关闭本机调试 9094
-      - "9093:9093"
+      # 生产仅保留 EXTERNAL SASL_SSL 9094 (外部日志源, advertised=KAFKA_PUBLIC_HOST);
+      # 关闭本机 PLAINTEXT 调试端口 9095
+      - "9094:9094"
 
   schema-registry:
     ports: []
 
   kafka-ui:
     ports:
-      - "18082:8080"
+      # P1: kafka-ui 默认无认证, 不能绑 0.0.0.0 暴露集群管理面 —
+      # 仅本机回环(需远程时走 SSH 隧道)。
+      - "127.0.0.1:18082:8080"

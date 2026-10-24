@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from config import settings
+from auth import RequireRole, UserInfo
 from models import get_session, Conversation, SecurityEvent, Memory, MemoryTreeNode
 from sliding_window import sliding_window
 from memory_tree import memory_tree
@@ -160,7 +161,8 @@ async def events_recent(
 # ── 对话端点 ──
 
 @router.post("/chat")
-async def chat(req: ChatRequest, session: AsyncSession = Depends(get_session)):
+async def chat(req: ChatRequest, session: AsyncSession = Depends(get_session),
+               user: UserInfo = Depends(RequireRole("operator"))):
     session_id = str(uuid.uuid4())
 
     await sliding_window.add_message(session_id, "user", "user", req.query)
@@ -183,7 +185,8 @@ async def chat(req: ChatRequest, session: AsyncSession = Depends(get_session)):
     }
 
 @router.post("/chat/stream")
-async def chat_stream(req: ChatRequest, session: AsyncSession = Depends(get_session)):
+async def chat_stream(req: ChatRequest, session: AsyncSession = Depends(get_session),
+                      user: UserInfo = Depends(RequireRole("operator"))):
     session_id = req.session_id or str(uuid.uuid4())
 
     await sliding_window.add_message(session_id, "user", "user", req.query)

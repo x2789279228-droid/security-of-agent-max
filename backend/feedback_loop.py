@@ -85,24 +85,31 @@ class FeedbackLoop:
     async def maybe_auto_downgrade(
         self, session: AsyncSession, rule_id: str, days: int = AUTO_DOWNGRADE_WINDOW_DAYS,
     ) -> dict:
-        """同一规则 7 天 FP>15% 且样本足够 → 降级为 alert_only。"""
+        """同一规则 7 天 FP>15% 且**有裁定样本**(fp+tp)足够 → 降级为 alert_only。
+
+        P1: 修复前样本数混入 missed_threat/rule_suggestion 等无裁定反馈 —
+        5 条 FP + 0 条 TP 即 fp_rate=100% 触发自动降级, 与规则真实触发量脱钩。
+        现在分母与样本门槛都只看 fp+tp。
+        """
         if not rule_id:
             return {"downgraded": False, "reason": "empty_rule_id"}
         stats = await self.get_fp_statistics(session, rule_id=rule_id, days=days)
         by_rule = (stats.get("by_rule") or {}).get(rule_id) or {}
-        total = int(by_rule.get("total") or 0)
+        verdict_total = int(by_rule.get("verdict_total") or 0)
         fp_rate = float(by_rule.get("fp_rate") or 0.0)
-        if total < AUTO_DOWNGRADE_MIN_SAMPLES:
-            return {"downgraded": False, "reason": "insufficient_samples", "total": total}
+        if verdict_total < AUTO_DOWNGRADE_MIN_SAMPLES:
+            return {"downgraded": False, "reason": "insufficient_samples",
+                    "verdict_total": verdict_total}
         if fp_rate <= FP_RATE_ALERT_THRESHOLD:
             return {"downgraded": False, "reason": "fp_rate_ok", "fp_rate": fp_rate}
         from ops_loop import apply_rule_downgrade
         applied = apply_rule_downgrade(rule_id)
         logger.warning(
             f"[Feedback] AUTO-DOWNGRADE rule={rule_id} fp_rate={fp_rate:.0%} "
-            f"n={total} → alert_only {applied}"
+            f"n={verdict_total} (fp+tp) → alert_only {applied}"
         )
-        return {"downgraded": True, "fp_rate": fp_rate, "total": total, "applied": applied}
+        return {"downgraded": True, "fp_rate": fp_rate,
+                "verdict_total": verdict_total, "applied": applied}
 
     async def review_feedback(
         self, session: AsyncSession, feedback_id: int,
@@ -167,8 +174,13 @@ class FeedbackLoop:
                 rule_stats[rid][ftype] += count
 
         for rid, stats in rule_stats.items():
+            # P1: fp_rate 分母只看有裁定的反馈(fp+tp) — missed_threat/
+            # rule_suggestion 不构成对规则误报的裁定, 混入会稀释/放大 fp_rate。
+            stats["verdict_total"] = (
+                stats["false_positive"] + stats["true_positive"]
+            )
             stats["fp_rate"] = round(
-                stats["false_positive"] / max(stats["total"], 1), 4
+                stats["false_positive"] / max(stats["verdict_total"], 1), 4
             )
 
         return {
@@ -189,18 +201,19 @@ class FeedbackLoop:
         stats = await self.get_fp_statistics(session, days=days)
         suggestions = []
 
-        # 建议 1: FP 率过高的规则
+        # 建议 1: FP 率过高的规则(样本门槛同样只看 fp+tp 裁定)
         for rule_id, rule_stats in stats.get("by_rule", {}).items():
-            if rule_stats["fp_rate"] > FP_RATE_ALERT_THRESHOLD and rule_stats["total"] >= 3:
+            if (rule_stats["fp_rate"] > FP_RATE_ALERT_THRESHOLD
+                    and rule_stats.get("verdict_total", 0) >= 3):
                 suggestions.append({
                     "type": "high_fp_rate",
                     "rule_id": rule_id,
                     "severity": "high",
                     "fp_rate": rule_stats["fp_rate"],
-                    "total_feedback": rule_stats["total"],
+                    "total_feedback": rule_stats["verdict_total"],
                     "suggestion": (
                         f"规则 {rule_id} 误报率 {rule_stats['fp_rate']:.0%} "
-                        f"({rule_stats['false_positive']}/{rule_stats['total']})，"
+                        f"({rule_stats['false_positive']}/{rule_stats['verdict_total']})，"
                         f"已触发/应触发 alert_only 降级（禁止自动封禁）"
                     ),
                     "actions": ["alert_only 降级", "提高阈值", "添加白名单排除"],

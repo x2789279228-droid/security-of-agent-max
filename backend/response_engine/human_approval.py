@@ -143,7 +143,7 @@ class ApprovalQueue:
         self._persist_tasks.add(task)
         task.add_done_callback(self._persist_tasks.discard)
 
-    async def _persist(self, ticket: ApprovalTicket) -> None:
+    async def _persist(self, ticket: ApprovalTicket) -> bool:
         from models import ApprovalTicketRecord
         try:
             async with self._persist_lock:
@@ -154,9 +154,17 @@ class ApprovalQueue:
                         s.add(rec)
                     self._fill_record(rec, ticket)
                     await s.commit()
+            return True
         except Exception as e:
-            # 落库失败不阻断审批主路径（内存工单仍可用），但要显式留痕
+            # 落库失败不阻断内存审批主路径，但要显式留痕并让调用方决定。
             logger.error(f"[APPROVAL] persist ticket {ticket.id[:8]} failed: {e}")
+            return False
+
+    async def persist_ticket(self, ticket: ApprovalTicket) -> Optional[bool]:
+        """同步落库一张工单；None=未配置 DB（测试/内存模式）。"""
+        if self._session_factory is None:
+            return None
+        return await self._persist(ticket)
 
     async def drain_persistence(self) -> None:
         """等待在途落库任务完成（测试与优雅停机用）。"""
@@ -210,11 +218,14 @@ class ApprovalQueue:
         from models import ApprovalTicketRecord
         from sqlalchemy import delete
         terminal = [s.value for s in ApprovalStatus]
-        cutoff = time.time() - max_age_hours * 3600
+        # created_at 是 DateTime 列；此前拿 time.time() 的 float 去比较，
+        # SQLite 下边界行为不稳定（max_age_hours=0 时偶发删 0 行）。
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
         async with self._session_factory() as s:
             res = await s.execute(
                 delete(ApprovalTicketRecord).where(
-                    ApprovalTicketRecord.created_at < cutoff,
+                    ApprovalTicketRecord.created_at <= cutoff,
                     ApprovalTicketRecord.status != ApprovalStatus.PENDING.value,
                 )
             )

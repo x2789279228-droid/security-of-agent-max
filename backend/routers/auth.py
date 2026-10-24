@@ -1,6 +1,9 @@
 """认证与健康检查路由 — 登录 / 注册"""
+import asyncio
+import hmac
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -37,6 +40,12 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
+# P1: Redis 故障时退回进程内计数 — 修复前 fail-open(logger.debug 后放行),
+# Redis 宕机期间登录爆破保护完全消失。
+_local_fail_counts: dict[str, tuple[int, float]] = {}
+_local_fail_lock = asyncio.Lock()
+
+
 async def _check_bruteforce(request: Request, username: str) -> None:
     client_ip = request.client.host if request.client else "unknown"
     try:
@@ -55,10 +64,30 @@ async def _check_bruteforce(request: Request, username: str) -> None:
                     detail=f"尝试次数过多，请 {ttl} 秒后重试",
                     headers={"Retry-After": str(ttl)},
                 )
+            return
     except HTTPException:
         raise
     except Exception as e:
-        logger.debug(f"[Auth] Rate limit check failed (non-blocking): {e}")
+        logger.warning(f"[Auth] Redis bruteforce check failed — falling back to in-memory counter: {e}")
+    # 内存兜底: 同样的失败阈值, 进程内生效(单实例部署下保护不中断)
+    key = f"{client_ip}:{username}"
+    now = time.time()
+    async with _local_fail_lock:
+        count, first_ts = _local_fail_counts.get(key, (0, now))
+        if now - first_ts > _LOGIN_LOCKOUT_SECONDS:
+            count, first_ts = 0, now
+        count += 1
+        _local_fail_counts[key] = (count, first_ts)
+        if count > _LOGIN_FAIL_LIMIT:
+            retry_after = int(max(1, _LOGIN_LOCKOUT_SECONDS - (now - first_ts)))
+            logger.warning(
+                f"[Auth] Brute force blocked (in-memory fallback): {client_ip} / {username} ({count} attempts)"
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"尝试次数过多，请 {retry_after} 秒后重试",
+                headers={"Retry-After": str(retry_after)},
+            )
 
 
 async def _clear_bruteforce(request: Request, username: str) -> None:
@@ -81,8 +110,12 @@ async def login(req: LoginRequest, request: Request):
 
     await _check_bruteforce(request, req.username)
 
-    # 1) 环境变量内置超管
-    if req.username == settings.admin_user and req.password == settings.admin_password:
+    # 1) 环境变量内置超管 — 常量时间比较, 避免时序侧信道逐字节猜口令
+    if (req.username == settings.admin_user
+            and hmac.compare_digest(
+                (req.password or "").encode("utf-8"),
+                (settings.admin_password or "").encode("utf-8"),
+            )):
         await _clear_bruteforce(request, req.username)
         token = create_access_token(req.username, role="admin")
         return {"access_token": token, "token_type": "bearer", "role": "admin"}

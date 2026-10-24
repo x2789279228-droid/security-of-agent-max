@@ -18,6 +18,7 @@ CI: ubuntu runner 自带 Docker → 正常执行；本地开发：启动 Docker 
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
 import subprocess
@@ -110,7 +111,10 @@ async def test_approval_persistence_roundtrip_on_real_postgres(pg_url, monkeypat
     全程单事件循环: asyncpg 连接绑定 loop, 不能分段用不同 loop 驱动同一引擎。
     """
     from alembic import command
-    command.upgrade(_alembic_cfg(pg_url), "head")
+    # migrations/env.py 内部会 asyncio.run()；在 pytest-asyncio 的
+    # 运行中事件循环里直接调用会抛 "asyncio.run() cannot be called from
+    # a running event loop"。放到线程里执行。
+    await asyncio.to_thread(command.upgrade, _alembic_cfg(pg_url), "head")
 
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     eng = create_async_engine(pg_url)

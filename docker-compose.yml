@@ -18,20 +18,82 @@ x-flink-taskmanager: &flink-taskmanager
       state.backend.incremental: true
       metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
       metrics.reporter.prom.port: 9250
-    KAFKA_BOOTSTRAP: kafka:9092
+    # 生产化: bootstrap 默认指向 3-broker 集群 (lite profile 经 .env 覆盖为 kafka:9092)
+    KAFKA_BOOTSTRAP: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
+    # ── Kafka 客户端安全 (与 backend kafka_security.py 同源; PLAINTEXT=演示默认) ──
+    KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
+    KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}
+    KAFKA_SASL_USERNAME: ${KAFKA_APP_USER:-soc-app}
+    KAFKA_SASL_PASSWORD: ${KAFKA_APP_PASSWORD:-}
+    KAFKA_SSL_CA_FILE: /etc/kafka/secrets/ca-cert.pem
+    KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: ${KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM:-}
     OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     # 数据源 API Key 白名单 (逗号分隔, LogValidationJob 读取)。
     # 2026-10-23: 源码内置演示密钥已删除; 此处默认值仅供本地/开发演示,
     # 生产必须经 .env 覆盖 (prod overlay 强制要求显式配置)。
-    VALID_API_KEYS: ${VALID_API_KEYS:-***REMOVED-LEAKED-SECRET***}
+    VALID_API_KEYS: ${VALID_API_KEYS:?VALID_API_KEYS 必填 — 复制 .env.example 为 .env 并设置私有数据源密钥(逗号分隔)}
   volumes:
     # 与 JobManager 共享持久化状态卷 (checkpoint 可见性)
     - flink_state:/var/flink-state
+    # Kafka 自签 CA (SASL_SSL 客户端信任配置; gen-kafka-certs.sh 生成)
+    - ./certs/kafka/ca-cert.pem:/etc/kafka/secrets/ca-cert.pem:ro
   depends_on:
     - flink-jobmanager
 
+x-kafka-broker-env: &kafka-broker-env
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9095,2@kafka-2:9095,3@kafka-3:9095
+  # 四监听: PLAINTEXT(9092 容器内管理面) / SASL_SSL(9093 容器内数据面,
+  # advertised=容器名) / EXTERNAL(9094 外部数据面, advertised=KAFKA_PUBLIC_HOST,
+  # 证书 SAN 已含该主机) / CONTROLLER(9095)
+  KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,SASL_SSL://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094,CONTROLLER://0.0.0.0:9095
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,SASL_SSL:SASL_SSL,EXTERNAL:SASL_SSL
+  KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+  KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/kafka_jaas.conf
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  # 3 broker 生产语义: 内部主题 RF=3; 事务日志 minISR=2 (Flink EXACTLY_ONCE 依赖)
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_TRANSACTION_MAX_TIMEOUT_MS: 3600000
+  KAFKA_LOG_RETENTION_HOURS: 168
+  KAFKA_LOG_RETENTION_BYTES: 1073741824
+  KAFKA_LOG_SEGMENT_BYTES: 107374182
+  KAFKA_LOG_CLEANUP_POLICY: delete
+  KAFKA_LOG_COMPRESSION_TYPE: lz4
+  # 笔记本预算: 每 broker 堆 768MB
+  KAFKA_HEAP_OPTS: -Xmx768m -Xms768m
+  KAFKA_SSL_KEYSTORE_FILENAME: broker-keystore.p12
+  KAFKA_SSL_KEYSTORE_CREDENTIALS: broker-keystore-creds
+  KAFKA_SSL_KEY_CREDENTIALS: broker-key-creds
+  KAFKA_SSL_TRUSTSTORE_FILENAME: ca-truststore.p12
+  KAFKA_SSL_TRUSTSTORE_CREDENTIALS: truststore-creds
+  KAFKA_SSL_KEYSTORE_TYPE: PKCS12
+  KAFKA_SSL_TRUSTSTORE_TYPE: PKCS12
+  KAFKA_SSL_CLIENT_AUTH: none
+  KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: ""
+  CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+
+x-kafka-broker: &kafka-broker
+  image: confluentinc/cp-kafka:7.6.0
+  restart: always
+  profiles: ["full"]
+  environment: *kafka-broker-env
+  healthcheck:
+    test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+    interval: 10s
+    timeout: 10s
+    retries: 10
+    start_period: 40s
+
+
 services:
   postgres:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 2g
+    cpus: 2.0
     image: pgvector/pgvector:0.8.2-pg16
     container_name: shared-memory-pg
     restart: always
@@ -57,6 +119,9 @@ services:
       retries: 5
 
   redis:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 512m
+    cpus: 1.0
     image: redis:7.4.2-alpine
     container_name: shared-memory-redis
     restart: always
@@ -67,13 +132,16 @@ services:
     ports:
       - "127.0.0.1:6380:6379"
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD --no-auth-warning ping | grep -q PONG"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli --no-auth-warning ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   # ── Qdrant 向量数据库 (RAG 知识库检索; 端口仅绑 127.0.0.1, 容器间走 Docker 内网) ──
   qdrant:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 2g
+    cpus: 1.5
     image: qdrant/qdrant:v1.15.1
     # 可重现: 运行 `docker pull qdrant/qdrant:v1.15.1` 后追加 `@sha256:<digest>`
     container_name: soc-qdrant
@@ -90,11 +158,17 @@ services:
       retries: 5
       start_period: 20s
 
-  # ── Kafka 消息总线 (KRaft 模式, 无需 ZooKeeper) ──
+  # ── Kafka 消息总线 (lite profile: 单 broker, KRaft 模式, 8GB 笔记本兜底) ──
+  # 生产化默认走 full profile 的 kafka-1/2/3 (RF=3, minISR=2);
+  # 经 .env 切换: COMPOSE_PROFILES=lite + KAFKA_BOOTSTRAP_SERVERS=kafka:9092
   kafka:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 1536m
+    cpus: 1.5
     image: confluentinc/cp-kafka:7.6.0
     container_name: soc-kafka
     restart: always
+    profiles: ["lite"]
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -150,14 +224,156 @@ services:
       retries: 10
       start_period: 30s
 
+  # ══ 生产化 Kafka 集群 (full profile, 默认): 3 broker KRaft, RF=3 / minISR=2 ══
+  # 单机多进程——规模是笔记本的, 机制是生产的: 任一 broker 宕机, 采集/消费不断流,
+  # under-replicated 告警亮起; 重启后 ISR 自愈。证书 SAN 覆盖 kafka-1/2/3 (gen-kafka-certs.sh)。
+  # 内部数据面默认 PLAINTEXT(9092, 容器网内); 切 SASL_SSL 见 .env 的 KAFKA_SECURITY_PROTOCOL。
+  kafka-1:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 1536m
+    cpus: 1.5
+    <<: *kafka-broker
+    container_name: soc-kafka-1
+    environment:
+      <<: *kafka-broker-env
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092,SASL_SSL://kafka-1:9093,EXTERNAL://${KAFKA_PUBLIC_HOST:-localhost}:9094
+    ports:
+      # EXTERNAL SASL_SSL: 外部日志源经 ${KAFKA_PUBLIC_HOST}:9094 接入 (仅 broker-1 映射宿主)
+      - "9094:9094"
+      # 本机工具/演练脚本: PLAINTEXT (仅 broker-1 映射宿主)
+      - "127.0.0.1:9095:9092"
+    volumes:
+      - kafka_data_1:/var/lib/kafka/data
+      - ./certs/kafka:/etc/kafka/secrets
+      - ./config/kafka/kafka_jaas.conf:/etc/kafka/kafka_jaas.conf:ro
+
+  kafka-2:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 1536m
+    cpus: 1.5
+    <<: *kafka-broker
+    container_name: soc-kafka-2
+    environment:
+      <<: *kafka-broker-env
+      KAFKA_NODE_ID: 2
+      # EXTERNAL 宿主端口仅映射在 broker-1; 2/3 的 external advertised 仅为拓扑完整
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9092,SASL_SSL://kafka-2:9093,EXTERNAL://${KAFKA_PUBLIC_HOST:-localhost}:19092
+    volumes:
+      - kafka_data_2:/var/lib/kafka/data
+      - ./certs/kafka:/etc/kafka/secrets
+      - ./config/kafka/kafka_jaas.conf:/etc/kafka/kafka_jaas.conf:ro
+
+  kafka-3:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 1536m
+    cpus: 1.5
+    <<: *kafka-broker
+    container_name: soc-kafka-3
+    environment:
+      <<: *kafka-broker-env
+      KAFKA_NODE_ID: 3
+      # EXTERNAL 宿主端口仅映射在 broker-1; 2/3 的 external advertised 仅为拓扑完整
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9092,SASL_SSL://kafka-3:9093,EXTERNAL://${KAFKA_PUBLIC_HOST:-localhost}:19093
+    volumes:
+      - kafka_data_3:/var/lib/kafka/data
+      - ./certs/kafka:/etc/kafka/secrets
+      - ./config/kafka/kafka_jaas.conf:/etc/kafka/kafka_jaas.conf:ro
+
+  # ── kafka-init (full, 一次性): SCRAM 服务账号 + 全量 topic (RF=3, minISR=2) ──
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: soc-kafka-init
+    restart: "no"
+    profiles: ["full"]
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:9092
+      KAFKA_TOPIC_RF: "3"
+      KAFKA_MIN_ISR: "2"
+      KAFKA_APP_USER: ${KAFKA_APP_USER:-soc-app}
+      KAFKA_APP_PASSWORD: ${KAFKA_APP_PASSWORD:-}
+      KAFKA_LOG_SOURCE_USER: ${KAFKA_LOG_SOURCE_USER:-}
+      KAFKA_LOG_SOURCE_PASSWORD: ${KAFKA_LOG_SOURCE_PASSWORD:-}
+    volumes:
+      - ./tools/init-kafka-cluster.sh:/opt/init/init-kafka-cluster.sh:ro
+      - ./tools/init-kafka-topics.sh:/opt/init/init-kafka-topics.sh:ro
+    command: ["bash", "/opt/init/init-kafka-cluster.sh"]
+
+  # ── Vector 边缘代理 (edge profile): 采集缓冲 + 契约映射 ──
+  # 缺口对应"采集边缘": 外部日志源 POST :8686 → VRL 盖章 → security-events-ingest。
+  # Kafka 全停期间事件落磁盘缓冲(config/vector/vector.toml buffer.type=disk),
+  # 集群恢复后自动排干 —— 零丢失演示见 demo/vector-buffer-demo.sh。
+  vector:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 512m
+    cpus: 0.5
+    image: timberio/vector:0.44.0-debian
+    container_name: soc-vector
+    restart: always
+    profiles: ["edge"]
+    command: ["--config", "/etc/vector/vector.toml"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
+      # 与 KAFKA_SECURITY_PROTOCOL=SASL_SSL 同步切换 (vector.toml 做不了条件, 用显式开关)
+      VECTOR_KAFKA_TLS: ${VECTOR_KAFKA_TLS:-false}
+      VECTOR_KAFKA_SASL: ${VECTOR_KAFKA_SASL:-false}
+      KAFKA_APP_USER: ${KAFKA_APP_USER:-soc-app}
+      KAFKA_APP_PASSWORD: ${KAFKA_APP_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8686:8686"   # 边缘接入端点 (HTTP JSON)
+      - "127.0.0.1:8687:8687"   # Prometheus 指标
+    volumes:
+      - ./config/vector/vector.toml:/etc/vector/vector.toml:ro
+      - ./certs/kafka/ca-cert.pem:/etc/kafka/secrets/ca-cert.pem:ro
+      # 磁盘缓冲持久化: 容器重建不丢已缓冲事件
+      - vector_data:/var/lib/vector
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8686' 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── kafka_exporter (full): broker 存活/ISR/消费组 lag → Prometheus ──
+  # 观测面走容器内网 PLAINTEXT(9092), 与 kafka-ui 同一信任边界
+  kafka-exporter:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 128m
+    cpus: 0.2
+    image: danielqsj/kafka-exporter:v1.8.0
+    container_name: soc-kafka-exporter
+    restart: always
+    profiles: ["full"]
+    command:
+      - --kafka.server=kafka-1:9092
+      - --kafka.server=kafka-2:9092
+      - --kafka.server=kafka-3:9092
+      - --web.listen-address=:9308
+    ports:
+      - "127.0.0.1:9308:9308"
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+        required: false
+
   # ── Kafka UI (竞赛演示可视化, 登录认证保护) ──
   kafka-ui:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 512m
+    cpus: 0.5
     image: provectuslabs/kafka-ui:v0.7.2
     container_name: soc-kafka-ui
     restart: always
     environment:
       KAFKA_CLUSTERS_0_NAME: SOC-Kafka
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
       DYNAMIC_CONFIG_ENABLED: "true"
       # 登录认证: 未认证不允许访问
       AUTH_TYPE: "LOGIN_FORM"
@@ -167,27 +383,36 @@ services:
       # 注: 不用 8082/8083 —— 宿主机 QQ 会抢占这些端口造成连接随机分流
       - "18082:8080"
     depends_on:
-      kafka:
+      # required:false: kafka-ui 自带重连, lite profile (kafka-1 未启用) 也能启动
+      kafka-1:
         condition: service_healthy
+        required: false
 
   # ── Confluent Schema Registry (Schema 版本管理) ──
   schema-registry:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 768m
+    cpus: 1.0
     image: confluentinc/cp-schema-registry:7.6.0
     container_name: soc-schema-registry
     restart: always
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
       SCHEMA_REGISTRY_KAFKASTORE_TOPIC: _schemas
     ports:
       - "127.0.0.1:8085:8081"
     depends_on:
-      kafka:
+      kafka-1:
         condition: service_healthy
+        required: false
 
   # ── Flink 流处理引擎 (生产级: RocksDB + 持久化 checkpoint + Exactly-Once) ──
   flink-jobmanager:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 1g
+    cpus: 1.0
     build:
       context: ./flink-jobs
       dockerfile: Dockerfile
@@ -209,52 +434,85 @@ services:
         execution.checkpointing.min-pause: 30s
         execution.checkpointing.timeout: 10min
         execution.checkpointing.max-concurrent-checkpoints: 1
+        # ── P0-6: externalized checkpoint 保留策略 ──
+        # 修复前作业失败/取消后 checkpoint 元数据被清理, 只能从 earliest() 重放
+        # (EXACTLY_ONCE 只保护"同一作业+checkpoint 恢复", 保护不了全新实例)。
+        # RETAIN_ON_CANCELLATION: 取消/失败后保留元数据, 升级/重启可用
+        #   FLINK_RESTORE_SAVEPOINT=file:///var/flink-state/checkpoints/<jobId>/chk-<n>
+        #   ./submit-jobs.sh  (或经 flink-job-submitter 环境变量透传) 恢复。
+        execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+        # 保留最近 3 份 checkpoint, 回滚有得选
+        execution.checkpointing.num-retained: 3
         # ── 容错: 失败自动重启 (fixed-delay 3 次, 间隔 10s) ──
         restart-strategy.type: fixed-delay
         restart-strategy.fixed-delay.delay: 10s
         restart-strategy.fixed-delay.attempts: 3
-        # ── 并行度: 由配置文件统一驱动 (不再在代码硬编码, 按 topic 分区弹性扩容) ──
-        # 3 个默认作业 × 5 = 15 槽, 与 3 副本 TaskManager × 5 slots 布局精确匹配
-        parallelism.default: 5
+        # ── 并行度: 3 作业 × 3 = 9 槽, 15 槽留 6 余量 —— 杀任一 TM (剩 10 槽)
+        # 作业仍能在剩余槽上全部自动重启 (演练/容灾的硬前提);
+        # 且与 raw/validated/sigma-hit 的 3 分区严格对齐, 无空闲 source subtask。
+        parallelism.default: 3
         # ── 指标: Prometheus Reporter (容器端口 9250) ──
         metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
         metrics.reporter.prom.port: 9250
         # 注: Flink 1.19 的 OTel 系统 trace reporter (checkpoint/init spans) 需额外
         # 插件 jar (flink-metrics-otel 仅存在 2.x), Docker 镜像未内置 → 每事件 span
         # 由作业内 TraceUtil (OTel SDK) 导出, 见 flink-jobs/src/.../TraceUtil.java
-      KAFKA_BOOTSTRAP: kafka:9092
+      # 生产化: bootstrap 默认 3-broker 集群 (lite 经 .env 覆盖)
+      KAFKA_BOOTSTRAP: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
+      # ── Kafka 客户端安全 (与 backend kafka_security.py 同源) ──
+      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
+      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}
+      KAFKA_SASL_USERNAME: ${KAFKA_APP_USER:-soc-app}
+      KAFKA_SASL_PASSWORD: ${KAFKA_APP_PASSWORD:-}
+      KAFKA_SSL_CA_FILE: /etc/kafka/secrets/ca-cert.pem
+      KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM: ${KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM:-}
       # 每事件 OTel span 导出端点 (TraceUtil 读取)
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       # 数据源 API Key 白名单 (逗号分隔, LogValidationJob 静态读取)。
       # 2026-10-23: 源码内置演示密钥已删除; 此处默认值仅供本地/开发演示,
       # 生产必须经 .env 覆盖 (prod overlay 强制要求显式配置)。
-      VALID_API_KEYS: ${VALID_API_KEYS:-***REMOVED-LEAKED-SECRET***}
+      VALID_API_KEYS: ${VALID_API_KEYS:?VALID_API_KEYS 必填 — 复制 .env.example 为 .env 并设置私有数据源密钥(逗号分隔)}
     ports:
       # 生产不映射; 仅开发时可通过 frontend:3002 认证反代访问
       - "127.0.0.1:9250:9250"
     volumes:
       # 持久化状态卷: checkpoint/savepoint 跨容器重建保留 (生产关键)
       - flink_state:/var/flink-state
+      # Kafka 自签 CA (SASL_SSL 客户端信任配置)
+      - ./certs/kafka/ca-cert.pem:/etc/kafka/secrets/ca-cert.pem:ro
     # REST/Dashboard 不映射宿主: 外部经 frontend:3002 (Basic Auth) 访问。
     # 作业提交由 flink-job-submitter(守护) 自动完成, 手动重提仍可用
     #   `docker compose exec flink-jobmanager /opt/flink/submit-jobs.sh`
     depends_on:
-      kafka:
+      kafka-1:
         condition: service_healthy
+        required: false
+      kafka-init:
+        condition: service_completed_successfully
+        required: false
 
   # ── TaskManager ×3 (每副本 5 slots, 集群总并发槽 = 15) ──
   # 生产级多副本: 单节点故障时其余 TM 仍可承接任务 (并行度 5 × 3 作业需 15 槽)
   flink-taskmanager-1:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 2g
+    cpus: 1.5
     <<: *flink-taskmanager
     container_name: soc-flink-taskmanager-1
     ports:
       - "127.0.0.1:9251:9250"   # Prometheus/调试 (副本 1)
   flink-taskmanager-2:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 2g
+    cpus: 1.5
     <<: *flink-taskmanager
     container_name: soc-flink-taskmanager-2
     ports:
       - "127.0.0.1:9252:9250"   # Prometheus/调试 (副本 2)
   flink-taskmanager-3:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 2g
+    cpus: 1.5
     <<: *flink-taskmanager
     container_name: soc-flink-taskmanager-3
     ports:
@@ -265,6 +523,9 @@ services:
   # `docker compose up -d` 后无需手动命令即自动提交核心作业;
   # JM/TM 重启或作业失败后自动补交。手动重提不再作为必需步骤。
   flink-job-submitter:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 256m
+    cpus: 0.5
     build:
       context: ./flink-jobs
       dockerfile: Dockerfile
@@ -278,15 +539,26 @@ services:
       JM_PORT: "8081"
       POLL_SECONDS: "${FLINK_AUTO_SUBMIT_POLL_SECONDS:-30}"
       AUTO_SUBMIT_MIN_SLOTS: "15"
-      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_BOOTSTRAP: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      # P0-6: 升级/重启时设 FLINK_RESTORE_SAVEPOINT=<checkpoint/savepoint 路径>
+      # (见 .env.example), 守护代提交会带 -s 恢复状态; 首次启动留空即可。
+      FLINK_RESTORE_SAVEPOINT: "${FLINK_RESTORE_SAVEPOINT:-}"
+      FLINK_ALLOW_NON_RESTORED_STATE: "${FLINK_ALLOW_NON_RESTORED_STATE:-0}"
     depends_on:
-      kafka:
+      kafka-1:
         condition: service_healthy
+        required: false
+      kafka-init:
+        condition: service_completed_successfully
+        required: false
       flink-jobmanager:
         condition: service_started
 
   backend:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 2g
+    cpus: 2.0
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -336,7 +608,14 @@ services:
       SHARED_MEMORY_FW_USE_SUDO: ${SHARED_MEMORY_FW_USE_SUDO:-false}
       # Kafka 消息总线
       SHARED_MEMORY_KAFKA_ENABLED: ${SHARED_MEMORY_KAFKA_ENABLED:-true}
-      SHARED_MEMORY_KAFKA_BOOTSTRAP: kafka:9092
+      SHARED_MEMORY_KAFKA_BOOTSTRAP: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
+      # ── Kafka 客户端安全 (kafka_security.py; 默认 PLAINTEXT 演示兼容) ──
+      SHARED_MEMORY_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
+      SHARED_MEMORY_KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}
+      SHARED_MEMORY_KAFKA_SASL_USERNAME: ${KAFKA_APP_USER:-soc-app}
+      SHARED_MEMORY_KAFKA_SASL_PASSWORD: ${KAFKA_APP_PASSWORD:-}
+      SHARED_MEMORY_KAFKA_SSL_CA_FILE: /etc/kafka/secrets/ca-cert.pem
+      SHARED_MEMORY_KAFKA_SSL_CHECK_HOSTNAME: ${KAFKA_SSL_CHECK_HOSTNAME:-false}
       # 数据源认证 (JSON: api_key → 源名)。2026-10-23: 源码内置演示密钥已删除,
       # 默认空 = 无预置来源 (fail-closed)。演示值写入 .env (见 .env.example);
       # 生产必须替换为私有密钥 (prod overlay 强制要求显式配置)。
@@ -412,6 +691,8 @@ services:
       RESPONSE_TAXONOMY_RELOAD_SEC: ${RESPONSE_TAXONOMY_RELOAD_SEC:-30}
       RESPONSE_UNCERTAIN_ENABLED: ${RESPONSE_UNCERTAIN_ENABLED:-true}
     volumes:
+      # Kafka 自签 CA (SASL_SSL 客户端信任配置)
+      - ./certs/kafka/ca-cert.pem:/etc/kafka/secrets/ca-cert.pem:ro
       # 挂载专用 soc-firewall 密钥（性能验证用，test only，未做 from/no-pty 等加固）
       - ./config/ssh/firewall_key:/tmp/ssh/firewall_key:ro
       # v4 修复(2026-09-01):同时挂到 entrypoint 期望路径,让 ssh_transport 真正可用
@@ -428,8 +709,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      kafka:
+      # required:false: kafka 连接自带重试; lite profile 下 kafka-1 未启用也能启动
+      kafka-1:
         condition: service_healthy
+        required: false
+      # topic 由 kafka-init 创建 (AUTO_CREATE_TOPICS=false):
+      # full 下等 init 完成, 首启不产生 UnknownTopicOrPartition; lite 下跳过
+      kafka-init:
+        condition: service_completed_successfully
+        required: false
       qdrant:
         condition: service_healthy
       temporal:
@@ -467,6 +755,9 @@ services:
           memory: 4G
 
   frontend:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 256m
+    cpus: 0.5
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -486,6 +777,9 @@ services:
 
   # ── Temporal Worker (4 层 Agent 编排的执行者; 独立进程跑 workflow/activity) ──
   temporal-worker:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 1g
+    cpus: 1.0
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -554,6 +848,9 @@ services:
 
   # ── OpenTelemetry Collector (OTLP 接收 → 尾部采样 → Tempo) ──
   otel-collector:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 512m
+    cpus: 0.5
     image: otel/opentelemetry-collector-contrib:0.159.0
     container_name: soc-otel-collector
     restart: always
@@ -566,6 +863,9 @@ services:
 
   # ── Grafana Tempo (trace 存储与查询) ──
   tempo:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 1g
+    cpus: 1.0
     image: grafana/tempo:2.10.8
     container_name: soc-tempo
     restart: always
@@ -578,6 +878,9 @@ services:
   # all-in-one v2: 内置 OTLP gRPC(4317)/HTTP(4318) 接收器 + Query UI(16686)
   # 经 frontend:3002/jaeger/ 反代访问; base-path 在 config/jaeger 配置。
   jaeger:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 512m
+    cpus: 0.5
     image: jaegertracing/jaeger:2.7.0
     container_name: soc-jaeger
     restart: always
@@ -592,6 +895,9 @@ services:
 
   # ── Temporal (4 层 Agent 编排: 可靠性/长任务/可视化; 独立 postgres 存储) ──
   temporal-postgres:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 512m
+    cpus: 0.5
     image: postgres:16.4
     container_name: soc-temporal-postgres
     restart: always
@@ -610,6 +916,9 @@ services:
       retries: 5
 
   temporal:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 512m
+    cpus: 0.5
     image: temporalio/auto-setup:1.27.1
     container_name: soc-temporal
     restart: always
@@ -628,6 +937,9 @@ services:
         condition: service_healthy
 
   temporal-ui:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 256m
+    cpus: 0.3
     image: temporalio/ui:2.38.1
     container_name: soc-temporal-ui
     restart: always
@@ -640,6 +952,9 @@ services:
 
   # ── Prometheus (Flink 9250/9251 + Python /metrics, 支持 exemplar) ──
   prometheus:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 1g
+    cpus: 1.0
     image: prom/prometheus:v3.14.0
     container_name: soc-prometheus
     restart: always
@@ -662,6 +977,9 @@ services:
 
   # ── Grafana (Tempo + Prometheus 统一看板; 经 frontend:3002/grafana/ 反代) ──
   grafana:
+    # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
+    mem_limit: 512m
+    cpus: 0.5
     image: grafana/grafana:12.3.8
     container_name: soc-grafana
     restart: always
@@ -755,6 +1073,10 @@ volumes:
   pgdata:
   qdrant_data:
   kafka_data:
+  kafka_data_1:
+  kafka_data_2:
+  kafka_data_3:
+  vector_data:
   flink_state:
   suricata_logs:
   suricata_rules:

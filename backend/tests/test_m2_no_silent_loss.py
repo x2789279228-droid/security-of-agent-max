@@ -91,6 +91,18 @@ async def test_audit_pq_atomic_pop_uses_eval():
     q._redis = _EvalRedis(b"")
     assert await q.pop_highest() is None
 
+    # 损坏 payload：必须计数为 payload_corrupt，且不得回退弹出别的任务
+    from prometheus_client import REGISTRY
+
+    def _corrupt():
+        return REGISTRY.get_sample_value(
+            "soc_audit_pq_lost_total", {"reason": "payload_corrupt"}) or 0
+
+    before = _corrupt()
+    q._redis = _EvalRedis(b"{not-json}")
+    assert await q.pop_highest() is None
+    assert _corrupt() == before + 1
+
 
 def test_kafka_producer_enables_idempotence():
     from pathlib import Path

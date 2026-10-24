@@ -700,26 +700,21 @@ class EventStore:
         session: AsyncSession,
         event_id: str,
     ) -> Optional[StoredEvent]:
-        """按上游 eventId 查询已落库事件 (幂等检查)"""
+        """按上游 eventId 查询已落库事件 (幂等检查)
+
+        P2: 修复前缺 analyzed/event_id/parent_event_id/trace_id 字段 —
+        幂等命中路径 analyzed 恒 False, ingest_pipeline 的 already_audited
+        判定失效, 已分析事件每次 Kafka 重放都被重复排进审计队列。
+        字段映射与 _to_stored 对齐。
+        """
         stmt = select(SecurityEvent).where(SecurityEvent.event_id == event_id)
         result = await session.execute(stmt)
         evt = result.scalars().first()
         if not evt:
             return None
-        raw = evt.raw_data or {}
-        return StoredEvent(
-            id=evt.id,
-            session_id=evt.session_id,
-            event_type=evt.event_type,
-            severity=evt.severity,
-            src_ip=evt.src_ip or "",
-            dst_ip=evt.dst_ip or "",
-            message=evt.message or "",
-            raw_data=raw,
-            anomaly_score=evt.anomaly_score or 0.0,
-            correlation_id=raw.get("_correlation_id", ""),
-            created_at=evt.created_at.isoformat() if evt.created_at else "",
-        )
+        stored = self._to_stored(evt)
+        stored.idempotent = True
+        return stored
 
     async def query(
         self,

@@ -424,6 +424,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     root = find_repo_root()
     if "--register" in args:
+        # 注册前必须先过对齐/兼容/fixtures 门禁，否则会把不兼容 schema
+        # 直接发布到 Registry（此前 --register 完全跳过 run_gate）。
+        issues = run_gate(root)
+        if issues:
+            print(f"Schema 门禁失败，拒绝注册 ({len(issues)}):", file=sys.stderr)
+            for item in issues:
+                print(f"  - {item}", file=sys.stderr)
+            return 1
         from schema_registry import schema_registry
         import asyncio
 

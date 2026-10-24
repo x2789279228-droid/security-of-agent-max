@@ -82,6 +82,17 @@ class FakeFirewallSSH:
         if op == "-D":
             if table in self.fail_tables:
                 raise RuntimeError(f"{table}: command not found")
+            # v5: 回滚改为按匹配删除(-s/-d ip -j DROP -m comment / 纯 comment),
+            # 与真实 iptables 语义一致(行号删除有并发竞态, 已废弃)
+            dcomment = ""
+            if "--comment" in parts[3:]:
+                dcomment = parts[parts.index("--comment", 3) + 1].strip("'")
+            if dcomment:
+                for i, r in enumerate(self._rules[key]):
+                    if r["comment"] == dcomment:
+                        del self._rules[key][i]
+                        break
+                return ""
             if parts[3].isdigit():  # -D <chain> <linenum>
                 idx = int(parts[3]) - 1
                 if 0 <= idx < len(self._rules[key]):

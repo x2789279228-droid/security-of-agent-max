@@ -64,6 +64,74 @@ ENFORCEMENT_ACTIONS = frozenset({
 #: ``tests/test_sigma_aggregation_action_chain.py`` 会钉住这三处一致。
 SIGMA_CONFIDENCE_NUM = {"high": 0.85, "medium": 0.65, "low": 0.45}
 
+#: timeframe 解析失败时 Flink 侧的默认窗口宽度（毫秒）。
+#: 两端默认必须一致，否则规则没写 timeframe 时两端窗口宽度对不上。
+DEFAULT_TIMEFRAME_MS = 300_000
+
+_TIMEFRAME_UNITS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000, "d": 86_400_000}
+
+
+def _timeframe_ms(value: Any) -> int:
+    """把 Sigma ``timeframe`` 声明归一成毫秒（``"5m"``/``"30s"``/``"1h"``/``250ms``）。
+
+    P0-1：修复前发往 Flink 的候选只带 threshold，Flink 硬编码 5m 窗口 ——
+    规则声明 ``timeframe: 1m`` 会在 5 分钟里凑数，阈值语义失真。
+    Sigma 规范里**不带单位的数字按秒**解释（``timeframe: 300`` = 5 分钟）。
+    解析失败返回 0，由调用方落到 ``DEFAULT_TIMEFRAME_MS``。
+    """
+    try:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, (int, float)):
+            # Sigma 规范: 不带单位的数字按**秒**解释
+            n = float(value) * 1_000
+        else:
+            import re as _re
+            s = str(value or "").strip().lower()
+            if not s:
+                return 0
+            m = _re.match(r"^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)?$", s)
+            if not m:
+                return 0
+            n = float(m.group(1)) * _TIMEFRAME_UNITS.get(m.group(2) or "s", 1)
+        return int(n) if n > 0 else 0
+    except Exception:
+        return 0
+
+
+def _coerce_epoch_ms(value: Any) -> int:
+    """把事件时间戳归一成 epoch 毫秒; 解析不了返回 0(调用方回退当前时间)。
+
+    P1: 上游时间戳形态不一 — int/float 秒或毫秒、ISO8601 字符串
+    (``2026-10-24T12:00:00Z``)。修复前 ``int(...)`` 遇 ISO 串直接抛
+    ValueError, 聚合候选被静默丢弃, 阈值语义整条断供。
+    """
+    try:
+        if isinstance(value, bool) or value is None:
+            return 0
+        if isinstance(value, (int, float)):
+            ts = int(value)
+        else:
+            s = str(value).strip()
+            if not s:
+                return 0
+            try:
+                ts = int(float(s))
+            except ValueError:
+                from datetime import datetime, timezone
+                iso = s.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(iso)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                ts = int(dt.timestamp())
+        if ts <= 0:
+            return 0
+        if ts < 10_000_000_000:  # 秒级 → 毫秒
+            ts *= 1000
+        return ts
+    except Exception:
+        return 0
+
 
 def _downgrade_enforcement_action(action: str) -> str:
     """把执行类动作降级为观察类（partial 阶段只能建议，不能执行）。
@@ -420,7 +488,15 @@ class PySigmaDetector:
                         "severity": _severity_of(meta.get("severity")),
                     })
                     continue
-                sql = (sql_list[0] if isinstance(sql_list, list) and sql_list else str(sql_list))
+                if isinstance(sql_list, list) and len(sql_list) > 1:
+                    # P1: pySigma 对多 selection/复合条件规则会产出**多条** SQL —
+                    # 修复前只编译第一条, 其余静默丢弃 → 带 `1 of them` 类条件的
+                    # 社区规则系统性漏报且无 load_errors 留痕。
+                    # UNION ALL 合并: 单行表上任一子 SELECT 命中即算命中,
+                    # 与 Sigma 多 selection 的 OR 语义一致。
+                    sql = "\nUNION ALL\n".join(str(s) for s in sql_list)
+                else:
+                    sql = (sql_list[0] if isinstance(sql_list, list) and sql_list else str(sql_list))
                 sql = sql.replace("<TABLE_NAME>", self.TABLE)
                 for m in re.finditer(r"`([^`]+)`", sql):
                     field_index.add(m.group(1))
@@ -766,6 +842,27 @@ class PySigmaDetector:
         conn.commit()
 
     @staticmethod
+    def _rule_version(meta: dict, agg: dict) -> str:
+        """规则语义版本的稳定指纹（8 hex）。
+
+        聚合告警跨进程（Python → Flink → Kafka → backend）携带的是**结果**，
+        复盘"这条告警是哪一版规则语义产出的"时没有别的依据。
+        优先用 yaml 原文指纹；yaml 不可用时退回语义字段签名 ——
+        两个来源对同一规则内容都给出稳定一致的值。
+        """
+        basis = str(meta.get("yaml") or "")
+        if not basis:
+            a = agg or {}
+            basis = "|".join(str(x) for x in (
+                meta.get("rule_id"), a.get("func"), a.get("field"),
+                a.get("op"), a.get("threshold"), a.get("timeframe"),
+                meta.get("action_recommend"), meta.get("severity"),
+                meta.get("confidence"),
+            ))
+        return hashlib.sha1(
+            basis.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+
+    @staticmethod
     def _agg_payload(meta: dict, ev: dict, agg: dict) -> dict:
         """构造发往 sigma-hit topic 的聚合候选载荷。
 
@@ -778,14 +875,48 @@ class PySigmaDetector:
         「窗口超阈值后才处置」这条路径就永远不会有执行动作 ——
         规则声明的 block_ip 会静默消失。
 
+        ⚠️ P0-1：**完整的阈值语义必须随候选下发**。修复前只发 threshold，
+        op/func/field/timeframe 全部丢在规则里 —— Flink 只能硬编码
+        ``count >= threshold`` 和 5m 窗口：声明 ``op: '>'`` 的 SIG-001
+        在第 5 条就告警（应为第 6 条），声明 ``threshold: 1`` 的 SIG-007
+        第 1 条就告警（聚合退化成单事件告警）。
+
         ``shadow_mode`` 规则的例外：灰度期只出 alert，与 ``detect()`` 口径一致。
         """
+        a = agg if isinstance(agg, dict) else {}
+        op = str(a.get("op") or "").strip()
+        func = str(a.get("func") or "").strip() or "count"
+        field = str(a.get("field") or "").strip() or "src_ip"
+        tf_raw = a.get("timeframe")
+        tf_ms = _timeframe_ms(tf_raw) or DEFAULT_TIMEFRAME_MS
+        # 残留修复: 事件时间戳秒→毫秒归一必须在**发布前**完成 ——
+        # 秒级值(≈1.7e9)直达 Flink 会被当 1970 年事件时间, 晚于 watermark
+        # 被事件时间窗口静默丢弃, 聚合永远凑不满阈值。
+        # P1: 时间戳也可能是 ISO8601 字符串(上游规范化差异) — int() 直接抛
+        # ValueError 让候选静默丢失, 必须容错解析, 失败回退当前时间。
+        ts = _coerce_epoch_ms(ev.get("timestamp", ev.get("@timestamp", 0)))
+        ts = ts or int(time.time() * 1000)
         return {
             "src_ip": str(ev.get("src_ip", "")),
+            # 残留修复: 聚合分组键按规则声明的 field 取值 (默认 src_ip) ——
+            # 修复前 Flink 只会按 src_ip 分组, 声明 field: dst_ip/user 的规则
+            # 语义在窗口边界上被改写。
+            "group_key": str(ev.get(field) or ev.get("src_ip", "")),
             "rule_id": meta["rule_id"],
-            "threshold": int(agg.get("threshold") or 0),
-            "timestamp": int(ev.get("timestamp", ev.get("@timestamp", 0)) or 0)
-                         or int(time.time() * 1000),
+            "threshold": int(a.get("threshold") or 0),
+            # ── 阈值语义契约 (P0-1)：Flink 按 op 比较、按规则 timeframe 建窗 ──
+            # op 缺省 ">="（与 Flink 旧硬编码一致，旧候选语义不变）；
+            # 认不出的一律由 Flink 回退 ">="（向"更难告警"方向回退）。
+            "op": op or ">=",
+            "func": func,
+            "field": field,
+            "timeframe": str(tf_raw or ""),
+            "timeframe_ms": tf_ms,
+            "rule_version": PySigmaDetector._rule_version(meta, a),
+            "event_id": str(ev.get("eventId") or ev.get("event_id")
+                            or ev.get("uuid") or ""),
+            "dst_ip": str(ev.get("dst_ip", "")),
+            "timestamp": ts,
             "action_recommend": (
                 "alert" if meta.get("shadow_mode")
                 else str(meta.get("action_recommend") or "alert")
@@ -803,28 +934,74 @@ class PySigmaDetector:
 
     def _schedule_publish_agg(self, meta, ev, agg: dict):
         """命中聚合类规则时, 若 Kafka 启用则异步发布聚合候选到 sigma-hit topic。
-        仅调度(不阻塞检测); 无 running 事件循环(Kafka 未启用)时静默跳过。"""
+        仅调度(不阻塞检测)。
+
+        残留修复(2026-10-24): 此前是彻底的 fire-and-forget —— producer 未启动
+        静默丢、create_task 异常无留痕、发送结果无人检查。现在每条路径都有
+        指标/日志: 候选丢失在 Prometheus 可见 (record_ingest source=sigma)。
+        """
+        def _metric(result: str, reason: str = "") -> None:
+            try:
+                from core_metrics import record_ingest
+                record_ingest("sigma", result, reason=reason)
+            except Exception:
+                pass
+
+        def _on_done(task) -> None:
+            try:
+                ok = task.result()
+            except Exception as cb_err:
+                _metric("candidate_dropped", reason=f"task_error:{type(cb_err).__name__}")
+                logger.warning(f"[Sigma/agg] publish task failed: {cb_err}")
+                return
+            if not ok:
+                _metric("candidate_dropped", reason="send_failed")
+
         try:
             import asyncio
             from config import settings
             if not getattr(settings, "kafka_enabled", False):
+                _metric("candidate_dropped", reason="kafka_disabled")
                 logger.info(f"[Sigma/agg] kafka disabled, skip publish {meta.get('rule_id')}")
                 return
             from kafka_producer import kafka_producer
-            logger.info(f"[Sigma/agg] producer.is_active={kafka_producer.is_active} rule={meta.get('rule_id')}")
             # is_active 是 property(属性 bool), 非方法
             if not kafka_producer.is_active:
+                _metric("candidate_dropped", reason="producer_inactive")
+                logger.warning(
+                    f"[Sigma/agg] producer inactive, candidate DROPPED "
+                    f"rule={meta.get('rule_id')} —— 聚合窗口将凑不满阈值")
                 return
         except Exception as e:
+            _metric("candidate_dropped", reason="precheck_error")
             logger.warning(f"[Sigma/agg] pre-publish check err: {e}")
             return
         payload = self._agg_payload(meta, ev, agg)
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(kafka_producer.publish_sigma_hit(payload))
+            import asyncio
+            # P1: detect() 是同步方法, 可能从任意线程调用 —
+            # `get_event_loop()`+`create_task` 跨线程调度不是线程安全,
+            # 且无运行循环时静默丢候选。改 run_coroutine_threadsafe 到主循环。
+            coro = kafka_producer.publish_sigma_hit(payload)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None and loop.is_running():
+                # 记住主循环: 之后从工作线程调用 detect() 时可跨线程安全调度
+                self._main_loop = loop
+                task = loop.create_task(coro)
+                task.add_done_callback(_on_done)
+                return
+            main_loop = getattr(self, "_main_loop", None)
+            if main_loop is not None and not main_loop.is_closed():
+                fut = asyncio.run_coroutine_threadsafe(coro, main_loop)
+                fut.add_done_callback(_on_done)
+                return
+            _metric("candidate_dropped", reason="no_running_loop")
         except Exception:
-            pass
+            _metric("candidate_dropped", reason="schedule_error")
+            raise
 
     def _mk_result(self, meta, ev, severity, action, description,
                    requires_aggregation: bool = False,
@@ -954,14 +1131,25 @@ class PySigmaDetector:
             return {**base, "detected": False, "hits": [],
                     "max_severity": "", "attack_types": [],
                     "action_recommend": "", "rule_count": 0}
-        max_sev = max(hits, key=lambda h: self.SEVERITY_ORDER.get(h.severity, 0))
+        # P0-2：detected 只反映**已确证**的命中。
+        # 修复前 detected 由全部命中计算 —— 待聚合命中（阈值证据尚未产生，
+        # 只是过了前置筛选）也把 detected 抬成 True，于是
+        # ingest_pipeline 只看 detected 就把 anomaly score 抬到 Sigma severity
+        # 下限、FastPath 接着用 `_fused_conf >= 0.7` 进入封禁决策，
+        # 单个 /login 事件就这样绕过了「窗口超阈值后才处置」的设计。
+        # 待聚合命中保留在 hits/pending_aggregation 里供审计，不参与判定。
+        confirmed_max = (
+            max(confirmed, key=lambda h: self.SEVERITY_ORDER.get(h.severity, 0))
+            if confirmed else None
+        )
         return {
             **base,
-            "detected": True,
+            "detected": bool(confirmed),
             "hits": [h.to_dict() for h in hits],
-            "max_severity": max_sev.severity,
-            "attack_types": sorted({h.attack_type for h in hits}),
-            "action_recommend": max_sev.action_recommend,
+            "max_severity": confirmed_max.severity if confirmed_max else "",
+            "attack_types": sorted({h.attack_type for h in confirmed}),
+            "action_recommend": (
+                confirmed_max.action_recommend if confirmed_max else "alert"),
             "rule_count": len(hits),
         }
 

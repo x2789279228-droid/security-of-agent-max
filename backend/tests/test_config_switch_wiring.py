@@ -161,18 +161,21 @@ def _shipped_keys() -> frozenset[str]:
 # ═══════════════════════════════════════════
 
 def test_settings_field_count_is_unchanged():
-    """前提①：config.py 仍是 338 个字段。
+    """前提①：config.py 仍是 345 个字段。
 
     2026-10-21 新增 5 个安全字段：execution 默认 dry_run 相关的主机密钥
     校验（fw/response 各 2 个）与 allow_self_registration（1 个）。
     2026-10-23 第一阶段 +2：log_format(结构化日志) / auto_migrate(启动迁移)。
     2026-10-23 第二阶段 +2：audit_claim_ttl_s(跨进程审计认领) /
     require_idempotency_for_live(live 幂等 fail-closed)。
+    2026-10-23 Kafka 安全化 +6：kafka_security_protocol / sasl_mechanism /
+    sasl_username / sasl_password / ssl_ca_file / ssl_check_hostname。
+    2026-10-24 生产加固 +1：suricata_eve_topic(EVE topic 可配置)。
     字段数再变说明 config.py 被大改，本文件里所有清单都需要重新核实。
     """
     fields = _settings_fields()
-    assert len(fields) == 338, (
-        f"Settings 字段数从 338 变成 {len(fields)} —— "
+    assert len(fields) == 345, (
+        f"Settings 字段数从 345 变成 {len(fields)} —— "
         "请重新跑全量普查并更新整改报告 §7.1.11"
     )
 

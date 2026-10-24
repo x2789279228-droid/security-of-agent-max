@@ -30,8 +30,8 @@ import base64
 import hashlib
 import ipaddress
 import logging
-import random
 import re
+import secrets
 from dataclasses import dataclass, field
 from typing import Callable, Coroutine, Optional
 from urllib.parse import urlsplit
@@ -140,13 +140,29 @@ class ResponseRegistry:
             result = await asyncio.wait_for(fn(**kwargs), timeout=action.timeout_ms / 1000)
             rollback_token = f"rb_{name}_{kwargs.get('src_ip', kwargs.get('target', 'unknown'))}_{int(__import__('time').time())}"
             inner_ok = True
-            if isinstance(result, dict) and result.get("success") is False:
-                inner_ok = False
+            if isinstance(result, dict):
+                # P0-2: 桩回退(未真实执行)一律按失败上报, 不虚报成功
+                if result.get("success") is False or result.get("_stub"):
+                    inner_ok = False
             logger.info(f"Action {name} executed: {str(result)[:100]}")
             return {
                 "success": inner_ok,
                 "result": result,
                 "rollback_token": rollback_token,
+            }
+        except asyncio.TimeoutError:
+            # P1: wait_for 超时不会终止 to_thread 里的 SSH — 远端规则可能**已经写入**。
+            # 上报 outcome=unknown 而不是普通失败, SafeExecutor 据此保留幂等占位锁,
+            # 防止告警重放触发重复封禁。
+            logger.error(
+                f"Action {name} timed out after {action.timeout_ms}ms — "
+                f"outcome unknown (remote side-effect possible)"
+            )
+            return {
+                "success": False,
+                "outcome": "unknown",
+                "timed_out": True,
+                "error": f"timeout after {action.timeout_ms}ms (结果未知, 远端副作用可能已发生)",
             }
         except Exception as e:
             logger.error(f"Action {name} failed: {e}")
@@ -372,7 +388,7 @@ async def _auto_rollback(rule_id: str, delay_seconds: int, label: str) -> None:
     try:
         await asyncio.sleep(delay_seconds)
         from .ssh_firewall import ssh_firewall
-        rb = ssh_firewall.rollback(rule_id)
+        rb = await asyncio.to_thread(ssh_firewall.rollback, rule_id)
         logger.info(f"[auto-rollback] {label} rule_id={rule_id}: {rb.get('status')}")
     except Exception as e:
         logger.error(f"[auto-rollback] {label} rule_id={rule_id} failed: {e}")
@@ -386,7 +402,7 @@ async def ttl_rollback(rule_id: str, action_name: str, params: dict) -> dict:
     """
     from .ssh_firewall import ssh_firewall
     try:
-        rb = ssh_firewall.rollback(rule_id)
+        rb = await asyncio.to_thread(ssh_firewall.rollback, rule_id)
         return {
             "success": rb.get("status") == "success",
             "rule_id": rule_id,
@@ -421,8 +437,11 @@ async def _stub_fallback(action: str, reason: str = "", **fields) -> dict:
     logger.warning(
         f"[STUB] {action} would execute: {fields} (reason: {reason})"
     )
-    return {"action": action, "mode": "stub", **fields, "_stub": True,
-            "reason": reason}
+    # P0-2: 桩回退**没有执行任何动作**, 必须如实上报失败。
+    # 修复前不带 success 键, execute() 只判 `success is False` → 桩被当成执行成功,
+    # 策略冷却/审计/动作日志全部失真(运维以为已处置, 实际什么都没发生)。
+    return {"action": action, "mode": "stub", "_stub": True, **fields,
+            "success": False, "reason": reason}
 
 
 def _ps_cmd(script: str) -> str:
@@ -496,6 +515,9 @@ async def _exec(cmd: str, action: str, platform: str = "windows", **fields) -> d
         live_fn=_live_fn,
         ttl_seconds=ttl_seconds,
         rule_id=rule_id,
+        # 预览模式必须对**所有**动作生效，不只 block/isolate/sinkhole。
+        # 之前 _exec 未传 mode_override，kill_session/rate_limit 等仍按 live 执行。
+        mode_override=_execution_mode(),
     )
 
 
@@ -529,7 +551,7 @@ async def _block_ip(src_ip: str, reason: str = "", duration_minutes: int = 60, *
     norm_ip = str(addr)
     family = "ipv6" if addr.version == 6 else "ipv4"
     table = "ip6tables" if family == "ipv6" else "iptables"
-    rule_id = f"FW-RULE-{random.randint(10000, 99999)}"
+    rule_id = f"FW-RULE-{secrets.randbelow(10 ** 10):010d}"
     rule_name = f"RE_Block_{norm_ip.replace('.', '_').replace(':', '_')}"
     command = (
         f"{table} -I INPUT -s {norm_ip} -j DROP "
@@ -557,7 +579,9 @@ async def _block_ip(src_ip: str, reason: str = "", duration_minutes: int = 60, *
                 "src_ip": norm_ip, "rule_name": rule_name,
                 "error": f"ssh_firewall connect failed: {err}",
             }
-        fw_result = ssh_firewall.block_ip(
+        # paramiko 是同步库；放在线程里，避免 SSH 延迟阻塞事件循环。
+        fw_result = await asyncio.to_thread(
+            ssh_firewall.block_ip,
             norm_ip, duration=duration_minutes * 60, rule_id=rule_id,
         )
         success = fw_result.get("status") == "success"
@@ -588,7 +612,9 @@ async def _block_ip(src_ip: str, reason: str = "", duration_minutes: int = 60, *
         rule_id=rule_id,
         verify_fn=_verify_fn,
         idempotency_key=f"soc:idem:block_ip:{norm_ip}:{duration_minutes}",
-        idempotency_ttl=ttl_seconds or 86400,
+        # duration=0（永久封禁）只做 5 分钟短去重；否则手动解封后 24h 内
+        # 真实再攻击会被 idempotent_skip 静默放过。
+        idempotency_ttl=(ttl_seconds if ttl_seconds > 0 else 300),
         mode_override=_execution_mode(),
     )
 
@@ -658,16 +684,20 @@ async def _unblock_ip(src_ip: str, reason: str = "", **kwargs) -> dict:
                 "message": f"[{exec_mode.upper()}] unblock_ip 模拟"}
     from .ssh_firewall import ssh_firewall
     try:
-        active = ssh_firewall.get_active_rules()
+        active = await ssh_firewall.get_active_rules_async()
         deleted = 0
         for r in active:
             # 只解封 block 记录, 不动隔离记录(status=isolated)
             if r.get("status") not in ("active", "applied") or not r.get("ip"):
                 continue
             if _same_host(r.get("ip", ""), src_ip):
-                rb = ssh_firewall.rollback(r.get("rule_id", ""))
+                rb = await asyncio.to_thread(ssh_firewall.rollback, r.get("rule_id", ""))
                 if rb.get("status") == "success":
                     deleted += int(rb.get("deleted", 1))
+        if deleted:
+            # 手动解封后清除幂等完成标记，允许下一次真实再封禁。
+            from .safe_executor import safe_executor
+            await safe_executor.clear_idempotency_for_target("block_ip", src_ip)
         return {
             "action": "unblock_ip",
             "success": deleted > 0,
@@ -709,7 +739,7 @@ async def _isolate_host(host_ip: str, reason: str = "", isolation_type: str = "n
         return {"action": "isolate_host", "success": False, "mode": "invalid",
                 "host_ip": host_ip, "error": str(e)}
 
-    isolation_id = f"EDR-ISO-{random.randint(10000, 99999)}"
+    isolation_id = f"EDR-ISO-{secrets.randbelow(10 ** 10):010d}"
     table = "ip6tables" if family == "ipv6" else "iptables"
     # 代表命令：用于白名单/审计展示；真实写入还会覆盖 OUTPUT 与 extra_ips，
     # 每一条都由 ssh_firewall._exec 的同一套白名单再次校验。
@@ -739,7 +769,8 @@ async def _isolate_host(host_ip: str, reason: str = "", isolation_type: str = "n
                 "success": False, "mode": "error", "action": "isolate_host",
                 "host_ip": norm_host, "error": f"connect failed: {err}",
             }
-        fw_result = ssh_firewall.isolate_host(
+        fw_result = await asyncio.to_thread(
+            ssh_firewall.isolate_host,
             norm_host, isolation_type=isolation_type,
             extra_ips=extra_list or None, isolation_id=isolation_id,
         )
@@ -772,7 +803,9 @@ async def _isolate_host(host_ip: str, reason: str = "", isolation_type: str = "n
         rule_id=isolation_id,
         verify_fn=_verify_fn,
         idempotency_key=f"soc:idem:isolate_host:{norm_host}:{isolation_type}:{duration_minutes}",
-        idempotency_ttl=ttl_seconds or 86400,
+        # duration=0（永久封禁）只做 5 分钟短去重；否则手动解封后 24h 内
+        # 真实再攻击会被 idempotent_skip 静默放过。
+        idempotency_ttl=(ttl_seconds if ttl_seconds > 0 else 300),
         mode_override=_execution_mode(),
     )
 
@@ -840,15 +873,29 @@ async def _restore_host(host_ip: str, reason: str = "", **kwargs) -> dict:
                 "message": f"[{exec_mode.upper()}] restore_host 模拟"}
     from .ssh_firewall import ssh_firewall
     try:
-        active = ssh_firewall.get_active_rules()
+        active = await ssh_firewall.get_active_rules_async()
         deleted = 0
         matched = 0
+        failed = 0
         for r in active:
             if _same_host(r.get("host", "") or r.get("ip", ""), host_ip):
                 matched += 1
-                rb = ssh_firewall.rollback(r.get("rule_id", ""))
+                rb = await asyncio.to_thread(ssh_firewall.rollback, r.get("rule_id", ""))
                 if rb.get("status") == "success":
                     deleted += int(rb.get("deleted", 1))
+                else:
+                    failed += 1
+        if failed:
+            # 有匹配规则但删不掉 → 不能报 success/idempotent。
+            return {
+                "action": "restore_host", "success": False,
+                "mode": "ssh_firewall_paramiko", "host_ip": host_ip,
+                "deleted_count": deleted, "rules_matched": matched,
+                "error": f"{failed} 条隔离规则回滚失败，主机可能仍被隔离",
+            }
+        if deleted or matched == 0:
+            from .safe_executor import safe_executor
+            await safe_executor.clear_idempotency_for_target("isolate_host", host_ip)
         # 幂等: 没有可恢复的隔离规则(已恢复过/从未隔离)也算成功,
         # 重复回滚不应被当作失败(rollback_batch 依赖该语义)。
         return {
@@ -929,7 +976,8 @@ async def _dns_sinkhole(domain: str = "", ipv4: str = "", ipv6: str = "",
                 "domain": domain, "marker_id": marker_id, "backend": "unconfigured",
                 "error": f"ssh_firewall connect failed: {err}",
             }
-        fw_res = ssh_firewall.sinkhole_domain(
+        fw_res = await asyncio.to_thread(
+            ssh_firewall.sinkhole_domain,
             domain=domain, ipv4=sink_v4 or None,
             ipv6=sink_v6 or None, marker_id=marker_id,
         )
@@ -1016,7 +1064,11 @@ async def _unsinkhole_domain(domain: str = "", marker_id: str = "", reason: str 
         return {"success": False, "mode": "unconfigured", "domain": d, "marker_id": marker,
                 "error": f"ssh_firewall connect failed: {err}"}
     try:
-        fw_res = ssh_firewall.unsinkhole_domain(domain=d, marker_id=marker)
+        # P1: ssh_firewall 是同步 paramiko 多次往返, 直接调用会卡死整个事件循环
+        # (期间全部 API/告警停摆) → 移入线程池。
+        fw_res = await asyncio.to_thread(
+            ssh_firewall.unsinkhole_domain, domain=d, marker_id=marker
+        )
     except Exception as e:
         logger.error(f"[unsinkhole] ssh_firewall.unsinkhole_domain failed: {e}")
         return {"success": False, "mode": "error", "domain": d, "marker_id": marker, "error": str(e)}
@@ -1082,9 +1134,11 @@ async def _kill_session(session_id: str, user: str = "", reason: str = "", **kwa
         ps_script = f'logoff {safe_sid} /server:localhost 2>$null\nWrite-Output "Session {safe_sid} logged off"'
     elif user:
         safe_user = _sanitize_powershell_string(user[:64])
+        # P1: `-match` 是正则匹配, user=".*"/"[a-z]" 等元字符会匹配所有用户,
+        # Stop-Process -Force 将杀死目标主机全部进程 → 改 `-eq` 精确等值比较。
         ps_script = (
             f'Get-Process -IncludeUserName | '
-            f'Where-Object {{$_.UserName -match "{safe_user}"}} | '
+            f'Where-Object {{$_.UserName -eq "{safe_user}"}} | '
             f'Stop-Process -Force\n'
             f'Write-Output "Processes for {safe_user} terminated"'
         )
@@ -1120,6 +1174,18 @@ async def _send_alert(
     channel 参数决定发送方式。
     webhook_url 可以自定义，否则使用默认值（默认只写日志，不外发）。
     """
+    # 预览模式：绝不发真实 webhook / 写事件日志 / 弹窗。
+    try:
+        from .preview import preview_mode
+        if preview_mode.get():
+            return {
+                "action": "send_alert", "success": True, "mode": "dry_run",
+                "would_execute": True, "channel": channel or "webhook",
+                "title": title or "安全告警",
+                "message": message or f"威胁告警 (严重度={severity})",
+            }
+    except Exception:
+        pass
     if not channel or channel == "webhook":
         if webhook_url:
             title = title or "安全告警"
@@ -1262,9 +1328,9 @@ async def _send_webhook(title: str, message: str, severity: str, webhook_url: st
         }
     if reason == "dns_resolve_failed":
         # 解析失败 → 这次请求本来也会失败（httpx 同样要解析），
-        # 所以不阻断发送，但必须留痕。
+        # 所以不阻断发送，但必须留痕（URL 须脱敏: 可能内嵌 access_token/key）。
         logger.warning(
-            f"[ALERT] webhook 域名解析失败（仍尝试发送）: {webhook_url}")
+            f"[ALERT] webhook 域名解析失败（仍尝试发送）: {redact_url_for_log(webhook_url)}")
     try:
         import httpx
         payload = {
@@ -1280,8 +1346,11 @@ async def _send_webhook(title: str, message: str, severity: str, webhook_url: st
             logger.info(f"[ALERT] Webhook sent to {redact_url_for_log(webhook_url)}: {resp.status_code}")
             return {"action": "send_alert", "mode": "webhook", "success": True, "status_code": resp.status_code}
     except Exception as e:
-        logger.warning(f"[ALERT] Webhook failed: {e}")
-        return {"action": "send_alert", "mode": "webhook", "success": False, "error": str(e)}
+        from .response_executor import redact_text_for_log
+        # 异常文本可能内嵌完整 URL(含 token), 与返回值同口径脱敏
+        logger.warning(f"[ALERT] Webhook failed: {redact_text_for_log(str(e))}")
+        return {"action": "send_alert", "mode": "webhook", "success": False,
+                "error": redact_text_for_log(str(e))}
 
 
 async def _send_webhook_default(title: str, message: str, severity: str) -> dict:

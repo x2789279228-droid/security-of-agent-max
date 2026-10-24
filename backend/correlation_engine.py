@@ -562,6 +562,8 @@ class CorrelationEngine:
                 SecurityEvent.created_at >= cutoff,
             )
             .order_by(SecurityEvent.created_at)
+            # P2: 回溯窗口不设 LIMIT → 长会话全量进内存无上界; 封顶防内存放大
+            .limit(5000)
         )
         result = await session.execute(stmt)
         events = result.scalars().all()

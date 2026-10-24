@@ -37,6 +37,7 @@ import time
 from typing import Optional
 
 from config import settings
+from kafka_security import aiokafka_security_kwargs
 from dlq_store import mark_kafka_acked, persist_dlq_failure, sanitize_error
 from field_cipher import field_cipher
 from metrics import inc_kafka_consumed
@@ -394,6 +395,10 @@ class KafkaConsumerManager:
             "oldest_lag_seconds": {},
         }
         self._live_consumers: dict[str, object] = {}
+        # P1: poll 批内原地退避的累计 sleep。串行批 50 条 × 每条 60s 预算
+        # 远超 max_poll_interval_ms → 消费者被踢出组 → rebalance → 重放,
+        # 下游持续降级时形成踢组循环。批开始时清零, 超过批预算即停止原地重试。
+        self._batch_sleep_s: float = 0.0
         self._oldest_record_ts: dict[str, float] = {}
         self._restart_initial_s = float(
             getattr(settings, "kafka_consumer_restart_initial_s", 1.0) or 1.0
@@ -530,11 +535,13 @@ class KafkaConsumerManager:
     async def _init_dlq_producer(self):
         """初始化 DLQ 生产者"""
         try:
+            from kafka_security import aiokafka_security_kwargs
             self._dlq_producer = AIOKafkaProducer(
                 bootstrap_servers=settings.kafka_bootstrap,
                 value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
                 key_serializer=lambda k: k.encode("utf-8") if k else None,
                 acks="all",
+                **aiokafka_security_kwargs(),
             )
             await self._dlq_producer.start()
             logger.info(f"[Kafka] DLQ producer started → {DLQ_TOPIC}")
@@ -976,6 +983,7 @@ class KafkaConsumerManager:
 
     async def _settle_ordered(self, fetched, topic, handler, stat_key, group_suffix, tracker):
         """分区内按 offset 顺序处理。遇到不可提交的记录就停住该分区。"""
+        self._batch_sleep_s = 0.0
         for tp, msgs in fetched.items():
             for msg in sorted(msgs, key=lambda m: m.offset):
                 if not self._running:
@@ -999,6 +1007,7 @@ class KafkaConsumerManager:
 
     async def _settle_concurrent(self, fetched, topic, handler, stat_key, group_suffix, tracker):
         """同一批并发完成。提交仍由 tracker 按分区连续水位决定。"""
+        self._batch_sleep_s = 0.0
         records = []
         for tp, msgs in fetched.items():
             ordered = sorted(msgs, key=lambda m: m.offset)
@@ -1101,6 +1110,7 @@ class KafkaConsumerManager:
             # Flink 使用 EXACTLY_ONCE 事务；消费端必须只读已提交，
             # 否则已 abort 的事务记录仍会到达响应引擎（重复告警）。
             isolation_level="read_committed",
+            **aiokafka_security_kwargs(),
         )
         tracker = OffsetCommitTracker()
         try:
@@ -1240,6 +1250,11 @@ class KafkaConsumerManager:
         slept = 0.0
         attempts_cap = max(1, int(MAX_RETRY))
         budget = max(0.0, float(getattr(settings, "kafka_retry_budget_s", 60) or 60))
+        # P1: 批内原地 sleep 不得超过 max_poll_interval 的一半 — 否则串行批
+        # 累计超时触发消费者被踢组/rebalance 风暴。超出即提前放弃原地重试,
+        # 走 retry topic / retain-offset 路径(下游自会重试)。
+        batch_headroom = max(0.0, (MAX_POLL_INTERVAL_MS / 1000.0) * 0.5 - self._batch_sleep_s)
+        budget = min(budget, batch_headroom)
         hops = int(event.get("_retry_hops") or 0)
         for attempt in range(1, attempts_cap + 1):
             if not self._running:
@@ -1308,6 +1323,7 @@ class KafkaConsumerManager:
                 if delay > 0 and self._running:
                     await asyncio.sleep(delay)
                     slept += delay
+                    self._batch_sleep_s += delay
                 if budget_exhausted(slept, budget):
                     break
 
@@ -1384,6 +1400,7 @@ class KafkaConsumerManager:
             # Flink 使用 EXACTLY_ONCE 事务；消费端必须只读已提交，
             # 否则已 abort 的事务记录仍会到达响应引擎（重复告警）。
             isolation_level="read_committed",
+            **aiokafka_security_kwargs(),
         )
         tracker = OffsetCommitTracker()
         topic = settings.kafka_topic_ingest_process
@@ -1804,7 +1821,10 @@ class KafkaConsumerManager:
             settings.kafka_topic_cep_partial,
             bootstrap_servers=settings.kafka_bootstrap,
             group_id=f"{settings.kafka_consumer_group}-cep-partial",
-            value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+            # P1: 不设 value_deserializer — 反序列化在迭代器内抛错会打垮整个
+            # 消费循环(毒丸消息→crash→offset 未提交→重读同一条→永久卡死)。
+            # 与其他消费者一致: 保留原始 bytes, 用 _decode_kafka_value 解码,
+            # 失败走 DLQ(下方 payload None 分支)。
             auto_offset_reset="latest",
             enable_auto_commit=False,
             max_poll_records=MAX_POLL_RECORDS,
@@ -1812,6 +1832,7 @@ class KafkaConsumerManager:
             # Flink 使用 EXACTLY_ONCE 事务；消费端必须只读已提交，
             # 否则已 abort 的事务记录仍会到达响应引擎（重复告警）。
             isolation_level="read_committed",
+            **aiokafka_security_kwargs(),
         )
         topic = settings.kafka_topic_cep_partial
         try:
@@ -1822,7 +1843,8 @@ class KafkaConsumerManager:
                 if not self._running:
                     break
                 try:
-                    payload = msg.value if isinstance(msg.value, dict) else None
+                    cep_event, cep_decode_error = _decode_kafka_value(msg.value)
+                    payload = cep_event if isinstance(cep_event, dict) else None
                     group = f"{settings.kafka_consumer_group}-cep-partial"
                     if payload is None:
                         try:
@@ -1833,7 +1855,7 @@ class KafkaConsumerManager:
                         stored = await self._send_to_dlq(
                             settings.kafka_topic_cep_partial,
                             {"eventId": ""},
-                            "cep payload is not an object",
+                            cep_decode_error or "cep payload is not an object",
                             0,
                             partition=msg.partition,
                             offset=msg.offset,
@@ -1948,11 +1970,20 @@ class KafkaConsumerManager:
                 session, log_data, session_id,
                 anomaly_score=anomaly_score,
             )
-            event_text = json.dumps(log_data, ensure_ascii=False)
-            await memory_tree.add_leaf(
-                session, session_id, log_data, event_text,
-                correlation_group="anomaly" if anomaly_score >= 0.6 else "",
-            )
+            # 残留修复(2026-10-24): 幂等命中(replay)只保留落库,
+            # 不再重复挂记忆树 —— 修复前重启重放会重复索引。
+            is_replay = bool(getattr(stored, "idempotent", False))
+            if not is_replay:
+                event_text = json.dumps(log_data, ensure_ascii=False)
+                await memory_tree.add_leaf(
+                    session, session_id, log_data, event_text,
+                    correlation_group="anomaly" if anomaly_score >= 0.6 else "",
+                )
+
+        if getattr(stored, "idempotent", False):
+            logger.debug("[Kafka-Enriched] replay event #%s — side effects skipped",
+                         stored.id)
+            return
 
         from event_bus import event_bus
         from event_identity import bus_fields
@@ -1971,6 +2002,8 @@ class KafkaConsumerManager:
         # 在日志中心永远停留在"待审计/审核中"。此处对命中告警路径的事件同样排队审计，
         # 使高优先级问题进入审计闭环并标记为已分析。
         severity = log_data["severity"]
+        if getattr(stored, "idempotent", False):
+            return  # replay: 审计闭环已在首次处理时提交, 不重复排队
         if anomaly_score >= 0.6 or severity in ("critical", "high"):
             await self._queue_audit(
                 log_data=log_data,
@@ -2069,6 +2102,12 @@ class KafkaConsumerManager:
                 session, log_data, session_id,
                 anomaly_score=anomaly_score,
             )
+
+        # 残留修复(2026-10-24): replay 不重复提交 Audit-LLM (幂等命中只保落库)
+        if getattr(stored, "idempotent", False):
+            logger.debug("[Kafka-Audit] replay event #%s — audit submit skipped",
+                         stored.id)
+            return
 
         from audit_worker import audit_worker
         await audit_worker.submit(

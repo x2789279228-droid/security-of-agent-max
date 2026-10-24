@@ -267,33 +267,44 @@ class TestCorruptStateFailsClosed:
 # ═══════════════════════════════════════════
 
 class TestKnownLimitationLastWriteWins:
-    """`_persist` 没有 version 谓词 —— 这一点被钉住，使差距可见。"""
+    """缺口已闭合(2026-10-24): `_persist` 已是 CAS — WHERE id==1 AND version=:v。
 
-    def test_persist_where_clause_has_no_version_predicate(self):
+    本类此前钉住 last-write-wins 缺口; 现按原登记改钉新语义:
+    陈旧副本不得覆盖权威状态, 冲突后本地对齐权威副本。
+    """
+
+    def test_persist_where_clause_has_version_predicate(self):
         import inspect
         from cad import CircuitBreaker
 
         src = inspect.getsource(CircuitBreaker._persist)
-        assert "CadCircuitState.version ==" not in src, (
-            "若将来补上真正的乐观并发，请同步更新本测试与本文件头部说明"
+        assert "CadCircuitState.version ==" in src, (
+            "_persist 的 version 谓词消失 —— 乐观并发被回退? "
+            "请同步更新本测试与本文件头部说明"
         )
 
-    def test_write_is_last_one_wins(self, db):
-        """当前语义：后写者覆盖前者。"""
+    def test_stale_writer_cannot_overwrite(self, db):
+        """新语义：版本不匹配的写必须被拒, 冲突后本地重载权威副本。"""
         async def scenario():
             a = _db_breaker()
             a.state.WARMUP_AUDITS = 0
-            await a.record_audit_result(1.0, 0.0, True)   # 熔断
+            await a.record_audit_result(1.0, 0.0, True)   # 熔断 → open, version 推进
             assert (await _read())["state"] == "open"
 
-            # 绕过载入纪律直接写，模拟「纪律被破坏」的极端情况
-            c = _db_breaker()
-            c.state.state = "closed"
-            await c._persist()
-            assert (await _read())["state"] == "closed", (
-                "若这里不再被覆盖，说明乐观并发已实现 —— "
-                "请更新 C 类测试与本文件头部说明"
-            )
+            stale = _db_breaker()
+            await stale._load_persisted()                 # 与 a 同版本
+            newer = _db_breaker()
+            await newer._load_persisted()
+            newer.state.state = "half_open"               # 模拟他人先推进权威
+            await newer._persist()
+            assert (await _read())["state"] == "half_open"
+
+            stale.state.state = "closed"                  # 陈旧副本试图覆盖
+            await stale._persist()                        # CAS 拒绝 → 重载权威
+            assert (await _read())["state"] == "half_open", (
+                "陈旧副本(版本不匹配)不得覆盖权威状态")
+            assert stale.state.state == "half_open", (
+                "版本冲突后本地必须对齐权威副本")
 
         _run(scenario())
 

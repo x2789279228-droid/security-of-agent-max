@@ -139,8 +139,23 @@ def _load_rule_file(fp: str) -> dict:
 
 
 def _write(fp: str, data: dict):
-    with open(fp, "w", encoding="utf-8") as fh:
-        yaml.dump(data, fh, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    """原子写: 先写临时文件再 os.replace — 进程中断留下半截 YAML 会让整条规则
+    静默失效(加载失败仅记一条 error, 检测面缩小且难察觉)。os.replace 同分区原子。"""
+    import os as _os
+    import tempfile
+
+    d = _os.path.dirname(fp) or "."
+    fd, tmp = tempfile.mkstemp(prefix=".rule-", suffix=".yml.tmp", dir=d)
+    try:
+        with _os.fdopen(fd, "w", encoding="utf-8") as fh:
+            yaml.dump(data, fh, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        _os.replace(tmp, fp)
+    except Exception:
+        try:
+            _os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def create_rule(content: dict, rules_dir: str = DEFAULT_RULES_DIR, changed_by: str = "admin") -> dict:
@@ -199,9 +214,12 @@ def update_rule(rule_id: str, patch: dict, rules_dir: str = DEFAULT_RULES_DIR, c
                 data.update({kk: vv for kk, vv in extra.items() if kk not in ("x-soc-id", "id")})
             except Exception as e:
                 return {"success": False, "error": f"sigma_yaml 解析失败: {e}"}
+    # P2: 修复前返回 version+1 但从不回写 — 每次更新都"恒为版本 2"。
+    # 版本真实化: 落库到 x-soc-version。
+    data["x-soc-version"] = int(data.get("x-soc-version") or data.get("version") or 1) + 1
     _write(fp, data)
-    logger.info(f"[Sigma/store] updated {rule_id} by {changed_by}")
-    return {"success": True, "rule_id": rule_id, "version": data.get("version", 1) + 1}
+    logger.info(f"[Sigma/store] updated {rule_id} by {changed_by} -> v{data['x-soc-version']}")
+    return {"success": True, "rule_id": rule_id, "version": data["x-soc-version"]}
 
 
 def delete_rule(rule_id: str, rules_dir: str = DEFAULT_RULES_DIR, changed_by: str = "admin") -> dict:

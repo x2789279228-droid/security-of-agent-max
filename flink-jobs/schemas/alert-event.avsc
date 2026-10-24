@@ -11,7 +11,7 @@
     {"name": "dstIp", "type": ["null", "string"], "default": null, "doc": "目标 IP"},
     {"name": "message", "type": "string", "doc": "告警描述"},
     {"name": "anomalyScore", "type": "double", "doc": "异常评分 [0, 1]"},
-    {"name": "alertType", "type": {"type": "enum", "name": "AlertType", "symbols": ["ANOMALY", "ATTACK_CHAIN", "THRESHOLD"]}, "doc": "告警类型"},
+    {"name": "alertType", "type": {"type": "enum", "name": "AlertType", "symbols": ["ANOMALY", "ATTACK_CHAIN", "THRESHOLD", "SIGMA_AGGREGATE"]}, "doc": "告警类型"},
     {"name": "reasons", "type": {"type": "array", "items": "string"}, "default": [], "doc": "告警触发原因列表"},
     {"name": "timestamp", "type": "long", "doc": "告警时间戳 (epoch millis)"},
     {"name": "traceId", "type": ["null", "string"], "default": null, "doc": "全链路追踪 ID"},

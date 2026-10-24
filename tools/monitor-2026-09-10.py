@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -55,9 +54,17 @@ def http_get(path: str, timeout: float = 10.0) -> tuple[int, dict | str]:
 
 
 def pg_query(sql: str) -> str:
-    """Run psql inside shared-memory-pg via docker exec, returns stdout (tab-separated)."""
+    """Run psql inside shared-memory-pg via docker exec, returns stdout (tab-separated).
+
+    P0-5: 口令此前硬编码在本文件并进入 git 历史(凭据已泄露)。
+    现一律从环境变量读取(SHARED_MEMORY_ADMIN_PASSWORD 或 PGPASSWORD),
+    缺失时明确报错而不是静默回退; 历史口令必须轮换。
+    """
+    pg_pw = os.environ.get("SHARED_MEMORY_ADMIN_PASSWORD") or os.environ.get("PGPASSWORD") or ""
+    if not pg_pw:
+        return "ERR:SHARED_MEMORY_ADMIN_PASSWORD/PGPASSWORD not set"
     cmd = ["docker", "exec", "shared-memory-pg", "bash", "-c",
-           f"PGPASSWORD='***REMOVED-LEAKED-SECRET***' psql -h 127.0.0.1 -U admin -d shared_memory -tAc {sql!r}"]
+           f"PGPASSWORD='{pg_pw}' psql -h 127.0.0.1 -U admin -d shared_memory -tAc {sql!r}"]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         return r.stdout.strip()

@@ -153,6 +153,7 @@ async def _harvest_feedback(session, ws, we) -> dict:
         .order_by(FeedbackRecord.created_at.desc())
         .limit(_FEEDBACK_LIMIT)
     )).scalars().all()
+
     return {
         "count": len(rows),
         "records": [

@@ -32,13 +32,13 @@ response_logger = get_response_logger()
 
 @router.get("/firewall/status")
 async def firewall_status(user: UserInfo = Depends(RequireRole("operator"))):
-    """SSH 防火墙适配器状态"""
+    """SSH 防火墙适配器状态(含 Redis TTL 索引合并 — 重启后仍可见孤儿规则)"""
     from response_engine.ssh_firewall import ssh_firewall
     return {
         "enabled": ssh_firewall.enabled,
         "connected": ssh_firewall._connected,
         "host": settings.fw_ssh_host,
-        "active_rules": ssh_firewall.get_active_rules(),
+        "active_rules": await ssh_firewall.get_active_rules_async(),
     }
 
 @router.post("/firewall/connect")
@@ -543,7 +543,12 @@ async def approve_action(
     ticket = approval_queue.approve(ticket_id, user.username, sig=sig or None)
     if not ticket:
         raise HTTPException(404, f"Ticket not found or already processed: {ticket_id}")
-    # 触发执行
+    # 先落库再执行：避免进程在 write-behind 完成前崩溃，重启后 DB 仍是
+    # pending → 第二次审批会重复执行已封禁的动作。
+    persisted = await approval_queue.persist_ticket(ticket)
+    if persisted is False:
+        raise HTTPException(503, "审批状态落库失败，拒绝执行（请检查数据库后重试）")
+    # 立即执行
     result = await response_orchestrator.execute_approved_action(ticket_id)
     await _audit(
         session, request, user, action="response.approval_approve",

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "IngestWrapper",
+  "description": "HTTP 网关 → security-events-ingest 的传输包装 (P0-3)。业务事件在 body 内，由网关盖章 eventId；消费端 (kafka_consumer._consume_python_ingest) 依赖顶层 body 对象与 eventId 幂等键。业务事件本身沿用 security_event.schema.json 权威契约，由检测/存储链路按需校验，不在传输包装上强制 —— 网关接受任意字段形状的日志。",
+  "x-schema-version": "1.0.0",
+  "type": "object",
+  "properties": {
+    "uuid": { "type": "string", "description": "网关消息唯一标识，Kafka 分区键" },
+    "eventId": { "type": "string", "description": "与 body.eventId 一致的幂等键" },
+    "correlationId": { "type": "string", "description": "同一业务处理过程的关联 ID" },
+    "type": { "type": "string", "description": "消息类型，网关固定写 security_event" },
+    "session_id": { "type": "string", "description": "接入会话 ID" },
+    "source_id": { "type": "string", "description": "来源名（经 X-API-Key 认证解析）" },
+    "_ts": { "type": "number", "description": "网关投递时刻 (epoch 秒)" },
+    "body": {
+      "type": "object",
+      "description": "业务事件（网关已 ensure_identity 盖章）",
+      "properties": {
+        "eventId": { "type": "string", "description": "业务事件幂等键（网关盖章，必填）" }
+      },
+      "required": ["eventId"]
+    }
+  },
+  "required": ["uuid", "eventId", "type", "body"],
+  "additionalProperties": true
+}

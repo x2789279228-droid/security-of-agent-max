@@ -123,6 +123,19 @@ def redact_action_params(params: dict) -> dict:
     return out
 
 
+def redact_text_for_log(text: str) -> str:
+    """错误文本里可能带完整 URL（含 token/key），落日志前统一脱敏。"""
+    if not text:
+        return ""
+    import re
+    from .response_registry import redact_url_for_log
+    return re.sub(
+        r"https?://[^\s\"'<>]+",
+        lambda m: redact_url_for_log(m.group(0)),
+        str(text),
+    )
+
+
 @dataclass
 class ActionResult:
     """单次动作执行结果"""
@@ -180,6 +193,14 @@ class RollbackStore:
         self._redis = redis_client
 
     async def record(self, token: str, action_records: list[dict]):
+        # P1: 回滚记录会进 Redis 存 7 天, params 必须与 ActionResult 同口径脱敏 —
+        # 修复前原始 params(可含 webhook token/password 类参数)明文入库。
+        # 回滚所需的 src_ip/host_ip/domain/rule_id 等非敏感键原样保留。
+        action_records = [
+            {**rec, "params": redact_action_params(rec.get("params", {}))}
+            if isinstance(rec, dict) else rec
+            for rec in action_records
+        ]
         self._store[token] = action_records
         if self._redis is not None:
             try:

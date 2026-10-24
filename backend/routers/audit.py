@@ -241,7 +241,8 @@ class AuditLLMRequest(BaseModel):
 @router.post("/audit-llm/run")
 async def run_audit_llm_pipeline(
     req: AuditLLMRequest,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("operator")),
 ):
     """手动触发 Audit-LLM 四层流水线"""
     from anomaly_detector import anomaly_detector as ad

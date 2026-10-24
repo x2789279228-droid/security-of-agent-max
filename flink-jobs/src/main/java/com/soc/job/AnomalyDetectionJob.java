@@ -97,8 +97,12 @@ public class AnomalyDetectionJob {
                 .setBootstrapServers(KafkaConfig.KAFKA_BOOTSTRAP)
                 .setTopics(KafkaConfig.TOPIC_VALIDATED_LOGS)
                 .setGroupId("anomaly-detection-job")
+                // P0-6: earliest 只在**首次启动**(无恢复状态)时生效;
+                // 升级/重启必须经 savepoint/checkpoint 恢复(submit-jobs.sh 的
+                // FLINK_RESTORE_SAVEPOINT), 否则从最早 offset 重放 = 重复告警/重复处置。
                 .setStartingOffsets(OffsetsInitializer.earliest())
                 .setValueOnlyDeserializer(new org.apache.flink.api.common.serialization.SimpleStringSchema())
+                .setProperties(KafkaConfig.clientSecurityProps())
                 .build();
 
         // ==================== 2. 消费并解析事件 ====================
@@ -128,8 +132,11 @@ public class AnomalyDetectionJob {
                 );
 
         // ==================== 3. 异常评分（KeyedProcessFunction）====================
+        // P0-7: keyBy 必须空值安全 —— Flink 对 null key 哈希会 NPE 打挂作业。
+        // LogValidationJob 已在源头把 srcIp 归一为 "unknown"；这里是纵深防御,
+        // 直接消费 validated topic 的旧数据/旁路数据也不会踩 null。
         SingleOutputStreamOperator<String> enrichedStream = timestampedStream
-                .keyBy(SecurityEvent::getSrcIp)
+                .keyBy(AnomalyDetectionJob::srcKey)
                 .process(new AnomalyScoringFunction())
                 .name("Anomaly-Scoring");
 
@@ -138,7 +145,7 @@ public class AnomalyDetectionJob {
 
         // ==================== 4.5 CEP 部分匹配追踪 ====================
         DataStream<String> partialMatches = timestampedStream
-                .keyBy(SecurityEvent::getSrcIp)
+                .keyBy(AnomalyDetectionJob::srcKey)
                 .process(new CepPartialMatchFunction())
                 .name("CEP-Partial-Match-Tracker");
 
@@ -159,6 +166,7 @@ public class AnomalyDetectionJob {
                         .build())
                 .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
                 .setTransactionalIdPrefix("soc-ano-enr")
+                .setKafkaProducerConfig(KafkaConfig.clientSecurityProps())
                 .build();
 
         enrichedStream
@@ -175,6 +183,7 @@ public class AnomalyDetectionJob {
                         .build())
                 .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
                 .setTransactionalIdPrefix("soc-ano-ale")
+                .setKafkaProducerConfig(KafkaConfig.clientSecurityProps())
                 .build();
 
         // 合并异常评分告警和 CEP 攻击链告警
@@ -193,6 +202,7 @@ public class AnomalyDetectionJob {
                         .build())
                 .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
                 .setTransactionalIdPrefix("soc-ano-aud")
+                .setKafkaProducerConfig(KafkaConfig.clientSecurityProps())
                 .build();
 
         auditStream
@@ -209,6 +219,7 @@ public class AnomalyDetectionJob {
                         .build())
                 .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
                 .setTransactionalIdPrefix("soc-ano-par")
+                .setKafkaProducerConfig(KafkaConfig.clientSecurityProps())
                 .build();
 
         partialMatches
@@ -224,6 +235,16 @@ public class AnomalyDetectionJob {
                 KafkaConfig.TOPIC_AUDIT_QUEUE, KafkaConfig.TOPIC_CEP_PARTIAL);
 
         env.execute("AnomalyDetectionJob");
+    }
+
+    /**
+     * P0-7: keyBy 的空值安全 srcIp 键。LogValidationJob 已在源头把
+     * srcIp 归一为 "unknown"；这里兜底直接消费 validated 的旧/旁路数据 ——
+     * Flink 对 null key 做哈希会 NPE, 单条脏数据就能打挂整个作业。
+     */
+    static String srcKey(SecurityEvent event) {
+        String src = event.getSrcIp();
+        return (src == null || src.isEmpty()) ? "unknown" : src;
     }
 
     // ==================== CEP 攻击链模式定义 ====================
@@ -309,12 +330,12 @@ public class AnomalyDetectionJob {
                 })
                 .within(Time.minutes(15));
 
-        // ---------- 应用 CEP 模式（按 srcIp 分组）----------
+        // ---------- 应用 CEP 模式（按 srcIp 分组; 空值安全, P0-7）----------
         ObjectMapper mapper = new ObjectMapper();
 
         // 模式 1: port_scan_to_c2
         PatternStream<SecurityEvent> portScanStream = CEP.pattern(
-                eventStream.keyBy(SecurityEvent::getSrcIp), portScanToC2);
+                eventStream.keyBy(AnomalyDetectionJob::srcKey), portScanToC2);
 
         DataStream<String> portScanAlerts = portScanStream.select(
                 new AttackChainAlertSelector("port_scan_to_c2",
@@ -322,7 +343,7 @@ public class AnomalyDetectionJob {
 
         // 模式 2: lateral_movement
         PatternStream<SecurityEvent> lateralStream = CEP.pattern(
-                eventStream.keyBy(SecurityEvent::getSrcIp), lateralMovement);
+                eventStream.keyBy(AnomalyDetectionJob::srcKey), lateralMovement);
 
         DataStream<String> lateralAlerts = lateralStream.select(
                 new AttackChainAlertSelector("lateral_movement",
@@ -330,7 +351,7 @@ public class AnomalyDetectionJob {
 
         // 模式 3: data_exfil
         PatternStream<SecurityEvent> exfilStream = CEP.pattern(
-                eventStream.keyBy(SecurityEvent::getSrcIp), dataExfil);
+                eventStream.keyBy(AnomalyDetectionJob::srcKey), dataExfil);
 
         DataStream<String> exfilAlerts = exfilStream.select(
                 new AttackChainAlertSelector("data_exfil",

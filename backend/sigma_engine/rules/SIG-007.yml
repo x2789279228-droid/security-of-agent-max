@@ -33,7 +33,12 @@ x-soc-confidence: medium
 x-soc-action: block_ip
 x-soc-attack_type: brute_force
 x-soc-severity: high
-# 聚合仅用于 Flink 升级阈值；单条结论型 BRUTE_FORCE 事件仍应立即命中
+# 阈值语义 (2026-10-24 对齐实际行为): 本规则声明 x-soc-aggregation,
+# 单事件命中只产生 pending 候选(pending-only 不抬分、不进封禁, 见 P0-2),
+# **第 2 条** 命中(op '>', threshold 1, 5m 窗口)才由 Flink SIGMA_AGGREGATE
+# 告警携带 block_ip 处置。若业务确需"单条结论立即处置", 应拆出独立的
+# 结论型规则(不带 x-soc-aggregation)—— 单事件处置走 FastPath 的
+# critical/强信号门槛, 而不是靠聚合规则降阈值。
 x-soc-aggregation:
   func: count
   field: src_ip

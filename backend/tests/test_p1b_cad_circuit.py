@@ -490,33 +490,69 @@ class TestCrossProcessState:
 
         _run(scenario())
 
-    def test_persist_has_no_version_predicate(self):
-        """已登记缺口：``_persist`` 是 last-write-wins，version 只写不比。
+    def test_persist_uses_version_predicate_cas(self):
+        """缺口已闭合(2026-10-24)：``_persist`` 已是 CAS。
 
-        这条测试断言的是**当前形态**，让缺口保持可见而不是被误以为已修。
-        将来真的补上乐观并发时它会红，失败信息会要求更新本登记。
+        本测试此前钉住 last-write-wins 缺口（version 只写不比），
+        现按原登记要求改钉新语义，并补上原登记点名的
+        「行不存在 vs 版本冲突」行为区分：
+          · 行不存在（UPDATE 匹配 0 行且 SELECT 不到）→ INSERT 首次落库;
+          · 行存在但版本不同 → 版本冲突, 不得覆盖, 本地对齐权威副本
+            （见 test_stale_version_cannot_overwrite）。
         """
         import inspect
 
         from cad import CircuitBreaker
 
         src = inspect.getsource(CircuitBreaker._persist)
-        assert "CadCircuitState.version ==" not in src, (
-            "_persist 已加入 version 谓词 —— 乐观并发缺口已闭合，"
-            "请更新本登记并补上「行不存在 vs 版本冲突」的区分测试"
+        assert "CadCircuitState.version ==" in src, (
+            "_persist 的 version 谓词消失 —— 乐观并发被回退? 请更新本登记"
         )
-        # 反向确认：version 确实还在被写入（只写字段的特征）
-        assert "version=self.state.version + 1" in src, (
-            "version 不再被写入 —— 本登记描述的形态已变化"
+        # version 仍随每次成功写回单调推进
+        assert "version=local_version + 1" in src, (
+            "version 不再被写入 —— 持久化版本可观测性丢失"
         )
-        # docstring 必须在**首行**如实写出当前形态。
-        # 用正向断言而不是「不得出现某句话」：docstring 里讨论这个话题时
-        # 必然会提到「乐观并发」，反向断言会被自己的说明文字抓住
-        # （本条测试最初就是这么误报的）。
+        # docstring 首行必须如实声明当前形态
         claim = (CircuitBreaker._persist.__doc__ or "").strip().splitlines()[0]
-        assert "last-write-wins" in claim, (
+        assert "CAS" in claim, (
             f"docstring 首行未如实声明当前形态: {claim!r}"
         )
+
+    def test_stale_version_cannot_overwrite(self):
+        """「版本冲突」分支：陈旧副本不得覆盖已被他人推进的权威状态。"""
+        from models import CadCircuitState
+        from sqlalchemy import delete
+        from cad import CircuitBreaker
+
+        async def scenario():
+            async with engine_begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            async with async_session() as s:
+                await s.execute(delete(CadCircuitState))
+                await s.commit()
+
+            a = CircuitBreaker(persist=True)
+            a.state.WARMUP_AUDITS = 0
+            await a.record_audit_result(1.0, 0.0, True)   # open, version 推进
+            assert a.state.state == "open"
+
+            stale = CircuitBreaker(persist=True)
+            await stale._load_persisted()                 # 与 a 同版本
+            newer = CircuitBreaker(persist=True)
+            await newer._load_persisted()
+            newer.state.state = "half_open"               # 他人先推进权威
+            await newer._persist()
+
+            stale.state.state = "closed"                  # 陈旧副本试图覆盖
+            await stale._persist()                        # CAS 拒绝 → 重载权威
+            async with async_session() as s:
+                row = await s.get(CadCircuitState, 1)
+            assert row is not None and row.state == "half_open", (
+                "陈旧副本(版本不匹配)不得覆盖权威状态")
+            assert stale.state.state == "half_open", (
+                "版本冲突后本地必须对齐权威副本")
+
+        _run(scenario())
 
     def test_manual_reset_persists(self):
         """人工重置也必须落库，否则 API 进程的重置对 worker 无效。"""

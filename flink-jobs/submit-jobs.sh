@@ -17,6 +17,24 @@ if [ -n "${FLINK_PARALLELISM:-}" ]; then
   PARALLELISM_ARGS=(-p "${FLINK_PARALLELISM}")
 fi
 
+# ── P0-6: 升级/重启经 savepoint/checkpoint 恢复 ──
+# 修复后三个核心作业仍以 earliest() 作为**首次启动**的兜底, 但升级/重启
+# 若不带恢复状态重提, 新作业会从最早 offset 重放整条 topic:
+# EXACTLY_ONCE 只保护"同一作业 + checkpoint 恢复", 保护不了全新实例。
+# 用法(重启/升级时):
+#   FLINK_RESTORE_SAVEPOINT=file:///var/flink-state/checkpoints/<jobId>/chk-<n> \
+#     ./submit-jobs.sh
+#   或指向 savepoint: file:///var/flink-state/savepoints/savepoint-xxx
+# 拓扑变更导致部分算子状态无法映射时, 追加 FLINK_ALLOW_NON_RESTORED_STATE=1。
+RESTORE_ARGS=()
+if [ -n "${FLINK_RESTORE_SAVEPOINT:-}" ]; then
+    RESTORE_ARGS=(-s "${FLINK_RESTORE_SAVEPOINT}")
+    if [ "${FLINK_ALLOW_NON_RESTORED_STATE:-0}" = "1" ]; then
+        RESTORE_ARGS+=(-n)
+    fi
+    echo "  恢复模式: -s ${FLINK_RESTORE_SAVEPOINT} (offset/状态来自恢复点, 不受 earliest 影响)"
+fi
+
 ACTIVE_STATES='("CREATED|SCHEDULED|DEPLOYING|RUNNING|RESTARTING|RECONCILING")'
 # 幂等探测: 若存在同名活跃 job 则返回 0(已在运行),否则返回 1
 job_is_active() {
@@ -41,6 +59,7 @@ submit_job() {
     if /opt/flink/bin/flink run \
         -d \
         -m "${JM_HOST}:${JM_PORT}" \
+        "${RESTORE_ARGS[@]}" \
         -c "${main_class}" \
         "${PARALLELISM_ARGS[@]}" \
         "${JAR_PATH}"; then

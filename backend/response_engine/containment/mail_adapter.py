@@ -78,7 +78,14 @@ def _graph_opaque_id(value: str, what: str) -> str:
 
 
 def _mode() -> str:
-    return (getattr(settings, "execution_mode", "live") or "live").lower()
+    # 失败关闭：空/缺失配置按 dry_run，不得回落到 live。
+    try:
+        from response_engine.preview import preview_mode
+        if preview_mode.get():
+            return "dry_run"
+    except Exception:
+        pass
+    return (getattr(settings, "execution_mode", "dry_run") or "dry_run").lower()
 
 
 def graph_configured() -> bool:

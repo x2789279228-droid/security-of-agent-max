@@ -102,3 +102,77 @@ groups:
         annotations:
           summary: Kafka 消费循环反复重启
           description: loop={{ $labels.loop }} 近 10 分钟重启 {{ $value }} 次。
+
+# ── 生产化演练告警: Kafka 集群健康 + Flink 流处理 SLO ──
+# kafka_* 指标来自 kafka_exporter (full profile); lite profile 下这些告警不评估。
+  - name: soc-kafka-cluster
+    interval: 15s
+    rules:
+      - alert: KafkaBrokerDown
+        expr: kafka_brokers < 3
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Kafka 集群 broker 数不足 3
+          description: 当前存活 broker={{ $value }}。full profile 下任一 broker 宕机即触发; 演练杀 broker 时预期亮起, 重启后恢复。
+
+      - alert: KafkaUnderReplicatedPartitions
+        expr: sum(kafka_topic_partition_under_replicated_partition) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kafka 出现 under-replicated 分区
+          description: 共 {{ $value }} 个分区副本不足 (RF=3/minISR=2 语义下的降级信号)。
+
+      - alert: KafkaTopicBelowMinIsr
+        expr: min by (topic) (kafka_topic_partition_in_sync_replica) < 2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "topic ISR 跌破 minISR=2"
+          description: "topic={{ $labels.topic }} —— 写入可用性即将丧失 (acks=all + minISR=2 会拒绝写入)。"
+
+      - alert: KafkaConsumerLagHigh
+        expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 5000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "消费组积压超 5000 条"
+          description: "group={{ $labels.consumergroup }} topic={{ $labels.topic }} lag={{ $value }} —— 消费能力不足或下游故障。"
+
+  - name: soc-flink-stream
+    interval: 15s
+    rules:
+      - alert: FlinkCheckpointFailed
+        expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: Flink checkpoint 连续失败
+          description: EXACTLY_ONCE 依赖 checkpoint; 失败 = 作业失去故障恢复点。
+
+      - alert: FlinkJobsNotAllRunning
+        # MetricNames.NUM_RUNNING_JOBS (flink-runtime 1.20 源码核实; numJobsRunning 只是 REST 字段名)
+        expr: flink_jobmanager_numRunningJobs < 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Flink 核心作业不足 3 个
+          description: "当前运行 {{ $value }} 个作业 (期望 3: LogValidation / AnomalyDetection / SigmaThresholdAggregation)。"
+
+      - alert: FlinkDuplicateRateHigh
+        expr: >
+          sum(increase(flink_taskmanager_job_task_data_quality_events_duplicate[15m]))
+          / clamp_min(sum(increase(flink_taskmanager_job_task_data_quality_events_total[15m])), 1) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 60s 窗口去重命中占比过高
+          description: 近 15 分钟重复事件占比 {{ $value | humanizePercentage }} —— 上游在重复发送或去重窗口异常。

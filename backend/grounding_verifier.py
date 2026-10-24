@@ -972,15 +972,20 @@ class GroundingVerifier:
         self,
         referenced_events: list[dict],
     ) -> tuple[list[str], float]:
-        """
-        检测引用事件之间是否存在跨源冲突
+        """检测引用事件之间是否存在跨源冲突
 
-        安全逻辑：不同数据源可能对同一事件给出矛盾描述。
-        例如源 A 报告 "登录成功"，源 B 报告 "登录失败"（同一 IP 同一时间）。
+        安全逻辑：不同数据源可能对**同一操作**给出矛盾结论
+        （同一目的地既 allowed 又 denied、同一事件既成功又失败）。
 
-        检测维度：
-        1. 同一 src_ip 的 severity 矛盾（info vs critical）
-        2. 同一 src_ip 的 event_type 矛盾（USER_LOGIN vs BRUTE_FORCE）
+        P1(2026-10-24): 修复前按"同一 src_ip 的**行为共存**"判矛盾 —
+        「同 IP 既有 info 又有 high」「同 IP 既有登录又有爆破」都算冲突并进
+        hard_fail。真实攻击者的侦察+攻击混合作业、受害主机被爆破后成功登录,
+        恰是这种形态 → 防幻觉闸门把合法结论整体压成假阴性。
+        现在只判**互斥**矛盾:
+          ① 同一 event_id 的 severity/event_type 不一致(数据完整性冲突);
+          ② 同一操作实体(同 src+dst+event_type)的结果互斥
+             (allowed/permit/success vs denied/blocked/failed, 含中文)。
+        行为共存(不同 event_type 共存于同一 IP)不再构成冲突。
 
         Returns:
             (conflicts, source_consistency)
@@ -989,40 +994,72 @@ class GroundingVerifier:
             return [], 1.0
 
         conflicts = []
-        # 按 src_ip 分组
-        by_ip: dict[str, list[dict]] = {}
+        # ① 同一事件(按 event_id)在不同引用中的字段必须自洽
+        by_event_id: dict[str, dict] = {}
         for evt in referenced_events:
-            src = evt.get("src_ip", "")
-            if src:
-                by_ip.setdefault(src, []).append(evt)
-
-        conflict_count = 0
-        for ip, events in by_ip.items():
-            if len(events) < 2:
+            eid = str(evt.get("event_id") or evt.get("id") or "").strip()
+            if not eid:
                 continue
-            severities = {str(e.get("severity", "")).lower() for e in events}
-            event_types = {str(e.get("event_type", "")).upper() for e in events}
-
-            # severity 矛盾：同时有 info 和 critical/high
-            if "info" in severities and ("critical" in severities or "high" in severities):
+            severity = str(evt.get("severity", "")).lower()
+            event_type = str(evt.get("event_type", "")).upper()
+            seen = by_event_id.setdefault(eid, {})
+            if "severity" in seen and severity and seen["severity"] != severity:
                 conflicts.append(
-                    f"IP {ip}: severity 矛盾 ({severities})，"
-                    f"同一源同时有 info 和高危事件"
+                    f"event {eid}: severity 矛盾 "
+                    f"({seen['severity']} vs {severity})"
                 )
-                conflict_count += 1
-
-            # event_type 矛盾：LOGIN 和 BRUTE_FORCE 同时出现
-            login_types = {"USER_LOGIN", "SUSPICIOUS_LOGIN"}
-            attack_types = {"BRUTE_FORCE", "PORT_SCAN", "C2_BEACON"}
-            if (event_types & login_types) and (event_types & attack_types):
+            if "event_type" in seen and event_type and seen["event_type"] != event_type:
                 conflicts.append(
-                    f"IP {ip}: 行为矛盾 ({event_types})，"
-                    f"同一源同时有正常登录和攻击事件"
+                    f"event {eid}: event_type 矛盾 "
+                    f"({seen['event_type']} vs {event_type})"
                 )
-                conflict_count += 1
+            if severity:
+                seen.setdefault("severity", severity)
+            if event_type:
+                seen.setdefault("event_type", event_type)
 
-        total_pairs = sum(len(evts) * (len(evts) - 1) // 2 for evts in by_ip.values())
-        consistency = 1.0 - (conflict_count / max(total_pairs, 1))
+        # ② 同一操作实体的结果互斥: 同 (src, dst, event_type) 既有"允许/成功"
+        #    又有"拒绝/失败" — 两条证据对同一操作给出相反结论。
+        allow_tokens = ("allow", "permit", "accept", "success", "succeed",
+                        "允许", "成功", "放行")
+        deny_tokens = ("deny", "denied", "block", "reject", "refuse",
+                       "failure", "failed", "拒绝", "阻断", "失败")
+
+        def _polarity(text: str) -> str:
+            t = (text or "").lower()
+            has_allow = any(tok in t for tok in allow_tokens)
+            has_deny = any(tok in t for tok in deny_tokens)
+            if has_allow and not has_deny:
+                return "allow"
+            if has_deny and not has_allow:
+                return "deny"
+            return ""
+
+        by_operation: dict[tuple, dict] = {}
+        for evt in referenced_events:
+            key = (
+                str(evt.get("src_ip", "")),
+                str(evt.get("dst_ip", "")),
+                str(evt.get("event_type", "")).upper(),
+            )
+            if not (key[0] or key[1]):
+                continue
+            pol = _polarity(str(evt.get("message", "")))
+            if not pol:
+                continue
+            g = by_operation.setdefault(key, {})
+            g.setdefault(pol, []).append(evt)
+
+        for (src, dst, etype), pols in by_operation.items():
+            if "allow" in pols and "deny" in pols:
+                conflicts.append(
+                    f"{etype} {src}→{dst}: 结果互斥 "
+                    f"(allowed/成功 vs denied/拒绝 的证据同时被引用)"
+                )
+
+        conflict_count = len(conflicts)
+        total_pairs = max(len(by_event_id) + len(by_operation), 1)
+        consistency = 1.0 - (conflict_count / total_pairs)
         return conflicts, max(consistency, 0.0)
 
     # ───────────────────────────────────────
@@ -1075,14 +1112,10 @@ class GroundingVerifier:
                 )
                 time_reversals += 1
 
-        # ID 跳跃检查（相邻 ID 差距 > 100 视为断裂）
-        for j in range(1, len(evidence_ids)):
-            gap = abs(evidence_ids[j] - evidence_ids[j - 1])
-            if gap > 100:
-                breaks.append(
-                    f"ID 跳跃: #{evidence_ids[j-1]} → #{evidence_ids[j]} "
-                    f"(间隔 {gap})，证据链可能不连续"
-                )
+        # P2: 删除"相邻 ID 差 >100 = 链断裂"启发式 — evidence_id 是自增主键,
+        # 跨时段/跨会话的正常引用天然大间隔, 该规则把合法引用系统性压低
+        # chain_integrity(进而拉低总分), 只产生噪声不产生信号。
+        # 时序一致性检查保留(它检查的是引用内的时间顺序, 与 ID 数值无关)。
 
         total_checks = max(len(evidence_ids) - 1, 1)
         integrity = 1.0 - (len(breaks) / (total_checks * 2))  # 每个检查点最多 2 种断裂

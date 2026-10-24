@@ -196,51 +196,68 @@ class CrossCorrelator:
         return results
 
     def _match_lateral_movement(self, edr_events, flows) -> list[CorrelationResult]:
-        """规则 2: SMB 流量 × 网络登录"""
+        """规则 2: SMB 流量 × 网络登录
+
+        P1: 修复前有三处硬伤 —
+          ① `logon.raw_data` 不存在(模型字段是 event_data) → 首个登录事件即
+             AttributeError, 整条规则从未真正跑通过(被 correlate() 的 except 吞成日志);
+          ② `logon.user` 不存在(模型字段是 user_name) — 同上;
+          ③ "目标 IP 匹配"只做空值检查不做相等比较 → O(登录×SMB流) 笛卡尔积,
+             4624 Type3 + 445 端口是 Windows 网络常态, 每分钟批量产出
+             confidence=0.75/high 的假横向移动告警。
+        现在按**同一发起源**关联: flow.src_ip == logon.src_ip(登录源 IP 与 SMB
+        流发起方一致才算同一行为者), 并按 src_ip 预索引消除笛卡尔积。
+        """
         results = []
 
-        # 网络登录事件 (4624 Type 3)
+        # 网络登录事件 (4624 Type 3) — 字段名与模型对齐(event_data/user_name)
         logon_events = [
             e for e in edr_events
             if e.event_id == 4624
-            and e.raw_data.get("logon_type") == "Network"
+            and isinstance(getattr(e, "event_data", None), dict)
+            and str(e.event_data.get("logon_type", "")).lower() in ("network", "3")
         ]
+        # 没有"登录来源 IP"就无法与流建立行为者关联 — 如实放弃, 不做假关联
+        logon_events = [e for e in logon_events if (e.src_ip or "").strip()]
 
-        # SMB 流 (端口 445)
-        smb_flows = [f for f in flows if f.dst_port == 445 or f.app_protocol == "SMB"]
+        # SMB 流 (端口 445), 按发起源预索引
+        flows_by_src: dict[str, list] = {}
+        for f in flows:
+            if f.dst_port == 445 or (f.app_protocol or "").upper() == "SMB":
+                flows_by_src.setdefault((f.src_ip or "").strip(), []).append(f)
 
         for logon in logon_events:
-            for flow in smb_flows:
-                # 目标 IP 匹配
-                if flow.dst_ip and logon.computer_name:
-                    # 简化匹配：同一时间窗口内的 SMB 流 + 网络登录
-                    if flow.flow_start and logon.created_at:
-                        delta = abs(
-                            flow.flow_start.timestamp() - logon.created_at.timestamp()
-                        )
-                        if delta > self.window_sec:
-                            continue
+            candidates = flows_by_src.get((logon.src_ip or "").strip(), [])
+            for flow in candidates:
+                # 同一行为者: SMB 流的发起源 == 网络登录的来源 IP
+                if flow.flow_start and logon.created_at:
+                    delta = abs(
+                        flow.flow_start.timestamp() - logon.created_at.timestamp()
+                    )
+                    if delta > self.window_sec:
+                        continue
 
-                    results.append(CorrelationResult(
-                        correlation_type="lateral_move",
-                        confidence=0.75,
-                        severity="high",
-                        description=(
-                            f"SMB 横向移动: {flow.src_ip} → {flow.dst_ip} "
-                            f"(用户: {logon.user})"
-                        ),
-                        network_event={
-                            "src_ip": flow.src_ip, "dst_ip": flow.dst_ip,
-                            "protocol": "SMB",
-                        },
-                        edr_event={
-                            "user": logon.user,
-                            "computer": logon.computer_name,
-                            "logon_type": "Network",
-                        },
-                        mitre_technique="T1021.002",
-                        indicators=["smb_lateral_move"],
-                    ))
+                results.append(CorrelationResult(
+                    correlation_type="lateral_move",
+                    confidence=0.75,
+                    severity="high",
+                    description=(
+                        f"SMB 横向移动: {flow.src_ip} → {flow.dst_ip} "
+                        f"(用户: {logon.user_name})"
+                    ),
+                    network_event={
+                        "src_ip": flow.src_ip, "dst_ip": flow.dst_ip,
+                        "protocol": "SMB",
+                    },
+                    edr_event={
+                        "user": logon.user_name,
+                        "computer": logon.computer_name,
+                        "logon_type": "Network",
+                        "logon_src_ip": logon.src_ip,
+                    },
+                    mitre_technique="T1021.002",
+                    indicators=["smb_lateral_move"],
+                ))
 
         return results
 
@@ -270,6 +287,11 @@ class CrossCorrelator:
                     )
                     if delta > self.window_sec * 2:
                         continue
+                # P1: EdrEvent 没有 event_name 字段 — 修复前这里 AttributeError,
+                # 整条外泄规则从未跑通(被 correlate() 的 except 吞掉)。
+                fe_event_name = {
+                    11: "FileCreate", 23: "FileDelete", 15: "FileCreateStreamHash",
+                }.get(getattr(fe, "event_id", 0), f"Event-{getattr(fe, 'event_id', 0)}")
 
                 results.append(CorrelationResult(
                     correlation_type="data_exfil",
@@ -278,7 +300,7 @@ class CrossCorrelator:
                     description=(
                         f"疑似数据外泄: {flow.src_ip} 外发 "
                         f"{flow.bytes_out / 1048576:.1f}MB → {flow.dst_ip}, "
-                        f"伴随文件操作 ({fe.event_name})"
+                        f"伴随文件操作 ({fe_event_name})"
                     ),
                     network_event={
                         "src_ip": flow.src_ip, "dst_ip": flow.dst_ip,
@@ -286,7 +308,7 @@ class CrossCorrelator:
                     },
                     edr_event={
                         "file_path": fe.file_path,
-                        "event": fe.event_name,
+                        "event": fe_event_name,
                         "computer": fe.computer_name,
                     },
                     mitre_technique="T1048",

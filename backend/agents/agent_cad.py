@@ -133,7 +133,9 @@ class CADAgent:
                 anomaly_detected=hallucination_count > 0,
             )
         else:
-            await circuit_breaker.record_na(
+            # P0-4: record_na 是同步方法, `await None` 必抛 TypeError —
+            # 单源告警(最常见车道)的整轮审计都会在这里崩溃。
+            circuit_breaker.record_na(
                 notes=("single-source: 无分解证据可穿透验证"
                        if has_audit_content else "empty audit: 无可验断言")
             )

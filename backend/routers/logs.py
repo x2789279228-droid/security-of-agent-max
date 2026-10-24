@@ -69,6 +69,25 @@ def _peek_source(api_key: str) -> str:
             return src.name
     return "http-admin"
 
+
+def _authenticate_source(request: Request) -> str:
+    """单条/批量接入共用的数据源鉴权（P0-3/P0-5）。
+
+    修复前 batch 接口只读 X-API-Key 就透传，从不调用
+    source_registry.authenticate —— 无效/吊销的 key 也能整批写入。
+    现在两个端点走同一条路径：带了 key 就必须有效（无效 → 403）；
+    Kafka 模式下不带 key 记安全告警（与单条接口同语义）。
+    """
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key:
+        source = source_registry.authenticate(api_key)
+        if not source:
+            _ingest_metric("rejected", reason="auth")
+            raise HTTPException(403, "Invalid or revoked API key")
+    elif settings.kafka_enabled:
+        logger.warning("[Security] HTTP ingest without API key in Kafka mode — should use Kafka pipeline")
+    return api_key
+
 def _stamp_ingest_events(events: list) -> list[dict]:
     """入口盖章：已有 eventId 保留，缺失时生成一次。"""
     stamped = []
@@ -172,15 +191,8 @@ async def ingest_log(
     - Kafka 模式下: 入队 security-events-ingest 后立即返回 202 (不借 DB session)
     - HTTP 模式下: 建议携带 X-API-Key 头, 同步 ingest 后返回 200
     """
-    # 数据源认证检查
-    api_key = request.headers.get("X-API-Key", "")
-    if api_key:
-        source = source_registry.authenticate(api_key)
-        if not source:
-            _ingest_metric("rejected", reason="auth")
-            raise HTTPException(403, "Invalid or revoked API key")
-    elif settings.kafka_enabled:
-        logger.warning("[Security] HTTP ingest without API key in Kafka mode — should use Kafka pipeline")
+    # 数据源认证检查（与 batch 接口共用 _authenticate_source）
+    api_key = _authenticate_source(request)
 
     from drain import drain
     if not drain.accepting:
@@ -241,6 +253,9 @@ async def ingest_log_batch(
     session: AsyncSession = Depends(_session_unless_queued)
 ):
     """Fast Path: 批量接入安全日志"""
+    # P0-3/P0-5: batch 接口与单条接口共用鉴权，且鉴权前置 ——
+    # 修复前只透传 header，无效 key 也能整批写入 Kafka。
+    api_key = _authenticate_source(request)
     from drain import drain
     if not drain.accepting:
         _ingest_metric("rejected", reason="draining", n=max(1, len(req.logs)))
@@ -254,7 +269,6 @@ async def ingest_log_batch(
     if denied is not None:
         _ingest_metric("rejected", reason="overloaded", n=max(1, len(req.logs)))
         return denied
-    api_key = request.headers.get("X-API-Key", "")
     session_id = req.session_id or str(uuid.uuid4())
     parsed = [d if isinstance(d, dict) else json.loads(d) for d in req.logs]
     # 输入 sanitization
@@ -317,6 +331,7 @@ async def ingest_log_batch(
 @router.post("/logs/analyze")
 async def trigger_analysis(
     session_id: str = Query(..., description="会话ID"),
+    user: UserInfo = Depends(RequireRole("operator")),
 ):
     """手动触发未分析日志的批量分析"""
     from drain import drain

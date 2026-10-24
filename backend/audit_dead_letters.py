@@ -114,7 +114,9 @@ async def replay_dead_letters(limit: int = 200) -> int:
                     anomaly_report=report,
                 )
                 note = f"resubmit:{status}"
-                if status in ("queued", "shed", "deferred", "spilled", "direct"):
+                # P2: "direct"(无执行者假成功)不再算重放成功 — 修复前它被当终态,
+                # 实际任务从未执行, 死信形成假闭环。
+                if status in ("queued", "shed", "deferred", "spilled"):
                     replayed += 1
                     try:
                         from metrics import AUDIT_DEAD_LETTER_REPLAYED
@@ -124,13 +126,20 @@ async def replay_dead_letters(limit: int = 200) -> int:
         except Exception as e:
             note = f"error:{e}"[:180]
             logger.warning(f"[AuditDeadLetter] replay event#{row.event_id} failed: {e}")
-        # 无论结果如何都标记已处理(带 note), 避免每次启动都重扫同一批
+        # 只有“终态”才写 replayed_at：事件不存在/已分析，或重新提交成功。
+        # worker_not_started / overflow / rejected / direct / error 必须保留未重放状态，
+        # 否则下一次启动永远不会再试 —— 死信就真的死了。
+        terminal = note in ("event_missing", "already_analyzed") or note.startswith(
+            ("resubmit:queued", "resubmit:shed", "resubmit:deferred",
+             "resubmit:spilled")
+        )
         try:
             from models import async_session as _sf
             async with _sf() as s:
                 db_row = await s.get(AuditDeadLetter, row.id)
                 if db_row is not None:
-                    db_row.replayed_at = datetime.now(timezone.utc)
+                    if terminal:
+                        db_row.replayed_at = datetime.now(timezone.utc)
                     db_row.replay_note = note[:190]
                     db_row.replay_attempts = int(db_row.replay_attempts or 0) + 1
                     await s.commit()
@@ -138,8 +147,10 @@ async def replay_dead_letters(limit: int = 200) -> int:
             logger.warning(f"[AuditDeadLetter] mark replayed event#{row.event_id} failed: {e}")
 
     if rows:
+        # P2: 修复前两个值都打印 len(rows) — 实际成功数是 replayed,
+        # 误导运维判断死信积压是否清理。
         logger.warning(
-            "[AuditDeadLetter] replayed %d/%d dead letter(s) (resubmitted=%d)",
-            len(rows), len(rows), replayed,
+            "[AuditDeadLetter] replayed %d/%d dead letter(s)",
+            replayed, len(rows),
         )
     return replayed

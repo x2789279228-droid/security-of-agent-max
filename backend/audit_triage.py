@@ -79,6 +79,11 @@ def _fused_confidence(log_data: dict, anomaly_score: float) -> float:
     sigma_conf = 0.0
     for hit in (sigma.get("hits") or []):
         if isinstance(hit, dict):
+            # P0-2：待聚合命中不是结论（阈值证据尚未产生），
+            # 不参与融合置信度 —— 否则 SIG-001 单条 /login 的高置信度
+            # 会把优先级/处置门槛抬到"已确证攻击"档。
+            if hit.get("requires_aggregation"):
+                continue
             sigma_conf = max(
                 sigma_conf,
                 sigma_conf_map.get(str(hit.get("confidence") or "").lower(), 0.5),

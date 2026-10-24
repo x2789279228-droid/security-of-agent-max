@@ -60,6 +60,9 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Database migration failed — refusing to start: {e}")
             raise
+    # auto_migrate=False 时也要 fail-closed：旧数据卷缺新列不能带病启动。
+    from models import assert_schema_current
+    await assert_schema_current()
     await init_db()
     # 审批工单持久化: 注入 session 工厂并恢复上次进程未决的 PENDING 工单
     # (修复前审批队列是纯内存 dict, 重启即丢全部高危待办)
@@ -580,11 +583,15 @@ def _resolve_rate_limit_key(request: Request) -> str:
         if token:
             return f"key:{token[:32]}"
     # 3. X-Forwarded-For(取第一项 = 真实客户端 IP)
-    xff = request.headers.get("X-Forwarded-For", "").strip()
-    if xff:
-        first_ip = xff.split(",")[0].strip()
-        if first_ip:
-            return f"ip:{first_ip[:64]}"
+    # P1: XFF 是**客户端可伪造**的头 — 无条件信任时攻击者每次请求轮换 XFF
+    # 即可绕过全部限流(含 crit/strict 桶)。与 http_guards.client_ip 同一门槛:
+    # 仅在 trust_proxy=true(部署在可信反代后)时采用, 否则用直连地址。
+    if getattr(settings, "trust_proxy", False):
+        xff = request.headers.get("X-Forwarded-For", "").strip()
+        if xff:
+            first_ip = xff.split(",")[0].strip()
+            if first_ip:
+                return f"ip:{first_ip[:64]}"
     # 4. client.host
     return f"ip:{request.client.host if request.client else 'unknown'}"
 

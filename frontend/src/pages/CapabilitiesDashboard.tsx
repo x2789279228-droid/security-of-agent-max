@@ -74,7 +74,7 @@ export default function CapabilitiesDashboard() {
       </div>
 
       {error ? (
-        <p className="border border-alert/40 bg-alert/5 px-5 py-4 text-[12px] text-alert">
+        <p role="alert" className="border border-alert/40 bg-alert/5 px-5 py-4 text-[12px] text-alert">
           能力状态加载失败：{error}
         </p>
       ) : loading ? (
@@ -152,7 +152,7 @@ export default function CapabilitiesDashboard() {
         </div>
       )}
 
-      {!loading && caps.length === 0 && (
+      {!error && !loading && caps.length === 0 && (
         <p className="border-t border-line py-12 text-[13px] text-ink-faint">
           暂无能力状态数据（调用 <span className="font-mono">/api/capabilities/status</span>）。
         </p>

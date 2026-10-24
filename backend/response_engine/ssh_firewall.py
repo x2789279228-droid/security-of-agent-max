@@ -32,8 +32,8 @@ import hashlib
 import ipaddress
 import logging
 import os
-import random
 import re
+import secrets
 import time
 from datetime import datetime
 from typing import Optional
@@ -55,6 +55,35 @@ FAMILY_IPV6 = "ipv6"
 
 # 未撤销状态集合(block=active, isolate=isolated); get_active_rules 按此过滤
 _ACTIVE_STATUSES = ("active", "isolated", "applied")
+
+
+def _new_rule_seq() -> str:
+    """10 位随机规则序号(secrets)。
+
+    修复前 random.randint(10000,99999): 约 300 条规则即有 50% 概率碰撞,
+    rule_id 撞车会让 TTL/回滚定位到错误规则。
+    """
+    return f"{secrets.randbelow(10 ** 10):010d}"
+
+
+def _parse_rule_line(line: str) -> tuple[str, str, str]:
+    """解析 `iptables -L <chain> -n --line-numbers` 的一行规则。
+
+    返回 (comment, src, dst); 不匹配规则行(表头/空行)返回 ("", "", "")。
+    列序: num target prot opt(--) source destination [/* comment */]
+    """
+    parts = line.strip().split()
+    if len(parts) < 6 or not parts[0].isdigit():
+        return "", "", ""
+    try:
+        sep = parts.index("--", 1)
+    except ValueError:
+        return "", "", ""
+    src = parts[sep + 1] if len(parts) > sep + 1 else ""
+    dst = parts[sep + 2] if len(parts) > sep + 2 else ""
+    m = re.search(r"/\*\s*([A-Za-z0-9_\-]+)\s*\*/", line)
+    comment = m.group(1) if m else ""
+    return comment, src, dst
 
 # 域名强校验: 字母/数字/连字符/点, ≤253, 无路径无空格 — sinkhole 拼命令前必须通过
 _DOMAIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,251}[A-Za-z0-9])?$")
@@ -171,6 +200,14 @@ class SshFirewallAdapter:
     def _connect_once(self) -> str:
         if not HAS_PARAMIKO:
             raise RuntimeError("paramiko 未安装")
+        # P2: 重连前先关旧连接, 否则旧 socket 泄漏(每次重连丢一个 fd)
+        if self._client is not None:
+            try:
+                self._client.close()
+            except Exception:
+                pass
+            self._client = None
+            self._connected = False
         cfg = self._config
         client = paramiko.SSHClient()
         # 主机密钥校验：默认失败关闭。
@@ -272,17 +309,27 @@ class SshFirewallAdapter:
                 raise RuntimeError(f"命令白名单拒绝: {reason} (命令: {cmd[:100]})")
 
         t = timeout or self._config["exec_timeout"]
-        # 最小权限: 仅 iptables/ip6tables 命令加 sudo，nmap/诊断命令不加
+        # 最小权限: 仅 iptables/ip6tables 命令加 sudo，nmap/诊断命令不加。
+        # `-n`(非交互): sudo 需要密码时立即失败, 而不是挂到 exec 超时。
         if self._config["use_sudo"] and not cmd.startswith("sudo"):
             if (cmd.startswith("iptables") or cmd.startswith("iptables ")
                     or cmd.startswith("ip6tables") or cmd.startswith("ip6tables ")):
-                cmd = f"sudo {cmd}"
+                cmd = f"sudo -n {cmd}"
         stdin, stdout, stderr = self._client.exec_command(cmd, timeout=t)  # nosec B601
         out = stdout.read().decode("utf-8", errors="ignore")
         err = stderr.read().decode("utf-8", errors="ignore")
         rc = stdout.channel.recv_exit_status()
-        if rc != 0 and err.strip() and "password for" not in err.lower():
-            raise RuntimeError(f"命令执行失败 rc={rc}: {err.strip()}\n命令: {cmd}")
+        # P0-3: 以退出码为准。修复前仅 `rc!=0 且 stderr 非空` 才抛错 —
+        # stderr 为空的失败(如 iptables 规则未写入)被当成功上报, 主结果失真;
+        # sudo 密码提示也被 `"password for" not in err` 误判为成功。
+        if rc != 0:
+            if "password" in err.lower():
+                raise RuntimeError(
+                    f"sudo 需要交互密码(已按非交互 -n 执行) rc={rc}: {err.strip()[:200]}\n命令: {cmd}"
+                )
+            raise RuntimeError(
+                f"命令执行失败 rc={rc}: {err.strip()[:500] or '(stderr 为空)'}\n命令: {cmd}"
+            )
         return out
 
     # ── 防火墙 API ──
@@ -327,7 +374,7 @@ class SshFirewallAdapter:
         rule_id = str(rule_id or "").strip()
         if rule_id and not re.fullmatch(r"FW-RULE-[0-9]{5,12}", rule_id):
             return {"status": "error", "message": f"非法 rule_id: {rule_id}"}
-        rule_id = rule_id or f"FW-RULE-{random.randint(10000, 99999)}"
+        rule_id = rule_id or f"FW-RULE-{_new_rule_seq()}"
         table = _table_for(family)
         cmd = f"{table} -I INPUT -s {norm_ip} -j DROP -m comment --comment '{rule_id}'"
         try:
@@ -395,7 +442,7 @@ class SshFirewallAdapter:
         isolation_id = str(isolation_id or "").strip()
         if isolation_id and not re.fullmatch(r"EDR-ISO-[0-9]{5,12}", isolation_id):
             return {"status": "error", "message": f"非法 isolation_id: {isolation_id}"}
-        isolation_id = isolation_id or f"EDR-ISO-{random.randint(10000, 99999)}"
+        isolation_id = isolation_id or f"EDR-ISO-{_new_rule_seq()}"
         ok_families: set[str] = set()  # INPUT+OUTPUT 全部写成功的族
         written = 0                    # 成功写入的规则条数
         commands: list[str] = []
@@ -471,6 +518,43 @@ class SshFirewallAdapter:
             "message": f"nmap 扫描完成，发现 {len(open_ports)} 个开放端口",
         }
 
+    _ALREADY_GONE_MARKERS = ("does a matching rule exist", "bad rule")
+
+    def _delete_rule(self, table: str, chain: str, comment: str,
+                     src: str = "", dst: str = "") -> tuple[bool, bool]:
+        """按匹配(而非行号)删除一条规则, 返回 (deleted, already_gone)。
+
+        P1: 旧实现先列表取行号再 `-D chain <行号>`, 两次 SSH 往返之间若有并发
+        插入/删除, 行号偏移会删掉**别人的**规则。按完整匹配(-s/-d + comment)删除
+        由 iptables 原子完成, 与并发变更无关。
+        首选带 IP 的完整匹配(白名单 LX-006/LX-012); 解析失败时退化为纯 comment 匹配
+        (LX-006/LX-012 扩展分支)。规则已被并发删除时按幂等处理(already_gone)。
+        """
+        comment = comment.replace("'", "")
+        if (table, chain) == ("iptables", "INPUT") and re.fullmatch(
+                r"\d{1,3}(\.\d{1,3}){3}", src or ""):
+            spec = f"-s {src} -j DROP -m comment --comment '{comment}'"
+        elif (table, chain) == ("iptables", "OUTPUT") and re.fullmatch(
+                r"\d{1,3}(\.\d{1,3}){3}", dst or ""):
+            spec = f"-d {dst} -j DROP -m comment --comment '{comment}'"
+        elif (table, chain) == ("ip6tables", "INPUT") and re.fullmatch(
+                r"[0-9a-fA-F:]+", src or ""):
+            spec = f"-s {src} -j DROP -m comment --comment '{comment}'"
+        elif (table, chain) == ("ip6tables", "OUTPUT") and re.fullmatch(
+                r"[0-9a-fA-F:]+", dst or ""):
+            spec = f"-d {dst} -j DROP -m comment --comment '{comment}'"
+        else:
+            spec = f"-m comment --comment '{comment}'"
+        try:
+            self._exec(f"{table} -D {chain} {spec}")
+            return True, False
+        except Exception as e:
+            msg = str(e).lower()
+            if any(k in msg for k in self._ALREADY_GONE_MARKERS):
+                # 列表到删除之间被并发移除 → 幂等, 不算失败
+                return False, True
+            raise
+
     def rollback(self, rule_id: str) -> dict:
         """按 rule_id 回滚 — 扫描 iptables+ip6tables × INPUT+OUTPUT, 删除全部匹配注释行。
 
@@ -479,26 +563,32 @@ class SshFirewallAdapter:
         """
         deleted = 0
         deleted_chains: list[str] = []
+        queries_ok = 0
+        query_errors: list[str] = []
+        delete_errors: list[str] = []
         for table in ("iptables", "ip6tables"):
             for chain in ("INPUT", "OUTPUT"):
                 try:
                     out = self._exec(f"{table} -L {chain} -n --line-numbers")
-                except Exception:
+                    queries_ok += 1
+                except Exception as e:
+                    query_errors.append(f"{table}:{chain}: {e}")
                     continue  # 表/链不可用(如未装 ip6tables) → 跳过该族
-                line_nums: list[int] = []
+                matched = 0
                 for line in out.splitlines():
-                    if rule_id in line:
-                        parts = line.strip().split()
-                        if parts and parts[0].isdigit():
-                            line_nums.append(int(parts[0]))
-                # 同一链内从后往前删, 避免行号偏移
-                for ln in reversed(sorted(line_nums)):
+                    comment, src, dst = _parse_rule_line(line)
+                    if comment != rule_id:
+                        continue
+                    matched += 1
                     try:
-                        self._exec(f"{table} -D {chain} {ln}")
-                        deleted += 1
-                    except Exception:
-                        pass
-                if line_nums:
+                        ok, already_gone = self._delete_rule(table, chain, comment, src, dst)
+                        if ok:
+                            deleted += 1
+                        elif already_gone:
+                            matched -= 1  # 并发已删, 不计入也不报错
+                    except Exception as e:
+                        delete_errors.append(f"{table}:{chain} [{comment}]: {e}")
+                if matched > 0:
                     deleted_chains.append(f"{table}:{chain}")
         if deleted:
             if rule_id in self._active_rules:
@@ -508,39 +598,58 @@ class SshFirewallAdapter:
                     "deleted_chains": deleted_chains,
                     "idempotent": False,
                     "message": f"规则 {rule_id} 已回滚(删除 {deleted} 条)"}
-        # 幂等语义: 规则不存在 = 已回滚过(或从未写入), 是成功而非失败,
-        # 重复回滚/自动解封竞态下调用方可安全重试。
+        # 没删到任何行 ≠ 回滚成功。必须区分三种情况：
+        #   ① 查询成功、规则确实不存在 → 幂等成功；
+        #   ② 查询成功、但删除失败 → 失败（规则仍在）；
+        #   ③ 所有查询都失败（SSH 断/权限）→ 失败（无法确认）。
+        if delete_errors:
+            return {"status": "error", "rule_id": rule_id, "deleted": 0,
+                    "deleted_chains": deleted_chains,
+                    "errors": delete_errors[:5],
+                    "message": f"规则 {rule_id} 删除失败，仍可能存在"}
+        if queries_ok == 0:
+            return {"status": "error", "rule_id": rule_id, "deleted": 0,
+                    "deleted_chains": [],
+                    "errors": query_errors[:5],
+                    "message": f"无法查询 iptables/ip6tables，规则 {rule_id} 状态未知"}
+        if rule_id in self._active_rules:
+            self._active_rules[rule_id]["status"] = "revoked"
         return {"status": "success", "rule_id": rule_id, "deleted": 0,
                 "deleted_chains": [], "idempotent": True,
                 "message": f"规则 {rule_id} 已回滚(无可删除项, 幂等)"}
 
     def rollback_all(self) -> dict:
-        """回滚所有本演示期间写入的规则 — 双族扫描(iptables + ip6tables) × INPUT/OUTPUT"""
+        """回滚所有本演示期间写入的规则 — 双族扫描(iptables + ip6tables) × INPUT/OUTPUT
+
+        P1: 与 rollback 相同, 按匹配删除而非行号, 避免并发下删错规则。
+        """
         count = 0
+        errors: list[str] = []
         for table in ("iptables", "ip6tables"):
             for chain in ("INPUT", "OUTPUT"):
                 try:
                     out = self._exec(f"{table} -L {chain} -n --line-numbers")
                 except Exception:
                     continue
-                lines_to_delete = []
-                for line in out.splitlines()[2:]:
-                    if "FW-RULE-" in line or "EDR-ISO-" in line:
-                        parts = line.strip().split()
-                        if parts and parts[0].isdigit():
-                            lines_to_delete.append(parts[0])
-                # 从后往前删（避免行号偏移）
-                for ln in reversed(lines_to_delete):
+                for line in out.splitlines():
+                    comment, src, dst = _parse_rule_line(line)
+                    if not (comment.startswith("FW-RULE-") or comment.startswith("EDR-ISO-")):
+                        continue
                     try:
-                        self._exec(f"{table} -D {chain} {ln}")
-                        count += 1
-                    except Exception:
-                        pass
+                        ok, already_gone = self._delete_rule(table, chain, comment, src, dst)
+                        if ok:
+                            count += 1
+                        elif already_gone:
+                            count += 1  # 幂等: 视同已清理
+                    except Exception as e:
+                        errors.append(f"{table}:{chain} [{comment}]: {e}")
         for rid in list(self._active_rules):
             self._active_rules[rid]["status"] = "revoked"
         logger.info(f"[Firewall] Rolled back {count} rules")
         result = {"status": "ok", "rolled_back": count,
                   "message": f"已回滚 {count} 条规则"}
+        if errors:
+            result["errors"] = errors[:5]
         if count == 0:
             result["idempotent"] = True  # 无规则可清理 = 重复调用, 幂等成功
         return result
@@ -550,7 +659,7 @@ class SshFirewallAdapter:
     def _sudo(self, cmd: str) -> str:
         """给非 iptables 管理命令按配置加 sudo(_exec 只自动处理 iptables/ip6tables)。"""
         if self._config.get("use_sudo") and not cmd.startswith("sudo"):
-            return f"sudo {cmd}"
+            return f"sudo -n {cmd}"
         return cmd
 
     def sinkhole_domain(self, domain: str, ipv4: Optional[str] = None,
@@ -721,6 +830,38 @@ class SshFirewallAdapter:
             for rid, info in self._active_rules.items()
             if info.get("status") in _ACTIVE_STATUSES
         ]
+
+    async def get_active_rules_async(self) -> list[dict]:
+        """内存台账 + Redis TTL 索引合并视图。
+
+        P1: 台账纯内存, 进程重启后远端 iptables 规则仍在但平台找不到也解不了
+        (成孤儿规则)。TTL 索引(soc:ttl:*)是持久的 — 合并后 unblock/restore/
+        运维视图在重启后仍能看到并回滚这些规则。内存记录优先。
+        """
+        rules = self.get_active_rules()
+        seen = {r.get("rule_id") for r in rules}
+        try:
+            from .ttl_manager import ttl_manager
+            ttl_entries = await ttl_manager.list_active()
+        except Exception as e:
+            logger.debug("TTL index merge skipped: %s", e)
+            ttl_entries = []
+        for item in ttl_entries:
+            rid = str(item.get("rule_id") or "")
+            if not rid or rid in seen:
+                continue
+            params = item.get("params") or {}
+            rules.append({
+                "rule_id": rid,
+                "ip": params.get("src_ip", ""),
+                "host": params.get("host_ip", ""),
+                "status": "active" if item.get("action_name") == "block_ip" else "isolated",
+                "action_name": item.get("action_name", ""),
+                "expires_at": item.get("expires_at", 0),
+                "source": "ttl_index",
+            })
+            seen.add(rid)
+        return rules
 
     # ── 异步包装器（避免阻塞事件循环） ──
 

@@ -72,11 +72,21 @@ jobs:
         working-directory: .
         env:
           BASE_REF: ${{ github.base_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          BASE="HEAD"
-          if [ -n "$BASE_REF" ] && git rev-parse --verify "origin/$BASE_REF" >/dev/null 2>&1; then
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if ! git rev-parse --verify "origin/$BASE_REF" >/dev/null 2>&1; then
+              echo "::error::PR 基线分支 origin/$BASE_REF 不可用 —— 拒绝用 HEAD 自比"
+              exit 1
+            fi
             BASE=$(git merge-base HEAD "origin/$BASE_REF")
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            BASE="$BEFORE_SHA"
+          else
+            echo "::error::无法确定断言门禁基线（缺少 before SHA）"
+            exit 1
           fi
           echo "断言弱化门禁基线：$BASE"
           python tools/assert-no-assert-weakening.py --base "$BASE"
@@ -197,6 +207,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install backend deps
+        # export_openapi.py 会 import app，必须装齐 FastAPI/Pydantic/SQLAlchemy；
+        # 此前该 job 缺这一步，在干净 runner 上会在导出前就 ModuleNotFoundError。
+        run: pip install -r backend/requirements.lock
       - name: Export OpenAPI schema
         run: python backend/tools/export_openapi.py
       - name: Generate TS types
@@ -455,7 +469,9 @@ jobs:
           r = c.get("/api/health")
           assert r.status_code == 200, f"health {r.status_code}: {r.text[:200]}"
           r = c.post("/api/auth/login", json={"username":"admin","password":"ci-admin"})
-          assert r.status_code in (200, 401), f"login {r.status_code}"
+          assert r.status_code == 200, f"login {r.status_code}: {r.text[:200]}"
+          bad = c.post("/api/auth/login", json={"username":"admin","password":"wrong"})
+          assert bad.status_code == 401, f"bad login {bad.status_code}"
           r = c.get("/metrics")
           assert r.status_code == 200, f"metrics {r.status_code}"
           print("[smoke] /api/health /api/auth/login /metrics OK")
@@ -493,8 +509,10 @@ jobs:
       - name: Git 历史私钥扫描
         run: |
           set -euo pipefail
-          if git log --all -p 2>/dev/null | grep -nE 'BEGIN (OPENSSH |RSA |EC |DSA )?PRIVATE KEY' | head -20; then
-            echo "::error::Git 历史中检出私钥内容 —— 视为已泄露，请轮换并清理历史"
+          # 不要用 head：pipefail 下 grep 会因 SIGPIPE(141) 让 if 误判为“没找到”。
+          HITS=$(git log --all -p 2>/dev/null | grep -cE 'BEGIN (OPENSSH |RSA |EC |DSA )?PRIVATE KEY' || true)
+          if [ "${HITS:-0}" -gt 0 ]; then
+            echo "::error::Git 历史中检出 ${HITS} 处私钥内容 —— 视为已泄露，请轮换并清理历史"
             exit 1
           fi
           echo "[leak-gate] Git 历史中未检出私钥"

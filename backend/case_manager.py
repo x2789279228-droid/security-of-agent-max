@@ -170,6 +170,7 @@ def session_dialect_name(session: Optional[AsyncSession] = None) -> str:
 
 
 _LOCAL_SESSION_LOCKS: dict[tuple, asyncio.Lock] = {}
+_LOCAL_SESSION_LOCKS_MAX = 4096
 
 
 def _local_session_lock(session_id: str) -> asyncio.Lock:
@@ -178,6 +179,11 @@ def _local_session_lock(session_id: str) -> asyncio.Lock:
     key = (id(loop), session_id)
     lock = _LOCAL_SESSION_LOCKS.get(key)
     if lock is None:
+        # P2: 按 session_id 无限增长 → 长期运行下每个演示会话泄漏一把 Lock。
+        # 超上限时回收当前未被持有的锁。
+        if len(_LOCAL_SESSION_LOCKS) >= _LOCAL_SESSION_LOCKS_MAX:
+            for k in [k for k, v in _LOCAL_SESSION_LOCKS.items() if not v.locked()]:
+                _LOCAL_SESSION_LOCKS.pop(k, None)
         lock = _LOCAL_SESSION_LOCKS.setdefault(key, asyncio.Lock())
     return lock
 
@@ -960,7 +966,9 @@ class CaseManager:
         has_pend = await self.has_pending_approval(session, case)
         deadline = _aware(case.sla_deadline)
         stale = bool(deadline and deadline < now)
-        if has_pend and not has_resp and not stale:
+        # P2: 有待审工单一律不自动关闭 — 修复前 stale(SLA 过期)分支会无视
+        # pending 审批直接 resolve 并把 disposition 工单批量标 completed(假闭环)。
+        if has_pend:
             return {"resolved": False, "reason": "pending_approval"}
         if not has_resp and not stale:
             return {"resolved": False, "reason": "no_auto_response"}

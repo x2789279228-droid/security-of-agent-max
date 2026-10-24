@@ -272,6 +272,11 @@ class SSHTransport:
 
         except asyncio.TimeoutError:
             proc.kill()
+            try:
+                # P2: kill 后不 wait 会留下僵尸进程/未回收的管道
+                await proc.wait()
+            except Exception:
+                pass
             elapsed = time.time() - start
             logger.warning(f"SSH TIMEOUT after {elapsed:.1f}s: {command[:80]}")
             return {
@@ -302,7 +307,8 @@ class SSHTransport:
         """
         在远程主机上执行一段 PowerShell 脚本
 
-        将脚本写入远程临时文件后执行，适合较长脚本。
+        脚本以 Base64(UTF-16LE) 编码后经 -EncodedCommand 直接执行
+        (不写远程临时文件), 适合较长脚本。
         """
         # 用 Base64 编码直接传递
         return await self.run(script_content, timeout=timeout, powershell=True)

@@ -53,16 +53,27 @@ async def test_lock_mutual_exclusion_and_ttl():
 
 
 @pytest.mark.asyncio
-async def test_lock_unavailable_redis_returns_none():
-    from distributed_lock import try_acquire
-    # client=None 且 sliding_window 无 Redis → None(未知), 调用方决定策略
-    res = await try_acquire("k-none", ttl_s=5, client=None)
-    assert res is None or res is True  # 本机可能有真实 Redis; None=fail-open 语义
+async def test_lock_unavailable_redis_returns_none(monkeypatch):
+    import distributed_lock
+
+    async def _none():
+        return None
+
+    monkeypatch.setattr(distributed_lock, "_default_client", _none)
+    res = await distributed_lock.try_acquire("k-none", ttl_s=5, client=None)
+    assert res is None, "Redis 不可用必须返回 None(未知)，不能伪装成已加锁"
 
 
-def test_lock_release_best_effort():
-    from distributed_lock import release
-    asyncio.new_event_loop().run_until_complete(release("nope", client=None))
+@pytest.mark.asyncio
+async def test_lock_release_does_not_delete_another_owners_lock():
+    from distributed_lock import release, _TOKEN
+    c = _FakeRedis()
+    c.store["k"] = "someone-else"
+    await release("k", client=c)
+    assert c.store.get("k") == "someone-else"
+    c.store["k"] = _TOKEN
+    await release("k", client=c)
+    assert "k" not in c.store
 
 
 # ── safe_executor fail-closed ──
@@ -217,7 +228,7 @@ async def test_dead_letter_replay_resubmits_unanalyzed_event():
         await s.commit()
     await record(1, "payload_missing")
 
-    # worker 未启动 → 不重提但标记已处理(不无限重扫)
+    # worker 未启动 → 不重提，但**不能**标记已处理：keep for next startup
     from audit_worker import audit_worker
     started = audit_worker._started
     audit_worker._started = False
@@ -227,8 +238,9 @@ async def test_dead_letter_replay_resubmits_unanalyzed_event():
         async with models.async_session() as s:
             from sqlalchemy import select
             row = (await s.execute(select(AuditDeadLetter))).scalars().one()
-            assert row.replayed_at is not None
+            assert row.replayed_at is None, "worker 未启动不得把死信标记为已重放"
             assert row.replay_note == "worker_not_started"
+            assert row.replay_attempts == 1
     finally:
         audit_worker._started = started
 

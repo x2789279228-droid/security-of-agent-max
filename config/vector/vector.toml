@@ -1,0 +1,104 @@
+# ═══ Vector 边缘代理 — 采集缓冲与契约映射 (生产化第二批) ═══
+#
+# 缺口对应: 采集边缘 (无 agent/collector, 无 disk buffer)
+# 职责:
+#   外部日志源 → HTTP(8686, JSON lines/dict) → VRL 字段白名单+盖章
+#   → Kafka(security-events-ingest), 与 backend HTTP 网关的 wrapper 契约同构
+#   (见 backend/schemas/ingest_wrapper.schema.json)
+#
+# 核心卖点: **磁盘缓冲** —— Kafka 全停期间事件落盘 (buffer.type=disk),
+# 集群恢复后自动排干, 全链路零丢失。演示: demo/vector-buffer-demo.sh
+#
+# 启用: .env 的 COMPOSE_PROFILES 加 edge (如 full,edge) → docker compose up -d vector
+# 外部源接入: POST http://<host>:8686  body={"message": "...", "severity": "low", "event": "..."}
+
+data_dir = "/var/lib/vector"
+
+# ── 接入源: HTTP (演示/外部采集器统一入口) ──
+[sources.http_in]
+type = "http"
+address = "0.0.0.0:8686"
+decoding.codec = "json"
+
+# ── VRL: 字段白名单 + 网关盖章 ──
+# 产出与 routers/logs._enqueue_ingest 同构的 wrapper:
+#   {uuid, eventId, correlationId, type, session_id, source_id, _ts, body}
+# body.eventId 必填 (ingest_wrapper.schema.json 的幂等键约束)。
+# 白名单只放行已知字段 —— 边缘不做透传, 防未知字段随流进入平台。
+[transforms.to_wrapper]
+type = "remap"
+source = '''
+  eid = uuid_v4()
+  evt = to_string(.event) ?? to_string(.eventType) ?? "UNKNOWN"
+  sev = downcase(to_string(.severity) ?? "info")
+  msg = to_string(.message) ?? ""
+  src = to_string(.srcIp) ?? to_string(.src_ip) ?? ""
+  dst = to_string(.dstIp) ?? to_string(.dst_ip) ?? ""
+  proto = to_string(.protocol) ?? ""
+  conf = to_float(.confidence) ?? 0.0
+  ts_ms = to_int(.timestamp) ?? to_unix_timestamp(now())
+  body = {
+    "eventId": eid,
+    "eventType": upcase(evt),
+    "severity": sev,
+    "message": msg,
+    "srcIp": src,
+    "dstIp": dst,
+    "protocol": proto,
+    "confidence": conf,
+    "timestamp": ts_ms,
+  }
+  . = {
+    "uuid": eid,
+    "eventId": eid,
+    "correlationId": eid,
+    "type": "security_event",
+    "session_id": "vector-edge",
+    "source_id": "vector-edge",
+    "_ts": unix_timestamp(),
+    "body": body,
+  }
+'''
+
+# ── Kafka 出口: security-events-ingest ──
+# 安全开关经 compose env 注入 (.env: VECTOR_KAFKA_TLS / VECTOR_KAFKA_SASL),
+# 与 backend/Flink 的 KAFKA_SECURITY_PROTOCOL=SASL_SSL 同步切换。
+[sinks.kafka_out]
+type = "kafka"
+inputs = ["to_wrapper"]
+bootstrap_servers = "${KAFKA_BOOTSTRAP_SERVERS-kafka-1:9092,kafka-2:9092,kafka-3:9092}"
+key_field = "uuid"
+topic = "security-events-ingest"
+compression = "zstd"
+# ── 核心卖点: 磁盘缓冲 —— Kafka 全停时事件落盘, 恢复后自动排干 ──
+# 256MB 上限 + 满时背压(阻塞 HTTP 接入), 演示/笔记本预算内可调
+buffer.type = "disk"
+buffer.max_size = 268435456
+buffer.when_full = "block"
+batch.max_bytes = 1048576
+batch.timeout_secs = 1
+# 退避上限 60s: 集群恢复后 1 分钟内开始排干
+retry_max_duration_secs = 60
+
+[sinks.kafka_out.encoding]
+codec = "json"
+
+[sinks.kafka_out.tls]
+enabled = ${VECTOR_KAFKA_TLS-false}
+ca_file = "/etc/kafka/secrets/ca-cert.pem"
+
+[sinks.kafka_out.sasl]
+enabled = ${VECTOR_KAFKA_SASL-false}
+mechanism = "SCRAM-SHA-512"
+username = "${KAFKA_APP_USER-soc-app}"
+password = "${KAFKA_APP_PASSWORD-}"
+
+# ── 内部指标 (可选): Prometheus 抓取 vector:8687/metrics 可后续接入 soc-kafka 面板 ──
+[sources.internal_metrics]
+type = "internal_metrics"
+format = "prometheus"
+
+[sinks.prom_exporter]
+type = "prometheus_exporter"
+inputs = ["internal_metrics"]
+address = "0.0.0.0:8687"

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 
 from config import settings
 from field_cipher import FieldCipherRejected, field_cipher
@@ -331,55 +332,67 @@ async def persist_dlq_failure(
         from models import DlqRecord, async_session
 
         async with async_session() as session:
-            found = (await session.execute(
-                select(DlqRecord).where(
-                    DlqRecord.original_topic == (topic or "")[:200],
-                    DlqRecord.original_partition == part,
-                    DlqRecord.original_offset == off,
-                )
-            )).scalar_one_or_none()
-            if found is None:
-                row = DlqRecord(
-                    event_id=eid,
-                    original_topic=(topic or "")[:200],
-                    original_partition=part,
-                    original_offset=off,
-                    consumer_group=group,
-                    attempt_count=attempts,
-                    first_failed_at=now,
-                    last_failed_at=now,
-                    error_class=klass,
-                    error_code=code,
-                    sanitized_error=cleaned,
-                    message_schema_version=schema_ver,
-                    envelope_version=DLQ_ENVELOPE_VERSION,
-                    message_timestamp=msg_time,
-                    payload_ciphertext=sealed,
-                    payload_sha256=digest,
-                    payload_complete=complete,
-                    trace_id=tid,
-                    kafka_dlq_acked=False,
-                    replay_status="pending",
-                    created_at=now,
-                )
-                session.add(row)
-            else:
-                row = found
-                row.event_id = eid or row.event_id
-                row.consumer_group = group or row.consumer_group
-                row.attempt_count = max(int(row.attempt_count or 0) + 1, attempts)
-                row.last_failed_at = now
-                row.error_class = klass
-                row.error_code = code
-                row.sanitized_error = cleaned
-                row.message_schema_version = schema_ver or row.message_schema_version
-                row.message_timestamp = msg_time or row.message_timestamp
-                row.payload_ciphertext = sealed
-                row.payload_sha256 = digest
-                row.payload_complete = complete
-                row.trace_id = tid or row.trace_id
-                row.kafka_dlq_acked = False
-            await session.commit()
+            # P2: SELECT-then-INSERT 有并发窗口 — 两进程对同一 (topic,partition,offset)
+            # 同时写失败时, 输家撞唯一约束。修复前 IntegrityError 直接外抛 →
+            # persisted=False → offset 无谓保留一整轮; 现重试一次走 UPDATE 分支
+            # (等价 upsert, 且兼容 SQLite 测试环境, 不用 PG 方言的 ON CONFLICT)。
+            for _attempt in range(2):
+                found = (await session.execute(
+                    select(DlqRecord).where(
+                        DlqRecord.original_topic == (topic or "")[:200],
+                        DlqRecord.original_partition == part,
+                        DlqRecord.original_offset == off,
+                    )
+                )).scalar_one_or_none()
+                if found is None:
+                    row = DlqRecord(
+                        event_id=eid,
+                        original_topic=(topic or "")[:200],
+                        original_partition=part,
+                        original_offset=off,
+                        consumer_group=group,
+                        attempt_count=attempts,
+                        first_failed_at=now,
+                        last_failed_at=now,
+                        error_class=klass,
+                        error_code=code,
+                        sanitized_error=cleaned,
+                        message_schema_version=schema_ver,
+                        envelope_version=DLQ_ENVELOPE_VERSION,
+                        message_timestamp=msg_time,
+                        payload_ciphertext=sealed,
+                        payload_sha256=digest,
+                        payload_complete=complete,
+                        trace_id=tid,
+                        kafka_dlq_acked=False,
+                        replay_status="pending",
+                        created_at=now,
+                    )
+                    session.add(row)
+                else:
+                    row = found
+                    row.event_id = eid or row.event_id
+                    row.consumer_group = group or row.consumer_group
+                    row.attempt_count = max(int(row.attempt_count or 0) + 1, attempts)
+                    row.last_failed_at = now
+                    row.error_class = klass
+                    row.error_code = code
+                    row.sanitized_error = cleaned
+                    row.message_schema_version = schema_ver or row.message_schema_version
+                    row.message_timestamp = msg_time or row.message_timestamp
+                    row.payload_ciphertext = sealed
+                    row.payload_sha256 = digest
+                    row.payload_complete = complete
+                    row.trace_id = tid or row.trace_id
+                    row.kafka_dlq_acked = False
+                try:
+                    await session.commit()
+                    break
+                except IntegrityError:
+                    await session.rollback()
+                    if _attempt == 0:
+                        continue  # 并发同键插入竞速输了 → 第二轮 SELECT 命中走 UPDATE
+                    raise
             await session.refresh(row)
             try:
                 from core_metrics import log_process, record_dlq_persisted
@@ -650,15 +663,17 @@ async def purge_expired(session=None) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     async def _run(active) -> int:
+        from sqlalchemy import delete as sa_delete
+
         from models import DlqRecord
 
-        rows = (await active.execute(
-            select(DlqRecord).where(DlqRecord.last_failed_at < cutoff)
-        )).scalars().all()
-        for row in rows:
-            await active.delete(row)
+        # P2: 修复前逐行 `await active.delete(row)` — N+1 删除且整批先进内存,
+        # 保留期到期的大批清理会长时间阻塞事件循环。一条 DELETE 批量完成。
+        result = await active.execute(
+            sa_delete(DlqRecord).where(DlqRecord.last_failed_at < cutoff)
+        )
         await active.commit()
-        return len(rows)
+        return int(result.rowcount or 0)
 
     if session is not None:
         return await _run(session)

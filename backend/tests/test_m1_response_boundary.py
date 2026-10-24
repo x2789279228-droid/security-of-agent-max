@@ -223,6 +223,97 @@ async def test_isolate_host_and_dns_sinkhole_have_safe_executor_audit(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_in_progress_idempotency_does_not_double_execute(monkeypatch):
+    from response_engine.safe_executor import SafeExecutor
+
+    class _LockRedis:
+        async def set(self, key, value, nx=False, ex=None):
+            if nx:
+                return False  # 已被另一个执行者占住
+            return True
+
+        async def get(self, key):
+            return "in_progress"
+
+        async def exists(self, key):
+            return 1
+
+    se = SafeExecutor()
+    se._redis = _LockRedis()
+    result = await se.execute(
+        action_name="block_ip",
+        command="iptables -I INPUT -s 10.0.0.9 -j DROP -m comment --comment 'FW-RULE-99999'",
+        params={"src_ip": "10.0.0.9"},
+        platform="linux",
+        live_fn=lambda cmd: (_ for _ in ()).throw(AssertionError("must not execute")),
+        mode_override="live",
+    )
+    assert result["mode"] == "in_progress", result
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_clear_idempotency_for_target_scans_prefix():
+    from response_engine.safe_executor import SafeExecutor
+
+    class _ScanRedis:
+        def __init__(self):
+            self.deleted = []
+
+        async def scan_iter(self, match=None):
+            assert match == "soc:idem:block_ip:10.0.0.9:*"
+            yield "soc:idem:block_ip:10.0.0.9:60"
+
+        async def delete(self, key):
+            self.deleted.append(key)
+            return 1
+
+    se = SafeExecutor()
+    se._redis = _ScanRedis()
+    assert await se.clear_idempotency_for_target("block_ip", "10.0.0.9") == 1
+    assert se._redis.deleted == ["soc:idem:block_ip:10.0.0.9:60"]
+
+
+def test_error_text_redacts_url_secrets():
+    from response_engine.response_executor import redact_text_for_log
+
+    text = "POST https://hooks.example.com/notify?token=SECRET123 failed"
+    out = redact_text_for_log(text)
+    assert "SECRET123" not in out, out
+    assert "hooks.example.com" in out
+
+
+@pytest.mark.asyncio
+async def test_preview_never_executes_side_effects(monkeypatch):
+    """预览必须对所有动作生效，不能只覆盖 block/isolate/sinkhole。"""
+    from response_engine.preview import preview_actions
+    from response_engine import ssh_firewall as fw_mod
+
+    fake = _FakeFirewall()
+    monkeypatch.setattr(fw_mod, "ssh_firewall", fake)
+    called = []
+
+    async def _boom(*a, **k):
+        called.append(1)
+        raise AssertionError("webhook called during preview")
+
+    monkeypatch.setattr(rr, "_send_webhook", _boom)
+    actions = [
+        {"name": "kill_session", "params": {"session_id": "sess-1", "user": "u"}},
+        {"name": "rate_limit", "params": {"src_ip": "10.0.0.5"}},
+        {"name": "send_alert", "params": {
+            "title": "t", "message": "m", "webhook_url": "http://example.com/hook",
+        }},
+    ]
+    out = await preview_actions(actions)
+    assert all(x["success"] for x in out), out
+    assert called == [], "预览触发了真实 webhook"
+    assert fake.block_calls == [] and fake.isolate_calls == []
+    for item in out:
+        assert item["preview"].get("mode") == "dry_run", item
+
+
+@pytest.mark.asyncio
 async def test_low_grounding_score_blocks_before_execution(monkeypatch):
     from response_engine import ssh_firewall as fw_mod
     from response_engine.safe_executor import safe_executor as se

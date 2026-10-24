@@ -103,16 +103,21 @@ class AuditPriorityQueue:
                 "priority": int(priority),
                 "tier": tier,
                 "enqueued_at_ms": now_ms,
+                "ttl_s": max(60, int(ttl_s)),
                 "retry_count": int((log_data or {}).get("_pq_retry") or 0),
             }
             pipe = self._redis.pipeline()
+            # payload TTL = 4×业务 TTL: 只是**安全网**(防消费者整体死亡后无限堆积);
+            # 真正的过期语义在 pop 侧 —— 过期任务显式 dead_letter, 不许静默消失。
             pipe.set(
                 f"{PQ_PAYLOAD_PREFIX}{member}",
                 json.dumps(payload, ensure_ascii=False, default=str),
-                ex=max(60, int(ttl_s)),
+                ex=max(60, int(ttl_s)) * 4,
             )
             pipe.zadd(PQ_KEY, {member: self._score(priority, now_ms)})
-            pipe.expire(PQ_KEY, max(60, int(ttl_s) * 2))
+            # 残留修复(2026-10-24): 删除 ZSET 整体 expire —— 修复前队列静默
+            # 2×TTL 后整队消失(含刚入队、payload 仍存活的任务), 与 never-drop
+            # 承诺冲突。ZSET 现在持久, 陈旧任务由 pop 侧显式过期出队。
             await pipe.execute()
             try:
                 from metrics import inc_audit_pq_enqueue
@@ -126,6 +131,47 @@ class AuditPriorityQueue:
         except Exception as e:
             logger.warning(f"[AuditPQ] enqueue failed: {e}")
             return False
+
+    @staticmethod
+    def _payload_expired(payload: dict) -> bool:
+        """payload 是否已超过业务 TTL (enqueued_at_ms + 2×ttl_s)。"""
+        try:
+            enq = int(payload.get("enqueued_at_ms") or 0)
+            ttl = int(payload.get("ttl_s") or 900)
+            return enq > 0 and (time.time() * 1000 - enq) > ttl * 2 * 1000
+        except (TypeError, ValueError):
+            return False
+
+    async def _pop_stale_skipping(self, max_skips: int = 16) -> Optional[dict]:
+        """连续弹出并跳过陈旧任务 (每次跳过都显式 dead_letter)。"""
+        for _ in range(max_skips):
+            res = await self._redis.eval(_POP_LUA, 1, PQ_KEY, PQ_PAYLOAD_PREFIX)
+            if not res:
+                return None
+            member, raw = res[0], res[1]
+            if isinstance(member, bytes):
+                member = member.decode()
+            if isinstance(raw, bytes):
+                raw = raw.decode()
+            if not raw:
+                await _dead_letter(member, "payload_missing", "stale skip")
+                continue
+            payload = json.loads(raw)
+            if self._payload_expired(payload):
+                try:
+                    from metrics import inc_audit_pq_lost
+                    inc_audit_pq_lost("expired")
+                except Exception:
+                    pass
+                await _dead_letter(member, "expired", "stale skip")
+                continue
+            try:
+                from metrics import inc_audit_pq_dequeue
+                inc_audit_pq_dequeue(str(payload.get("tier") or "?"))
+            except Exception:
+                pass
+            return payload
+        return None
 
     async def pop_highest(self) -> Optional[dict]:
         """弹出最高优先级任务; 空队列返回 None。"""
@@ -156,7 +202,32 @@ class AuditPriorityQueue:
                         pass
                     await _dead_letter(member, "payload_missing", "atomic pop")
                     return None
-                payload = json.loads(raw)
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError as e:
+                    # 成员已被原子弹出并删除；损坏 payload 不能再走 fallback
+                    # （那会弹出另一个任务，造成乱序/丢失）。
+                    logger.error(
+                        f"[AuditPQ] LOST member={member} reason=payload_corrupt: {e}"
+                    )
+                    try:
+                        from metrics import inc_audit_pq_lost
+                        inc_audit_pq_lost("payload_corrupt")
+                    except Exception:
+                        pass
+                    await _dead_letter(member, "payload_corrupt", str(e))
+                    return None
+                # 残留修复(2026-10-24): 陈旧任务显式过期出队(不再靠整队 TTL) ——
+                # 过期任务 dead_letter 后继续取下一个, 不静默消失。
+                if self._payload_expired(payload):
+                    try:
+                        from metrics import inc_audit_pq_lost
+                        inc_audit_pq_lost("expired")
+                    except Exception:
+                        pass
+                    await _dead_letter(member, "expired",
+                                       f"ttl_s={payload.get('ttl_s')}")
+                    return await self._pop_stale_skipping()
                 try:
                     from metrics import inc_audit_pq_dequeue
                     inc_audit_pq_dequeue(str(payload.get("tier") or "?"))
@@ -190,7 +261,19 @@ class AuditPriorityQueue:
                 return None
             if isinstance(raw, bytes):
                 raw = raw.decode()
-            payload = json.loads(raw)
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as e:
+                logger.error(
+                    f"[AuditPQ] LOST member={member} reason=payload_corrupt: {e}"
+                )
+                try:
+                    from metrics import inc_audit_pq_lost
+                    inc_audit_pq_lost("payload_corrupt")
+                except Exception:
+                    pass
+                await _dead_letter(member, "payload_corrupt", str(e))
+                return None
             try:
                 from metrics import inc_audit_pq_dequeue
                 inc_audit_pq_dequeue(str(payload.get("tier") or "?"))

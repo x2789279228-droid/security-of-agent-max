@@ -9,6 +9,34 @@
   },
   "schemas": [
     {
+      "name": "sigma_hit",
+      "version": "1.0.0",
+      "json_schema": "backend/schemas/sigma_hit.schema.json",
+      "baseline": "contracts/baseline/sigma_hit.schema.json",
+      "subjects": [
+        "security-sigma-hit-value"
+      ],
+      "topics": [
+        "security-sigma-hit"
+      ],
+      "runtime_extensions": [],
+      "compatibility": "FULL"
+    },
+    {
+      "name": "ingest_wrapper",
+      "version": "1.0.0",
+      "json_schema": "backend/schemas/ingest_wrapper.schema.json",
+      "baseline": "contracts/baseline/ingest_wrapper.schema.json",
+      "subjects": [
+        "security-events-ingest-value"
+      ],
+      "topics": [
+        "security-events-ingest"
+      ],
+      "runtime_extensions": [],
+      "compatibility": "FULL"
+    },
+    {
       "name": "security_event",
       "version": "1.0.0",
       "json_schema": "backend/schemas/security_event.schema.json",
@@ -17,19 +45,20 @@
       "baseline": "contracts/baseline/security_event.schema.json",
       "subjects": [
         "security-events-enriched-value",
-        "security-events-ingest-value",
         "security-audit-queue-value",
         "security-logs-raw-value",
         "security-logs-validated-value"
       ],
       "topics": [
         "security-events-enriched",
-        "security-events-ingest",
         "security-audit-queue",
         "security-logs-raw",
         "security-logs-validated"
       ],
-      "runtime_extensions": ["anomalyScore", "anomalyReasons"],
+      "runtime_extensions": [
+        "anomalyScore",
+        "anomalyReasons"
+      ],
       "compatibility": "FULL"
     },
     {

@@ -561,38 +561,32 @@ class CircuitBreaker:
             return False
 
     async def _persist(self) -> bool:
-        """写回熔断状态。当前实现是 **last-write-wins**（WHERE 无 version 谓词）。
+        """写回熔断状态 — CAS: ``WHERE id==1 AND version=:本地版本``。
 
-        WHERE 只有 ``id == 1``，**没有 version 谓词**，所以：
-          · ``version`` 列被读取、递增、写入，但**从不被比较** ——
-            它是一个只写字段，和 ``target_hash_top`` 属于同一族；
-          · 「版本冲突」在本函数里**无法被检测到**。
-
-        ⚠️ 修复前本 docstring 声称的是乐观并发 + version 冲突时重载重放，
-        而实现并不提供该属性。与其留一句假话，这里如实记录当前形态；
-        真正补上需要正确区分 ``rowcount == 0`` 的两种成因
-        （行尚不存在 / version 不匹配），目前一律当作「行不存在」。
-
-        跨进程一致性现在靠的是**先载入权威状态再写**的纪律
-        （所有写路径在 P1-b 后都先 ``await self._load_persisted()``），
-        不是靠本函数。真正并发的交错窗口（两进程同时载入、先后写回）
-        仍存在，且未被检出。
-
-        必须处理「行尚不存在」的情况：只用 UPDATE 的话，
-        UPDATE 对空表匹配 0 行 → **首次熔断永远不会落库**，
-        跨进程一致性在最关键的时刻失效。
+        P1: 修复前 UPDATE 无 version 谓词(last-write-wins) — FastAPI 与
+        Temporal worker 两进程交错载入-写回时, 陈旧副本可**静默回滚熔断状态**
+        (这是安全闸门, 不允许)。现在:
+          · UPDATE 带 version 谓词, ``rowcount==0`` 区分两种成因:
+            行尚不存在 → INSERT(首次落库); 行存在但版本不同 → **版本冲突**;
+          · 版本冲突 → 重载权威副本对齐本地(与 P1-b 起的"先载入再写"纪律一致),
+            本次增量留在下次写回 — 冲突窗口本来就极窄, 有界漂移可接受;
+          · version 从此单调递增, 可被外部监控。
         """
         if not self._persist_enabled:
             return True
         for attempt in range(2):
+            version_conflict = False
+            db_version_seen: int = -1
             try:
-                from sqlalchemy import update
+                from sqlalchemy import select, update
                 from models import CadCircuitState, async_session
+                local_version = int(self.state.version)
                 async with async_session() as s:
                     async with s.begin():
                         res = await s.execute(
                             update(CadCircuitState)
                             .where(CadCircuitState.id == 1)
+                            .where(CadCircuitState.version == local_version)
                             .values(
                                 state=self.state.state,
                                 reason=self.state.reason,
@@ -602,32 +596,46 @@ class CircuitBreaker:
                                 supervision_failures=self.state.supervision_failures,
                                 last_supervision_error=self.state.last_supervision_error,
                                 half_open_probes_left=self.state.half_open_probes_left,
-                                version=self.state.version + 1,
+                                version=local_version + 1,
                                 updated_at=datetime.now(timezone.utc),
                             )
                         )
-                        # 行不存在 → 插入（INSERT 后 UPDATE 永不生效的场景）
                         if not res.rowcount:
-                            s.add(CadCircuitState(
-                                id=1,
-                                state=self.state.state,
-                                reason=self.state.reason,
-                                tripped_at=self.state.tripped_at,
-                                consecutive_bad=self.state.consecutive_bad,
-                                audit_count=self.state.audit_count,
-                                supervision_failures=self.state.supervision_failures,
-                                last_supervision_error=self.state.last_supervision_error,
-                                half_open_probes_left=self.state.half_open_probes_left,
-                                version=self.state.version + 1,
-                            ))
-                self.state.version += 1
+                            row = (await s.execute(
+                                select(CadCircuitState).where(CadCircuitState.id == 1)
+                            )).scalar_one_or_none()
+                            if row is None:
+                                # 行不存在(INSERT 后 UPDATE 永不生效的场景) → 插入
+                                s.add(CadCircuitState(
+                                    id=1,
+                                    state=self.state.state,
+                                    reason=self.state.reason,
+                                    tripped_at=self.state.tripped_at,
+                                    consecutive_bad=self.state.consecutive_bad,
+                                    audit_count=self.state.audit_count,
+                                    supervision_failures=self.state.supervision_failures,
+                                    last_supervision_error=self.state.last_supervision_error,
+                                    half_open_probes_left=self.state.half_open_probes_left,
+                                    version=local_version + 1,
+                                ))
+                            else:
+                                version_conflict = True
+                                db_version_seen = int(row.version or 0)
+                if version_conflict:
+                    logger.warning(
+                        "[CAD] 熔断状态版本冲突 local_v=%s db_v=%s — 重载权威副本, "
+                        "本地增量待下次记录写回",
+                        local_version, db_version_seen,
+                    )
+                    await self._load_persisted()
+                    return True
+                self.state.version = local_version + 1
                 return True
             except Exception as e:
                 self._store_error = f"persist_failed:{type(e).__name__}"
                 logger.warning(f"[CAD] 熔断状态写入失败(attempt={attempt}): {e}")
                 if attempt == 0:
-                    # 这是**通用的持久化失败**重试，不是版本冲突处理 ——
-                    # 没有 version 谓词，版本冲突在本函数里检测不到。
+                    # 这是**通用的持久化失败**重试，不是版本冲突处理。
                     # 重载权威状态后再试一次，至少避免用陈旧值硬写。
                     await self._load_persisted()
                     continue

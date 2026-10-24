@@ -292,6 +292,8 @@ function handleConnected(raw: string) {
   )
   if (payload.cursor_reset) {
     insertMarker('gap')
+    // DB 被重建后 ID 会复用；旧 dedup key 会把“新事件”静默丢掉。
+    seenKeys.clear()
     if (typeof payload.max_event_id === 'number' && payload.max_event_id >= 0) {
       knownEventId = payload.max_event_id
       writeStoredCursor(payload.max_event_id)
@@ -356,6 +358,8 @@ function handlePing(raw: string) {
 
 function openStream() {
   if (es) return
+  // 重连会再次进入 openStream；先清掉旧 watchdog，否则 interval 会累积。
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = undefined }
   const refresh = pendingRefreshIds
   pendingRefreshIds = []
   const source = api.eventsStream(knownEventId ?? undefined, refresh)
@@ -423,6 +427,7 @@ function closeStream() {
 // ── 对外控制接口 ──
 
 export function streamReconnect() {
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = undefined }
   if (es) { es.close(); es = null }
   errStreak = 0
   lastActivityTs = 0

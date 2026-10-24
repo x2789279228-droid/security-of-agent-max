@@ -14,6 +14,9 @@
 #   POLL_SECONDS              轮询间隔(默认 30)
 #   AUTO_SUBMIT_MIN_SLOTS     触发提交所需最小总槽(默认 15)
 #   JM_READY_TIMEOUT_SEC      首启等待 JM 就绪上限; 超时退出交 restart:always 拉回(默认 900)
+#   FLINK_RESTORE_SAVEPOINT   P0-6: 设为 checkpoint/savepoint 路径时, 守护代提交
+#                             会带 -s 恢复状态(升级/重启避免 earliest 重放);
+#                             compose 经环境变量透传给本容器。
 
 set -u
 

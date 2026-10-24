@@ -657,12 +657,16 @@ def test_flink_window_no_longer_hardcodes_severity():
 def test_flink_window_requires_positive_threshold():
     """threshold<=0 时不得当成「计数 1 就超阈值」。
 
-    ``count >= threshold`` 在 threshold=0 时恒真，等于把聚合窗口
-    退化成单事件告警 —— 恰好是本作业存在的意义所反对的。
+    ``threshold=0`` 配任何比较符都容易退化成单事件告警 ——
+    恰好是本作业存在的意义所反对的。P0-1 之后比较符由规则声明
+    （op/'>'/'>='/「==»），但「阈值必须为正」这道防退化闸门必须仍在,
+    且按 op 的比较收敛在 thresholdMet 一个入口里, 便于真执行测试覆盖。
     """
     src = FLINK_JOB.read_text(encoding="utf-8")
-    assert "threshold > 0 && count >= threshold" in src, \
+    assert "threshold > 0" in src, \
         "threshold=0 时会立刻告警（退化成单事件），需显式要求阈值 > 0"
+    assert "thresholdMet" in src, \
+        "阈值比较必须收敛在 thresholdMet 单一入口（按规则声明的 op 比较）"
 
 
 def test_flink_window_picks_worst_action_in_window():
@@ -1004,3 +1008,184 @@ def test_missing_optional_fields_use_documented_defaults(window_runner):
     assert alert["action_recommend"] == "alert"
     assert alert["severity"] == "medium"
     assert alert["eventType"] == "custom"
+
+
+# ══════════════════════════════════════════════════════════════
+# 7. P0-1: 阈值语义契约（op / timeframe 随候选下发, Flink 按声明比较/建窗）
+# ══════════════════════════════════════════════════════════════
+#
+# 修复前候选只带 threshold: Flink 硬编码 count >= threshold 和 5m 窗口。
+# SIG-001 (op '>', threshold 5) 第 5 条就告警(应为第 6 条);
+# SIG-007 (op '>', threshold 1) 第 1 条就告警 —— "单事件不得处置"
+# 的保护在聚合层退化。下面从载荷(2)→白名单(3)→真执行(4c)逐层钉住。
+
+def test_agg_payload_carries_full_threshold_semantics():
+    """载荷必须带 op/func/field/timeframe/timeframe_ms —— 缺一个 Flink 就回退硬编码。"""
+    ev = {"src_ip": "10.1.2.3", "dst_ip": "10.0.0.9", "eventId": "evt-42",
+          "timestamp": 1_700_000_000_000}
+    p = PySigmaDetector._agg_payload(_meta(), ev, {
+        "func": "count", "field": "src_ip", "op": ">",
+        "threshold": 5, "timeframe": "5m",
+    })
+    assert p["op"] == ">"
+    assert p["func"] == "count" and p["field"] == "src_ip"
+    assert p["timeframe"] == "5m"
+    assert p["timeframe_ms"] == 300_000
+    assert p["event_id"] == "evt-42"
+    assert p["dst_ip"] == "10.0.0.9"
+    assert p["threshold"] == 5
+
+
+def test_agg_payload_rule_version_present_and_stable():
+    """rule_version 是稳定指纹 —— 同一规则内容两算必须一致。"""
+    agg = {"func": "count", "field": "src_ip", "op": ">",
+           "threshold": 5, "timeframe": "5m"}
+    p1 = PySigmaDetector._agg_payload(_meta(), {"src_ip": "1.1.1.1"}, agg)
+    p2 = PySigmaDetector._agg_payload(_meta(), {"src_ip": "2.2.2.2"}, agg)
+    assert p1["rule_version"], "rule_version 缺失, 聚合告警无法定版复盘"
+    assert p1["rule_version"] == p2["rule_version"], "rule_version 随事件漂移"
+
+
+@pytest.mark.parametrize("declared,expected_ms", [
+    ("5m", 300_000), ("1m", 60_000), ("30s", 30_000), ("1h", 3_600_000),
+    (300, 300_000),          # Sigma 规范: 裸数字按秒
+    ("bogus", 300_000),      # 解析不了 → 默认 5m（与 Flink 默认一致）
+    (None, 300_000), ("", 300_000),
+])
+def test_agg_payload_timeframe_normalization(declared, expected_ms):
+    p = PySigmaDetector._agg_payload(
+        _meta(), {"src_ip": "1.1.1.1"},
+        {"op": ">", "threshold": 5, "timeframe": declared})
+    assert p["timeframe_ms"] == expected_ms
+
+
+@pytest.mark.asyncio
+async def test_publish_sigma_hit_passes_threshold_semantics(monkeypatch):
+    """producer 白名单必须放行阈值语义字段。
+
+    白名单漏一个键, op/timeframe 就在 Kafka 边界上被剥掉,
+    Flink 悄悄回退 ">= / 5m" 硬编码 —— 与「上游没发」不可区分。
+    """
+    import json as _json
+
+    from kafka_producer import kafka_producer
+
+    sent = {}
+
+    async def fake_send(topic, key, value, headers=None):
+        sent["body"] = _json.loads(value)
+
+    monkeypatch.setattr(kafka_producer, "_started", True, raising=False)
+    monkeypatch.setattr(kafka_producer, "_send_bounded", fake_send)
+
+    await kafka_producer.publish_sigma_hit({
+        "src_ip": "10.1.2.3", "rule_id": "SIG-001", "threshold": 5,
+        "timestamp": 1_700_000_000_000, "action_recommend": "block_ip",
+        "severity": "high", "attack_type": "brute_force", "confidence": 0.85,
+        "op": ">", "func": "count", "field": "src_ip",
+        "timeframe": "5m", "timeframe_ms": 300_000,
+        "rule_version": "a1b2c3d4", "event_id": "evt-42", "dst_ip": "10.0.0.9",
+        "__internal_debug": "should_not_leak",
+    })
+
+    body = sent["body"]
+    assert body["op"] == ">"
+    assert body["timeframe"] == "5m" and body["timeframe_ms"] == 300_000
+    assert body["rule_version"] == "a1b2c3d4"
+    assert body["event_id"] == "evt-42" and body["dst_ip"] == "10.0.0.9"
+    assert "__internal_debug" not in body, "白名单失效：非约定字段被透传"
+
+
+@pytest.mark.asyncio
+async def test_publish_sigma_hit_semantic_defaults_when_absent(monkeypatch):
+    """上游(旧版本)没带语义字段时, 落到与 Flink 回退一致的默认值。"""
+    import json as _json
+
+    from kafka_producer import kafka_producer
+
+    sent = {}
+
+    async def fake_send(topic, key, value, headers=None):
+        sent["body"] = _json.loads(value)
+
+    monkeypatch.setattr(kafka_producer, "_started", True, raising=False)
+    monkeypatch.setattr(kafka_producer, "_send_bounded", fake_send)
+
+    await kafka_producer.publish_sigma_hit(
+        {"src_ip": "1.1.1.1", "rule_id": "SIG-001", "threshold": 5})
+    body = sent["body"]
+    assert body["op"] == ">="
+    assert body["func"] == "count" and body["field"] == "src_ip"
+    assert body["timeframe_ms"] == 0  # 旧候选不臆造窗口, Flink 回退默认 5m
+
+
+# ── 阈值语义真执行（SIG-001 / SIG-007 修复验收口径）──────────
+
+def test_sig001_fires_at_six_not_five(window_runner):
+    """SIG-001 (op '>', threshold 5): 第 5 条**不**告警, 第 6 条告警。
+
+    这是 P0-1 的直接验收标准 —— 修复前 `count >= 5` 在第 5 条就触发。
+    """
+    _no_alert(window_runner.run([_hit(op=">", threshold=5)] * 5))
+    alert = _only_alert(window_runner.run([_hit(op=">", threshold=5)] * 6))
+    assert alert["count"] == 6 and alert["op"] == ">"
+
+
+def test_sig007_second_event_alerts_not_first(window_runner):
+    """SIG-007 (op '>', threshold 1): 第 1 条**不**告警, 第 2 条告警。
+
+    修复前 `count >= 1` 恒真, 聚合窗口退化成单事件告警,
+    "单事件不得处置"的保护随之失效。
+    """
+    _no_alert(window_runner.run([_hit(op=">", threshold=1)] * 1))
+    alert = _only_alert(window_runner.run([_hit(op=">", threshold=1)] * 2))
+    assert alert["count"] == 2
+
+
+def test_eq_op_fires_only_at_exact_count(window_runner):
+    """op '==' 只在计数**恰好等于**阈值时告警（多一条少一条都不告警）。"""
+    _no_alert(window_runner.run([_hit(op="==", threshold=3)] * 2))
+    _only_alert(window_runner.run([_hit(op="==", threshold=3)] * 3))
+    _no_alert(window_runner.run([_hit(op="==", threshold=3)] * 4))
+
+
+def test_strict_op_never_fires_below_threshold_plus_one(window_runner):
+    """反向钉: op '>' 在 count <= threshold 时**绝不**告警（比较方向写反会挂）。"""
+    _no_alert(window_runner.run([_hit(op=">", threshold=3)] * 1))
+    _no_alert(window_runner.run([_hit(op=">", threshold=3)] * 3))
+
+
+def test_unrecognized_op_falls_back_conservative(window_runner):
+    """认不出的比较符必须回退 ">=", 且 '<' 语义不得按"少于阈值"触发处置。
+
+    回退方向是安全边界: 落到 ">=" 最坏是语义口径偏紧;
+    回落到 '<' 会让 count=1 就触发 —— 单事件处置的口子重新打开。
+    """
+    _only_alert(window_runner.run([_hit(op="!!", threshold=3)] * 3))
+    _no_alert(window_runner.run([_hit(op="<", threshold=3)] * 1))
+    _no_alert(window_runner.run([_hit(op="<", threshold=3)] * 2))
+
+
+def test_missing_op_keeps_legacy_gte_semantics(window_runner):
+    """旧版本候选（不带 op）保持 ">= " 语义 —— 部署顺序无关, 前后兼容。"""
+    _only_alert(window_runner.run([_hit()] * 3))
+
+
+def test_java_side_parses_semantic_fields_from_payload(window_runner):
+    """Java 侧解析语义字段后**原样带回**告警（跨语言键名不漂移）。
+
+    op/func/field/rule_version 在告警里缺失/改名, 下游与人复盘时
+    就答不了「count 是按什么语义算出来的」。
+    """
+    payload = _hit(op=">", threshold=2)
+    payload["func"] = "count"
+    payload["field"] = "src_ip"
+    payload["rule_version"] = "a1b2c3d4"
+    payload["event_id"] = "evt-7"
+    payload["dst_ip"] = "10.0.0.9"
+    alert = _only_alert(window_runner.run([payload] * 3))
+    assert alert["op"] == ">"
+    assert alert["func"] == "count" and alert["field"] == "src_ip"
+    assert alert["rule_version"] == "a1b2c3d4"
+    assert alert["dst_ip"] == "10.0.0.9"
+

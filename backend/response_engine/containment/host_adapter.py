@@ -35,6 +35,12 @@ _SYS_NIX = ("/bin", "/sbin", "/usr/bin", "/usr/sbin", "/etc")
 
 def _mode() -> str:
     # 失败关闭：配置缺失时按 dry_run，而不是真实执行。
+    try:
+        from response_engine.preview import preview_mode
+        if preview_mode.get():
+            return "dry_run"
+    except Exception:
+        pass
     return (getattr(settings, "execution_mode", "dry_run") or "dry_run").lower()
 
 

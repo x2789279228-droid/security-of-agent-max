@@ -103,6 +103,11 @@ def action_rows_from_batch(
     for item in batch_result.results or []:
         inner = _inner_result(item)
         mode = inner.get("mode") or inner.get("execution_mode") or ""
+        from .response_executor import redact_text_for_log
+        raw_error = item.error or inner.get("error") or ""
+        safe_inner = dict(inner) if isinstance(inner, dict) else {}
+        if "error" in safe_inner:
+            safe_inner["error"] = redact_text_for_log(safe_inner.get("error") or "")
         rows.append({
             "session_id": threat_info.get("session_id", ""),
             "event_id": threat_info.get("event_id", 0) or 0,
@@ -111,7 +116,7 @@ def action_rows_from_batch(
             "action_params": {
                 "execution_mode": mode,
                 "verified": inner.get("verified"),
-                "error": item.error or inner.get("error") or "",
+                "error": redact_text_for_log(raw_error),
                 # 动作**实际收到的参数**（执行器里已脱敏）。
                 # 整改报告 §9.61：此前这里只有上面三个键 ——
                 # 「告警发到了哪个 URL」「封禁了哪台机器」在审计里查不到。
@@ -120,7 +125,7 @@ def action_rows_from_batch(
                 "params": dict(item.params or {}),
             },
             "success": bool(item.success),
-            "result": inner or {"error": item.error},
+            "result": safe_inner or {"error": redact_text_for_log(raw_error)},
             "rollback_token": (
                 item.rollback_token or getattr(batch_result, "batch_rollback_token", "") or ""
             ),
@@ -437,6 +442,15 @@ class ResponseOrchestrator:
                         ticket.status = ApprovalStatus.PENDING
                     else:
                         ticket.status = ApprovalStatus.AUTO_EXECUTED
+                    # P1: submit() 内部已调度 write-behind 落库(此时状态还是 PENDING),
+                    # 就地改状态后必须重落库, 否则 DB 停留 PENDING → 重启 restore()
+                    # 把已自动执行的工单当待审拉回, 审批通过即二次执行。
+                    try:
+                        await approval_queue.persist_ticket(ticket)
+                    except Exception as persist_err:
+                        logger.warning(
+                            f"Failed to persist post-submit status for #{ticket.id[:8]}: {persist_err}"
+                        )
                     result["approval_ticket_id"] = ticket.id
                     result["approval_priority"] = ticket.priority
                     await self._log_executed_actions(
@@ -509,6 +523,23 @@ class ResponseOrchestrator:
                 ticket = approval_queue.get_ticket(ticket_id)
                 if not ticket:
                     logger.warning(f"Approval ticket {ticket_id} vanished")
+                    return
+
+                # P1: 全库无人把 PENDING 主动迁移为 EXPIRED(仅 approve/list 被动触发),
+                # 轮询必须自判过期并收口, 否则无人审批的工单让本任务永不退出、
+                # _running_approvals 无限累积。
+                if (
+                    ticket.status == ApprovalStatus.PENDING
+                    and ticket.is_expired
+                ):
+                    ticket.status = ApprovalStatus.EXPIRED
+                    try:
+                        await approval_queue.persist_ticket(ticket)
+                    except Exception as persist_err:
+                        logger.warning(
+                            f"Failed to persist expiry for #{ticket_id[:8]}: {persist_err}"
+                        )
+                    logger.warning(f"Approval poll expired ticket #{ticket_id[:8]} (TTL reached, no human action)")
                     return
 
                 if ticket.status == ApprovalStatus.APPROVED:

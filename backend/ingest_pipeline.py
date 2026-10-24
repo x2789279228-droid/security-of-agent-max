@@ -398,7 +398,17 @@ async def detect(log_data: dict) -> DetectResult:
                                     error_code="no_result:sigma",
                                     detector_version=_sigma_version()))
 
-    if sigma_result.get("detected"):
+    # P0-2：只有**待聚合**命中（阈值证据尚未产生）时不得当作 Sigma 命中。
+    # 修复前只判断 detected —— 聚合规则的前置筛选命中会走到这里，
+    # 把 anomaly score 抬到 Sigma severity 下限（SIG-001 high → 0.65），
+    # FastPath 随后按 `_fused_conf >= 0.7` 判强信号进封禁决策，
+    # 单事件就这样绕过了「窗口超阈值后才处置」的设计。
+    # 引擎层已把 pending-only 的 detected 置 False；这里是防御同一契约，
+    # 旧引擎/陈旧载荷下也不会复活这条路径。
+    _sigma_pending_only = bool(
+        (sigma_result.get("pending_aggregation") or [])
+    ) and not sigma_result.get("confirmed_hits")
+    if sigma_result.get("detected") and not _sigma_pending_only:
         event_type = log_data.get("event", log_data.get("type", "UNKNOWN"))
         logger.info(
             f"[Sigma] {event_type}: {sigma_result.get('rule_count')} rules hit, "
@@ -415,6 +425,12 @@ async def detect(log_data: dict) -> DetectResult:
             anomaly_report.reasons = list(anomaly_report.reasons or []) + [
                 f"Sigma命中:{','.join(sigma_result.get('attack_types') or [])}"
             ]
+    elif _sigma_pending_only:
+        logger.info(
+            "[Sigma] pending aggregation only (%s) — 不抬分、不进处置, "
+            "等待 Flink 聚合窗口判定",
+            sigma_result.get("pending_aggregation"),
+        )
 
     # ── 统一契约: 状态传播 (整改方案 §二.2) ──
     # Sigma 引擎可能在**内部**吞掉单条规则的 SQL 失败并返回 detected=False,
@@ -669,9 +685,16 @@ async def dispatch(
 
     # 3. 快速响应: 异常分数极高 / severity=critical / Sigma 命中 critical → create_task
     #    (语义逐行迁移自 log_ingestion.ingest; FastPath 只此一份实现)
+    # P0-2：pending-only（只有待聚合命中）不得作为强信号 ——
+    # 阈值证据尚未产生，单事件只能告警/审计，封禁等 Flink SIGMA_AGGREGATE 告警。
+    _sigma_info = log_data.get("_sigma") or {}
+    _sigma_pending_only = bool(
+        (_sigma_info.get("pending_aggregation") or [])
+    ) and not _sigma_info.get("confirmed_hits")
+    _sigma_confirmed = bool(_sigma_info.get("detected")) and not _sigma_pending_only
     _sigma_critical = (
-        log_data.get("_sigma", {}).get("detected", False)
-        and log_data.get("_sigma", {}).get("max_severity") == "critical"
+        _sigma_confirmed
+        and _sigma_info.get("max_severity") == "critical"
     )
     _fp_trigger = (
         anomaly_report.anomaly_score >= 0.5
@@ -694,11 +717,15 @@ async def dispatch(
             _sigma_conf_map = {"high": 0.85, "medium": 0.65, "low": 0.45}
             _sigma_conf = 0.0
             for hit in (sigma_info.get("hits") or []):
+                # P0-2：待聚合命中不是结论，不参与融合置信度 ——
+                # 否则 SIG-001 单条 /login 的高置信度仍会把 _fused_conf 抬过 0.7。
+                if isinstance(hit, dict) and hit.get("requires_aggregation"):
+                    continue
                 _sigma_conf = max(
                     _sigma_conf,
                     _sigma_conf_map.get(str(hit.get("confidence") or "").lower(), 0.5),
                 )
-            if sigma_info.get("detected") and sigma_info.get("max_severity") == "critical":
+            if _sigma_confirmed and sigma_info.get("max_severity") == "critical":
                 _sigma_conf = max(_sigma_conf, 0.85)
             _evt_conf = log_data.get("confidence", 0)
             try:
@@ -715,9 +742,14 @@ async def dispatch(
             # v5 修复(A):双轨封禁门槛
             #   强信号(Sigma critical 命中 或 融合置信度>=0.7) → FastPath 可封禁
             #   仅 severity=critical(无检测器佐证) → 仅告警, 封禁等 Audit-LLM confirmed
+            # P0-2: pending-only 事件**永远**进不了强信号 —— 只能告警/审计
+            # (allow_blocking=False), 执行类动作只属于 Flink SIGMA_AGGREGATE 告警。
             _strong_signal = bool(
-                (sigma_info.get("detected") and sigma_info.get("max_severity") == "critical")
-                or _fused_conf >= 0.7
+                (not _sigma_pending_only)
+                and (
+                    _sigma_critical
+                    or _fused_conf >= 0.7
+                )
             )
             # v5 修复:不再把 low/info 抬成 high。未知级别下限取 medium
             _fp_sev = severity if severity in ("critical", "high", "medium") else "medium"

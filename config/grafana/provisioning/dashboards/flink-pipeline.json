@@ -1,0 +1,178 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["soc", "flink"],
+  "time": { "from": "now-30m", "to": "now" },
+  "title": "SOC Flink 流处理管道 (SLO)",
+  "uid": "soc-flink-pipeline",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "运行中的作业数 (期望 3)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "A", "expr": "flink_jobmanager_numRunningJobs" }]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "checkpoint 失败 (10m)",
+      "description": "EXACTLY_ONCE 依赖 checkpoint; >0 即失去恢复点",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "A", "expr": "sum(increase(flink_jobmanager_job_numberOfFailedCheckpoints[10m]))" }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "checkpoint 耗时 (max, ms)",
+      "description": "SLO: < 30000ms (checkpoint interval 60s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 15000 },
+              { "color": "red", "value": 30000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "A", "expr": "max(flink_jobmanager_job_lastCheckpointDuration)" }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "checkpoint 大小 (max)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [{ "refId": "A", "expr": "max(flink_jobmanager_job_lastCheckpointSize)" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "作业吞吐 (records out /s by job)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 8, "lineWidth": 1 }, "unit": "ops" }, "overrides": [] },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (job_name) (flink_taskmanager_job_task_operator_numRecordsOutPerSecond)",
+        "legendFormat": "{{job_name}}"
+      }]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "反压 / 忙碌 (by job)",
+      "description": "isBackPressured=1 的占比与 busyTimeMsPerSecond —— 背压是 lag 上涨的先行指标",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 8, "lineWidth": 1 }, "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg by (job_name) (flink_taskmanager_job_task_busyTimeMsPerSecond)",
+          "legendFormat": "busy {{job_name}}"
+        },
+        {
+          "refId": "B",
+          "expr": "avg by (job_name) (flink_taskmanager_job_task_backPressuredTimeMsPerSecond)",
+          "legendFormat": "backpressured {{job_name}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "数据质量: 有效/重复/拒绝 (rate/s)",
+      "description": "LogValidationJob data_quality 计数器: duplicate 应稳定为低占比; schema_fail/auth_fail 应为 0",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 8, "lineWidth": 1 }, "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(flink_taskmanager_job_task_data_quality_events_valid[1m]))",
+          "legendFormat": "valid"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(flink_taskmanager_job_task_data_quality_events_duplicate[1m]))",
+          "legendFormat": "duplicate"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(flink_taskmanager_job_task_data_quality_events_schema_fail[1m]))",
+          "legendFormat": "schema_fail"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(flink_taskmanager_job_task_data_quality_events_auth_fail[1m]))",
+          "legendFormat": "auth_fail"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "backend Kafka 消费循环存活",
+      "description": "soc_kafka_consumer_alive —— 任一循环停止即跌 0 (对应 SocKafkaConsumerDead 告警)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{
+        "refId": "A",
+        "expr": "min(soc_kafka_consumer_alive)",
+        "legendFormat": "min alive"
+      }]
+    }
+  ]
+}

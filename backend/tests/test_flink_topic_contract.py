@@ -71,6 +71,11 @@ JAVA_ONLY = {
         "NDR 作业默认不提交（SUBMIT_NDR_JOBS=1 才启用），"
         "其输出 topic 后端暂未消费，见 submit-jobs.sh 注释"
     ),
+    "TOPIC_DUPLICATE_LOGS": (
+        "P0-4: 60s 窗口去重命中的独立出口（security-logs-duplicate），"
+        "与 rejected 分流；后端暂只做观测/回放不消费，"
+        "topic 由 tools/init-kafka-topics.sh 创建"
+    ),
 }
 
 

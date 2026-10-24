@@ -191,13 +191,17 @@ class SuricataConnector:
         try:
             from aiokafka import AIOKafkaConsumer
 
-            topic = "suricata-eve"  # 可配置
+            # P2: topic 可配置(注释与实现一致), 缺省保持原值兼容
+            topic = getattr(settings, "suricata_eve_topic", "") or "suricata-eve"
+            # Kafka 安全参数与主链路同源 (见 kafka_security.py 模块说明)
+            from kafka_security import aiokafka_security_kwargs
             consumer = AIOKafkaConsumer(
                 topic,
                 bootstrap_servers=settings.kafka_bootstrap,
                 group_id="soc-suricata",
                 value_deserializer=lambda m: json.loads(m.decode("utf-8")),
                 auto_offset_reset="latest",
+                **aiokafka_security_kwargs(),
             )
             await consumer.start()
             logger.info("Suricata EVE Kafka 消费者启动: topic=%s", topic)
