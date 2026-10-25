@@ -1,0 +1,33 @@
+title: Webshell 命令执行参数特征（原始 URL）
+id: aaaaaaaa-0016-0000-0000-000000000016
+status: test
+description: >
+  URL 携带命令执行/代码执行类参数与协议封装 —— 一句话/内存马交互的
+  高频原始指标: ?cmd=、shell_exec、system(、base64_decode(、php://input。
+date: 2026/10/25
+author: SOC Platform
+license: SOC-Internal
+logsource:
+  category: webserver
+  product: generic
+detection:
+  selection:
+    url|contains:
+    - '?cmd='
+    - 'shell_exec'
+    - 'system('
+    - 'base64_decode('
+    - 'php://input'
+    - 'eval($_'
+  condition: selection
+level: critical
+tags:
+- attack.persistence.t1505.003
+falsepositives:
+- 极少; 参数命名撞车需人工复核
+x-soc-id: SIG-016
+x-soc-confidence: high
+x-soc-action: alert
+x-soc-attack_type: webshell
+x-soc-severity: critical
+x-soc-version: 1

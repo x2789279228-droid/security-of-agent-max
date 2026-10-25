@@ -1,0 +1,59 @@
+title: Suspicious User Agent
+id: 7195a772-4b3f-43a4-a210-6a003d65caa1
+status: test
+description: Detects suspicious malformed user agent strings in proxy logs
+references:
+- https://github.com/fastly/waf_testbed/blob/8bfc406551f3045e418cbaad7596cff8da331dfc/templates/default/scanners-user-agents.data.erb
+author: Florian Roth (Nextron Systems)
+date: 2017-07-08
+modified: 2022-10-31
+tags:
+- attack.command-and-control
+- attack.t1071.001
+logsource:
+  category: proxy
+detection:
+  selection1:
+    c-useragent|startswith:
+    - user-agent
+    - 'Mozilla/3.0 '
+    - 'Mozilla/2.0 '
+    - 'Mozilla/1.0 '
+    - 'Mozilla '
+    - ' Mozilla/'
+    - Mozila/
+    - Mozilla/4.0 (compatible; MSIE 6.0; MS Web Services Client Protocol
+  selection2:
+    c-useragent|contains:
+    - ' (compatible;MSIE '
+    - '.0;Windows NT '
+    - loader
+  selection3:
+    c-useragent:
+    - _
+    - CertUtil URL Agent
+    - Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:60.0)
+    - Mozilla/5.0 (Windows NT 6.3; WOW64; rv:28.0) Gecko/20100101 Firefox/28.0
+    - HTTPS
+    - Erbium-UA-4ce7c27cb4be9d32e333bf032c88235a
+    - x
+    - xxx
+  falsepositives:
+  - c-useragent: Mozilla/3.0 * Acrobat *
+  - cs-host|endswith:
+    - .acrobat.com
+    - .adobe.com
+    - .adobe.io
+  condition: 1 of selection* and not falsepositives
+falsepositives:
+- Unknown
+level: high
+x-soc-id: C-121
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: high
+x-soc-attack_type: c2_communication
+x-soc-severity: high
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 7195a772-4b3f-43a4-a210-6a003d65caa1
+x-soc-version: 1

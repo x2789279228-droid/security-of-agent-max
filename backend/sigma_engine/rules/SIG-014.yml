@@ -1,0 +1,27 @@
+title: sudoers 越权尝试（原始 auth.log）
+id: aaaaaaaa-0014-0000-0000-000000000014
+status: test
+description: >
+  匹配 syslog 原文 "NOT in sudoers" —— 用户尝试执行未授权的 sudo 命令,
+  属权限提升尝试的直接原始证据; 连续出现通常意味着正在试探提权路径。
+date: 2026/10/25
+author: SOC Platform
+license: SOC-Internal
+logsource:
+  category: system
+  product: linux
+detection:
+  selection:
+    message|contains: NOT in sudoers
+  condition: selection
+level: high
+tags:
+- attack.privilege-escalation.t1548
+falsepositives:
+- 用户误用 sudo 的孤立事件(由聚合阈值前的告警-only 动作兜底)
+x-soc-id: SIG-014
+x-soc-confidence: high
+x-soc-action: alert
+x-soc-attack_type: privilege_escalation
+x-soc-severity: high
+x-soc-version: 1

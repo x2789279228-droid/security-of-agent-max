@@ -1,0 +1,33 @@
+title: Spring Boot Actuator 敏感端点暴露探测
+id: aaaaaaaa-0019-0000-0000-000000000019
+status: test
+description: >
+  探测 /actuator/env、/actuator/heapdump、/actuator/gateway 等
+  Spring Boot 管理端点 —— 未授权可读环境变量(含密钥)甚至 RCE
+  (Spring Cloud Gateway CVE-2022-22947)。
+date: 2026/10/25
+author: SOC Platform
+license: SOC-Internal
+logsource:
+  category: webserver
+  product: generic
+detection:
+  selection:
+    url|contains:
+    - '/actuator/env'
+    - '/actuator/heapdump'
+    - '/actuator/gateway'
+    - '/actuator/jolokia'
+    - '/jolokia/read'
+  condition: selection
+level: high
+tags:
+- attack.initial-access.t1190
+falsepositives:
+- 内部运维平台对 actuator 的常规巡检(可按 src_ip 白名单加成)
+x-soc-id: SIG-019
+x-soc-confidence: high
+x-soc-action: block_ip
+x-soc-attack_type: unauthorized_access
+x-soc-severity: high
+x-soc-version: 1

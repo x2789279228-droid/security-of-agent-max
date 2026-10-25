@@ -1,0 +1,33 @@
+title: 加密货币矿池端口连接
+id: aaaaaaaa-0017-0000-0000-000000000017
+status: test
+description: >
+  对常见矿池端口(3333/4444/5555/7777/14444/14433)的出站连接 ——
+  主机失陷后被植入挖矿木马的强原始指标。
+date: 2026/10/25
+author: SOC Platform
+license: SOC-Internal
+logsource:
+  category: network
+  product: generic
+detection:
+  selection:
+    dst_port:
+    - 3333
+    - 4444
+    - 5555
+    - 7777
+    - 14444
+    - 14433
+  condition: selection
+level: high
+tags:
+- attack.impact.t1496
+falsepositives:
+- 内部借用这些端口的非常规服务(结合资产台账研判)
+x-soc-id: SIG-017
+x-soc-confidence: medium
+x-soc-action: alert
+x-soc-attack_type: cryptomining
+x-soc-severity: high
+x-soc-version: 1

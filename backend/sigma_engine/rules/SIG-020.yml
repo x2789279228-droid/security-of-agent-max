@@ -1,0 +1,30 @@
+title: Jenkins Script Console / Groovy 控制台探测
+id: aaaaaaaa-0020-0000-0000-000000000020
+status: test
+description: >
+  探测 Jenkins script 与 /command 端点 —— 未授权 Groovy 执行即 RCE,
+  勒索软件团伙的常用入口之一。
+date: 2026/10/25
+author: SOC Platform
+license: SOC-Internal
+logsource:
+  category: webserver
+  product: generic
+detection:
+  selection:
+    url|contains:
+    - '/jenkins/script'
+    - '/scriptlet/'
+    - 'jdk_internal_misc'
+  condition: selection
+level: high
+tags:
+- attack.initial-access.t1190
+falsepositives:
+- 安全团队的自建扫描器(按 src_ip 白名单处理)
+x-soc-id: SIG-020
+x-soc-confidence: medium
+x-soc-action: alert
+x-soc-attack_type: unauthorized_access
+x-soc-severity: high
+x-soc-version: 1

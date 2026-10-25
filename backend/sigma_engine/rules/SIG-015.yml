@@ -1,0 +1,27 @@
+title: SSH authorized_keys 变更相关日志（原始 syslog）
+id: aaaaaaaa-0015-0000-0000-000000000015
+status: test
+description: >
+  原始日志中出现 authorized_keys 文件操作痕迹 —— 攻击者放置 SSH 后门
+  公钥的持久化手法; 结合出现时段与操作账号上下文人工研判。
+date: 2026/10/25
+author: SOC Platform
+license: SOC-Internal
+logsource:
+  category: system
+  product: linux
+detection:
+  selection:
+    message|contains: authorized_keys
+  condition: selection
+level: medium
+tags:
+- attack.persistence.t1098
+falsepositives:
+- 管理员正常的密钥轮换
+x-soc-id: SIG-015
+x-soc-confidence: medium
+x-soc-action: alert
+x-soc-attack_type: persistence
+x-soc-severity: medium
+x-soc-version: 1

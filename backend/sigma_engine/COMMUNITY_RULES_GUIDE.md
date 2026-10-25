@@ -100,3 +100,47 @@ dry-run 复评（样本含 `method=GET`/`status=200`，负样本 0 误报）：
 | C-005 | web_xss_in_access_logs | xss | require_confirmation |
 
 引擎 `stats()` 现报告 `rules=16, shadow=5`，5 条社区规则全部以 `x-soc-shadow: true` 灰度在册（命中仅标记 `[SHADOW]`/`action=alert`，不阻断）。全量 pytest 198 passed 无回归。
+
+---
+
+## 3. 批量导入层（2026-10-25 B1 落地,规则库 16 → 150）
+
+上面的手工适配流程已由 `tools/import_sigmahq.py` 自动化,并新增第 4 层:
+
+| 层 | 目录 | 引擎加载 | 动作权 | 现状(2026-10-25) |
+|---|---|---|---|---|
+| 内置 | `rules/SIG-001..020` | ✓ | 执行类可用 | 20 条自研(原始指标锚点 SIG-012..020) |
+| 手适配社区 | `rules_community_active/c_0*` | ✓ | 影子(alert) | C-001..005 执行层历史存量;C-006..014 影子 |
+| **SigmaHQ 批量** | `rules_community_active/hq_*` | ✓ | **影子(alert)** | 116 条,`SIGMAHQ_MANIFEST.json` 全程溯源 |
+
+### 批量导入管线(幂等,可重复执行)
+
+```bash
+# 拉源(许可: Detection Rule License 1.1,出处保留在每个文件与 manifest)
+curl -sL -o tools/.sigmahq-cache/sigma.tar.gz \
+  https://codeload.github.com/SigmaHQ/sigma/tar.gz/refs/heads/master
+tar -xzf tools/.sigmahq-cache/sigma.tar.gz -C tools/.sigmahq-cache \
+  "sigma-master/rules/web" "sigma-master/rules/proxy" \
+  "sigma-master/rules/network" "sigma-master/rules-emerging-threats"
+python tools/import_sigmahq.py
+```
+
+管线四道门禁:字段兼容过滤(平台 schema 没有的字段=永不命中死重)
+→ **不兼容语义过滤**(`|re` 修饰符后端无 REGEXP;空字符串字面量在稀疏
+事件上="字段缺失也算空",两者都实测出过事故)→ 标题去重(与手适配规则)
+→ pySigma 逐条编译。产出写 `SIGMAHQ_MANIFEST.json`(每条剔除都有原因)。
+
+### 影子 → 执行的晋升纪律
+
+批量导入**永远影子上岗**(`x-soc-shadow: true, action: alert`):
+只有记录与告警权,没有 block_ip 权。转执行必须拿
+`nightly-backtest.yml` 的 per-rule precision 数据说话;
+守卫测试 `tests/test_sigma_bulk_sigmahq.py` 锁定该底线
+(任何人把批量规则改回执行类,CI 即红)。
+
+### 平台字段 → Sigma 字段的映射
+
+见 `sigma_engine/mapping.py`(`PLATFORM_TO_SIGMA`)。B1 扩容新增别名:
+`c-uri`/`cs-uri`/`UriPath`/`UriQuery`(url)、`c-useragent`(user_agent)、
+`cs-host`(host)、`c-ip`(src_ip)等 —— 与导入器 `COMPAT_FIELDS`
+白名单必须同步维护。

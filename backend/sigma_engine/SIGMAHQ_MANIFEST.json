@@ -1,0 +1,1802 @@
+{
+  "source": "https://github.com/SigmaHQ/sigma",
+  "license": "Detection Rule License (DRL) 1.1",
+  "imported_at": "2026-10-25T02:10:36.875382+00:00",
+  "sigma_root_ref": "master",
+  "total_scanned": 572,
+  "field_compatible": 116,
+  "compiled_ok": 116,
+  "written": 116,
+  "shadow_mode": true,
+  "id_range": "C-101+",
+  "dropped": [
+    {
+      "file": "rules\\web\\product\\apache\\web_apache_segfault.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\web\\product\\apache\\web_apache_threading_error.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\web\\product\\nginx\\web_nginx_core_dump.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\web\\proxy_generic\\proxy_download_susp_dyndns.yml",
+      "reason": "fields_absent:c-uri-extension"
+    },
+    {
+      "file": "rules\\web\\proxy_generic\\proxy_download_susp_tlds_blacklist.yml",
+      "reason": "fields_absent:c-uri-extension"
+    },
+    {
+      "file": "rules\\web\\proxy_generic\\proxy_download_susp_tlds_whitelist.yml",
+      "reason": "fields_absent:c-uri-extension"
+    },
+    {
+      "file": "rules\\web\\proxy_generic\\proxy_hktl_cobalt_strike_malleable_c2_requests.yml",
+      "reason": "fields_absent:cs-cookie"
+    },
+    {
+      "file": "rules\\web\\proxy_generic\\proxy_susp_ipfs_cred_harvest.yml",
+      "reason": "incompatible:re_modifier_unsupported"
+    },
+    {
+      "file": "rules\\web\\proxy_generic\\proxy_ua_empty.yml",
+      "reason": "incompatible:empty_string_literal"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_clear_logs.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_collect_data.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_crypto_actions.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_disable_logging.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_discovery.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_dos.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_dot1x_disabled.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_file_deletion.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_input_capture.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_local_accounts.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_modify_config.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_moving_data.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\aaa\\cisco_cli_net_sniff.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\bgp\\cisco_bgp_md5_auth_failed.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\cisco\\ldp\\cisco_ldp_md5_auth_failed.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\dns\\net_dns_external_service_interaction_domains.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules\\network\\dns\\net_dns_mal_cobaltstrike.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules\\network\\dns\\net_dns_pua_cryptocoin_mining_xmr.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules\\network\\dns\\net_dns_susp_b64_queries.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules\\network\\dns\\net_dns_susp_telegram_api.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules\\network\\dns\\net_dns_susp_txt_exec_strings.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules\\network\\dns\\net_dns_wannacry_killswitch_domain.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules\\network\\firewall\\net_firewall_cleartext_protocols.yml",
+      "reason": "category:firewall"
+    },
+    {
+      "file": "rules\\network\\fortinet\\fortigate\\fortinet_fortigate_new_admin_account_created.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\fortinet\\fortigate\\fortinet_fortigate_new_firewall_address_object.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\fortinet\\fortigate\\fortinet_fortigate_new_firewall_policy_added.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\fortinet\\fortigate\\fortinet_fortigate_new_local_user_created.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\fortinet\\fortigate\\fortinet_fortigate_new_vpn_ssl_web_portal.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\fortinet\\fortigate\\fortinet_fortigate_user_group_modified.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\fortinet\\fortigate\\fortinet_fortigate_vpn_ssl_settings_modified.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\huawei\\bgp\\huawei_bgp_auth_failed.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\juniper\\bgp\\juniper_bgp_missing_md5.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dce_rpc_mitre_bzar_execution.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dce_rpc_mitre_bzar_persistence.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dce_rpc_potential_petit_potam_efs_rpc_call.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dce_rpc_smb_spoolss_named_pipe.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_default_cobalt_strike_certificate.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dns_kerberos_coercion_via_dns_object_spn_spoofing.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dns_mining_pools.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dns_nkn.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dns_susp_zbit_flag.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_dns_torproxy.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_http_executable_download_from_webdav.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_http_susp_file_ext_from_susp_tld.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_http_webdav_put_request.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_rdp_public_listener.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_smb_converted_win_atsvc_task.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_smb_converted_win_impacket_secretdump.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_smb_converted_win_lm_namedpipe.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_smb_converted_win_susp_psexec.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_smb_converted_win_susp_raccess_sensitive_fext.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_smb_converted_win_transferring_files_with_credential_data.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules\\network\\zeek\\zeek_susp_kerberos_rc4.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2014\\TA\\Axiom\\proc_creation_win_apt_zxshell.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2014\\TA\\Turla\\proc_creation_win_apt_turla_commands_critical.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2014\\TA\\Turla\\proc_creation_win_apt_turla_comrat_may20.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2015\\Exploits\\CVE-2015-1641\\proc_creation_win_exploit_cve_2015_1641.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Exploits\\CVE-2017-0261\\proc_creation_win_exploit_cve_2017_0261.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Exploits\\CVE-2017-11882\\proc_creation_win_exploit_cve_2017_11882.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Exploits\\CVE-2017-8759\\proc_creation_win_exploit_cve_2017_8759.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Malware\\Adwind-RAT\\proc_creation_win_malware_adwind.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Malware\\CosmicDuke\\win_security_mal_cosmik_duke_persistence.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Malware\\Fireball\\proc_creation_win_malware_fireball.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Malware\\Hancitor\\proc_access_win_malware_verclsid_shellcode.yml",
+      "reason": "category:process_access"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Malware\\NotPetya\\proc_creation_win_malware_notpetya.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Malware\\PlugX\\proc_creation_win_malware_plugx_susp_exe_locations.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Malware\\StoneDrill\\win_system_apt_stonedrill.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\Malware\\WannaCry\\proc_creation_win_malware_wannacry.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\TA\\APT10\\proc_creation_win_apt_apt10_cloud_hopper.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\TA\\Dragonfly\\proc_creation_win_apt_ta17_293a_ps.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\TA\\Equation-Group\\net_firewall_apt_equationgroup_c2.yml",
+      "reason": "category:firewall"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\TA\\Lazarus\\proc_creation_win_apt_lazarus_binary_masquerading.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\TA\\Pandemic\\registry_event_apt_pandemic.yml",
+      "reason": "category:registry_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\TA\\Turla\\pipe_created_apt_turla_named_pipes.yml",
+      "reason": "category:pipe_created"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\TA\\Turla\\win_system_apt_carbonpaper_turla.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2017\\TA\\Turla\\win_system_apt_turla_service_png.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\Exploits\\CVE-2018-15473\\lnx_sshd_exploit_cve_2018_15473.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\Malware\\Elise-Backdoor\\proc_creation_win_malware_elise.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\APT27\\proc_creation_win_apt_apt27_emissary_panda.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\APT28\\proc_creation_win_apt_sofacy.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\APT29-CozyBear\\file_event_win_apt_cozy_bear_phishing_campaign_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\APT29-CozyBear\\proc_creation_win_apt_apt29_phishing_campaign_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\APT32-Oceanlotus\\registry_event_apt_oceanlotus_registry.yml",
+      "reason": "category:registry_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\MuddyWater\\proc_creation_win_apt_muddywater_activity.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\OilRig\\proc_creation_win_apt_oilrig_mar18.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\OilRig\\registry_event_apt_oilrig_mar18.yml",
+      "reason": "category:registry_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\OilRig\\win_security_apt_oilrig_mar18.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\OilRig\\win_system_apt_oilrig_mar18.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\Slingshot\\proc_creation_win_apt_slingshot.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\Slingshot\\win_security_apt_slingshot.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2018\\TA\\TropicTrooper\\proc_creation_win_apt_tropictrooper.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Exploits\\BearLPE-Exploit\\proc_creation_win_exploit_other_bearlpe.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Exploits\\CVE-2019-0708\\win_security_exploit_cve_2019_0708_scanner_poc.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Exploits\\CVE-2019-0708\\win_system_exploit_cve_2019_0708.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Exploits\\CVE-2019-1378\\proc_creation_win_exploit_cve_2019_1378.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Exploits\\CVE-2019-1388\\proc_creation_win_exploit_cve_2019_1388.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Exploits\\CVE-2019-14287\\lnx_sudo_exploit_cve_2019_14287.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Exploits\\CVE-2019-14287\\proc_creation_lnx_exploit_cve_2019_14287.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\BabyShark\\proc_creation_win_malware_babyshark.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\Dridex\\proc_creation_win_malware_dridex.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\Dtrack-RAT\\proc_creation_win_malware_dtrack.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\Emotet\\proc_creation_win_malware_emotet.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\Formbook\\proc_creation_win_malware_formbook.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\LockerGoga\\proc_creation_win_malware_lockergoga_ransomware.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\QBot\\proc_creation_win_malware_qbot.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\Ryuk\\proc_creation_win_malware_ryuk.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\Snatch\\proc_creation_win_malware_snatch_ransomware.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\Malware\\Ursnif\\registry_add_malware_ursnif.yml",
+      "reason": "category:registry_add"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\TA\\APC-C-12\\proc_creation_win_apt_aptc12_bluemushroom.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\TA\\APT31\\proc_creation_win_apt_apt31_judgement_panda.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\TA\\Bear-APT-Activity\\proc_creation_win_apt_bear_activity_gtr19.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\TA\\EmpireMonkey\\proc_creation_win_apt_empiremonkey.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\TA\\EquationGroup\\proc_creation_win_apt_equationgroup_dll_u_load.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\TA\\MustangPanda\\proc_creation_win_apt_mustangpanda.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\TA\\Operation-Wocao\\proc_creation_win_apt_wocao.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2019\\TA\\Operation-Wocao\\win_security_apt_wocao.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Exploits\\CVE-2020-0688\\win_vul_cve_2020_0688.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Exploits\\CVE-2020-10189\\proc_creation_win_exploit_cve_2020_10189.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Exploits\\CVE-2020-1048\\proc_creation_win_exploit_cve_2020_1048.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Exploits\\CVE-2020-1048\\registry_set_exploit_cve_2020_1048_new_printer_port.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Exploits\\CVE-2020-1350\\proc_creation_win_exploit_cve_2020_1350.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Exploits\\CVE-2020-1472\\proc_creation_win_exploit_cve_2020_1472_zero_poc.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Malware\\Blue-Mockingbird\\proc_creation_win_malware_blue_mockingbird.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Malware\\Blue-Mockingbird\\registry_set_mal_blue_mockingbird.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Malware\\Emotet\\proc_creation_win_malware_emotet_rundll32_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Malware\\FlowCloud\\registry_event_malware_flowcloud_markers.yml",
+      "reason": "category:registry_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Malware\\Ke3chang-TidePool\\proc_creation_win_malware_ke3chang_tidepool.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Malware\\Maze\\proc_creation_win_malware_maze_ransomware.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\Malware\\Trickbot\\proc_creation_win_malware_trickbot_wermgr.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\Evilnum\\proc_creation_win_apt_evilnum_jul20.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\GALLIUM\\proc_creation_win_apt_gallium_iocs.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\GALLIUM\\win_dns_analytic_apt_gallium.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\Greenbug\\proc_creation_win_apt_greenbug_may20.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\Lazarus\\proc_creation_win_apt_lazarus_group_activity.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\Leviathan\\registry_event_apt_leviathan.yml",
+      "reason": "category:registry_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\SolarWinds-Supply-Chain\\proc_creation_win_apt_unc2452_cmds.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\SolarWinds-Supply-Chain\\proc_creation_win_apt_unc2452_ps.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\SolarWinds-Supply-Chain\\proc_creation_win_apt_unc2452_vbscript_pattern.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\TAIDOOR-RAT\\proc_creation_win_apt_taidoor.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\Winnti\\proc_creation_win_apt_winnti_mal_hk_jan20.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2020\\TA\\Winnti\\proc_creation_win_apt_winnti_pipemon.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\av_exploit_cve_2021_34527_print_nightmare.yml",
+      "reason": "category:antivirus"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\file_delete_win_exploit_cve_2021_1675_print_nightmare.yml",
+      "reason": "category:file_delete"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\file_event_win_exploit_cve_2021_1675_printspooler.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\image_load_exploit_cve_2021_1675_spoolsv_dll_load.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\registry_event_cve_2021_1675_mimikatz_printernightmare_drivers.yml",
+      "reason": "category:registry_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\win_exploit_cve_2021_1675_printspooler.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\win_exploit_cve_2021_1675_printspooler_operational.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\win_security_exploit_cve_2021_1675_printspooler_security.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-1675\\zeek_dce_rpc_exploit_cve_2021_1675_printnightmare_print_driver_install.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-26084\\proc_creation_win_exploit_cve_2021_26084_atlassian_confluence.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-26084\\web_cve_2021_26084_confluence_rce_exploit.yml",
+      "reason": "fields_absent:cs-username"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-26857\\proc_creation_win_exploit_cve_2021_26857_msexchange.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-26858\\file_event_win_cve_2021_26858_msexchange.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-26858\\web_cve_2021_26858_iis_rce.yml",
+      "reason": "fields_absent:,cs-username"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-33771\\file_event_win_cve_2021_31979_cve_2021_33771_exploits.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-33771\\registry_set_cve_2021_31979_cve_2021_33771_exploits.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-35211\\proc_creation_win_exploit_cve_2021_35211_servu.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-38647\\zeek_http_exploit_cve_2021_38647_omigod_no_auth_rce.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-4034\\lnx_auth_exploit_cve_2021_4034_pwnkit_lpe.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-40444\\file_event_win_exploit_cve_2021_40444.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-40444\\proc_creation_win_exploit_cve_2021_40444.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-40444\\proc_creation_win_exploit_cve_2021_40444_office_directory_traversal.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-41379\\file_event_win_cve_2021_41379_msi_lpe.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-41379\\proc_creation_win_exploit_cve_2021_41379.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-41379\\win_vul_cve_2021_41379.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-42278\\win_system_exploit_cve_2021_42278.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-42287\\win_security_samaccountname_spoofing_cve_2021_42287.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-42287\\win_system_exploit_cve_2021_42287.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-42321\\win_exchange_cve_2021_42321.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-44077\\file_event_win_cve_2021_44077_poc_default_files.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\CVE-2021-44228\\proc_creation_win_exploit_cve_2021_44228_vmware_horizon_log4j.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\RazerInstaller-LPE-Exploit\\proc_creation_win_exploit_other_razorinstaller_lpe.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Exploits\\SystemNightmare-Exploit\\proc_creation_win_exploit_other_systemnightmare.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\BlackByte\\proc_creation_win_malware_blackbyte_ransomware.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\BlackByte\\registry_set_win_malware_blackbyte_privesc_registry.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Conti\\proc_creation_win_malware_conti.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Conti\\proc_creation_win_malware_conti_7zip.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Conti\\proc_creation_win_malware_conti_ransomware_commands.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Conti\\proc_creation_win_malware_conti_ransomware_database_dump.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\DarkSide\\proc_creation_win_malware_darkside_ransomware.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Devil-Bait\\file_event_win_malware_devil_bait_script_drop.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Devil-Bait\\proc_creation_win_malware_devil_bait_output_redirect.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\FoggyWeb\\image_load_malware_foggyweb_nobelium.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Goofy-Guineapig\\file_event_win_malware_goofy_guineapig_file_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Goofy-Guineapig\\proc_creation_win_malware_goofy_guineapig_broken_cmd.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Goofy-Guineapig\\proc_creation_win_malware_goofy_guineapig_googleupdate_uncommon_child_instance.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Goofy-Guineapig\\win_system_malware_goofy_guineapig_service_persistence.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Moriya-Rootkit\\file_event_win_moriya_rootkit.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Netwire\\registry_add_malware_netwire.yml",
+      "reason": "category:registry_add"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Pingback\\file_event_win_malware_pingback_backdoor.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Pingback\\image_load_malware_pingback_backdoor.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Pingback\\proc_creation_win_malware_pingback_backdoor.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Small-Sieve\\file_event_win_malware_small_sieve_evasion_typo.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Small-Sieve\\proc_creation_win_malware_small_sieve_cli_arg.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\Malware\\Small-Sieve\\registry_set_malware_small_sieve_evasion_typo.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\TA\\HAFNIUM\\proc_creation_win_apt_hafnium.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\TA\\Kaseya-Supply-Chain\\proc_creation_win_apt_revil_kaseya.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\TA\\PRIVATELOG\\image_load_usp_svchost_clfsw32.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2021\\TA\\SOURGUM\\proc_creation_win_apt_sourgrum.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-21554\\proc_creation_win_exploit_cve_2023_21554_queuejumper.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-21919\\win_system_exploit_cve_2022_21919_or_cve_2021_34484.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-22954\\proc_creation_win_exploit_cve_2022_22954_vmware_workspace_one_rce.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-24527\\file_event_win_cve_2022_24527_lpe.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-26134\\proc_creation_lnx_exploit_cve_2022_26134_atlassian_confluence.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-26809\\proc_creation_win_exploit_cve_2022_26809_rpcss_child_process_anomaly.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-29072\\proc_creation_win_exploit_cve_2022_29072_7zip.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-29799\\lnx_exploit_cve_2022_27999_cve_2022_27800.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-30190\\registry_set_exploit_cve_2022_30190_msdt_follina.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-33891\\proc_creation_lnx_exploit_cve_2022_33891_spark_shell_command_injection.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-37966\\win_system_exploit_cve_2022_37966_kdcsvc_rc4_downgrade.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-41120\\proc_creation_win_exploit_cve_2022_41120_sysmon_eop.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Exploits\\CVE-2022-42475\\fortios_sslvpnd_exploit_cve_2022_42475_exploitation_indicators.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\BlueSky-Ransomware\\win_security_malware_bluesky_ransomware_files_indicators.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\Bumblebee\\create_remote_thread_win_malware_bumblebee.yml",
+      "reason": "category:create_remote_thread"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\ChromeLoader\\proc_creation_win_malware_chrome_loader_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\Emotet\\proc_creation_win_malware_emotet_loader_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\Hermetic-Wiper\\proc_creation_win_malware_hermetic_wiper_activity.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\Raspberry-Robin\\proc_creation_win_malware_raspberry_robin_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\Raspberry-Robin\\proc_creation_win_malware_raspberry_robin_external_drive_exec.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\Raspberry-Robin\\proc_creation_win_malware_raspberry_robin_single_dot_ending_file.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\Serpent-Backdoor\\proc_creation_win_malware_serpent_backdoor_payload_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\SocGholish\\proc_creation_win_malware_socgholish_fakeupdates_activity.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\Malware\\win_mssql_sp_maggie.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\TA\\ACTINIUM\\proc_creation_win_apt_actinium_persistence.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2022\\TA\\MERCURY\\proc_creation_win_apt_mercury.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-20198\\cisco_syslog_cve_2023_20198_ios_xe_web_ui.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-21554\\win_cve_2023_21554_msmq_corrupted_packet.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-22518\\proc_creation_lnx_exploit_cve_2023_22518_confluence_java_child_proc.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-22518\\proc_creation_win_exploit_cve_2023_22518_confluence_tomcat_child_proc.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-2283\\lnx_sshd_exploit_cve_2023_2283_libssh_authentication_bypass.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-23397\\registry_set_exploit_cve_2023_23397_outlook_reminder_trigger.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-23397\\win_security_exploit_cve_2023_23397_outlook_remote_file_query.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-23397\\win_smbclient_connectivity_exploit_cve_2023_23397_outlook_remote_file.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-27363\\file_event_win_cve_2023_27363_foxit_rce.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-34362-MOVEit-Transfer-Exploit\\file_event_win_exploit_cve_2023_34362_moveit_transfer.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-34362-MOVEit-Transfer-Exploit\\proc_creation_win_exploit_cve_2023_34362_moveit_transfer_exploitation_activity.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-36874\\file_event_win_exploit_cve_2023_36874_report_creation.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-36874\\file_event_win_exploit_cve_2023_36874_wermgr_creation.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-36874\\proc_creation_win_exploit_cve_2023_36874_fake_wermgr.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-36884\\file_event_win_exploit_cve_2023_36884_office_windows_html_rce_file_patterns.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-36884\\proxy_exploit_cve_2023_36884_office_windows_html_rce.yml",
+      "reason": "incompatible:re_modifier_unsupported"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-36884\\proxy_exploit_cve_2023_36884_office_windows_html_rce_extenstion_ip_pattern_traffic.yml",
+      "reason": "incompatible:re_modifier_unsupported"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-36884\\win_security_exploit_cve_2023_36884_office_windows_html_rce_share_access_pattern.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-38831\\file_event_win_exploit_cve_2023_38331_winrar_susp_double_ext.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-38831\\proc_creation_win_exploit_cve_2023_38831_winrar_child_proc.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-40477\\file_event_win_exploit_cve_2023_40477_winrar_rev_file_abuse.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-40477\\win_application_exploit_cve_2023_40477_winrar_crash.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-46747\\proxy_cve_2023_46747_f5_remote_code_execution.yml",
+      "reason": "fields_absent:"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-46747\\web_cve_2023_46747_f5_remote_code_execution.yml",
+      "reason": "fields_absent:"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-4966\\proxy_exploit_cve_2023_4966_citrix_sensitive_information_disclosure_exploit.yml",
+      "reason": "incompatible:re_modifier_unsupported"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\CVE-2023-4966\\web_exploit_cve_2023_4966_citrix_sensitive_information_disclosure_exploit_attempt.yml",
+      "reason": "incompatible:re_modifier_unsupported"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Exploits\\Windows-Server-Unknown-Exploit\\proc_creation_win_exploit_other_win_server_undocumented_rce.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\COLDSTEEL\\file_event_win_malware_coldsteel_renamed_cmd.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\COLDSTEEL\\file_event_win_malware_coldsteel_service_dll_creation.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\COLDSTEEL\\image_load_malware_coldsteel_persistence_service_dll.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\COLDSTEEL\\proc_creation_win_malware_coldsteel_anonymous_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\COLDSTEEL\\proc_creation_win_malware_coldsteel_cleanup.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\COLDSTEEL\\proc_creation_win_malware_coldsteel_service_persistence.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\COLDSTEEL\\registry_set_malware_coldsteel_created_users.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\COLDSTEEL\\win_system_malware_coldsteel_persistence_service.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\DarkGate\\file_event_win_malware_darkgate_autoit3_binary_creation.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\DarkGate\\proc_creation_win_malware_darkgate_autoit3_from_susp_parent_and_location.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\DarkGate\\proc_creation_win_malware_darkgate_net_user_creation.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\dns_query_win_malware_socgholish_second_stage_c2.yml",
+      "reason": "category:dns_query"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Griffon\\proc_creation_win_malware_griffon_patterns.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\GuLoader\\proc_creation_win_malware_guloader_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\IcedID\\proc_creation_win_malware_icedid_rundll32_dllregisterserver.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Pikabot\\net_connection_win_malware_pikabot_rundll32_activity.yml",
+      "reason": "category:network_connection"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Pikabot\\proc_creation_win_malware_pikabot_combined_commands_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Pikabot\\proc_creation_win_malware_pikabot_discovery.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Pikabot\\proc_creation_win_malware_pikabot_rundll32_hollowing.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Pikabot\\proc_creation_win_malware_pikabot_rundll32_uncommon_extension.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Qakbot\\proc_creation_win_malware_qakbot_regsvr32_calc_pattern.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Qakbot\\proc_creation_win_malware_qakbot_rundll32_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Qakbot\\proc_creation_win_malware_qakbot_rundll32_exports.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Qakbot\\proc_creation_win_malware_qakbot_rundll32_fake_dll_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Qakbot\\proc_creation_win_malware_qakbot_uninstaller_cleanup.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Rhadamanthys\\proc_creation_win_malware_rhadamanthys_stealer_dll_launch.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Rorschach\\proc_creation_win_malware_rorschach_ransomware_activity.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\file_event_win_malware_snake_encrypted_payload_ioc.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\file_event_win_malware_snake_installers_ioc.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\file_event_win_malware_snake_werfault_creation.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\proc_creation_win_malware_snake_installer_cli_args.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\proc_creation_win_malware_snake_installer_exec.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\proc_creation_win_malware_snake_service_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\registry_event_malware_snake_covert_store_key.yml",
+      "reason": "category:registry_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\registry_set_malware_snake_encrypted_key.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\SNAKE\\win_system_malware_snake_persistence_service.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\Malware\\Ursnif\\proc_creation_win_malware_ursnif_cmd_redirection.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\3CX-Supply-Chain\\dns_query_win_malware_3cx_compromise.yml",
+      "reason": "category:dns_query"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\3CX-Supply-Chain\\image_load_malware_3cx_compromise_susp_dll.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\3CX-Supply-Chain\\net_connection_win_malware_3cx_compromise_beaconing_activity.yml",
+      "reason": "category:network_connection"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\3CX-Supply-Chain\\proc_creation_win_malware_3cx_compromise_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\3CX-Supply-Chain\\proc_creation_win_malware_3cx_compromise_susp_children.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\3CX-Supply-Chain\\proc_creation_win_malware_3cx_compromise_susp_update.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Cozy-Bear\\image_load_apt_cozy_bear_graphical_proton_dlls.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Cozy-Bear\\win_security_apt_cozy_bear_scheduled_tasks_name.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Cozy-Bear\\win_taskscheduler_apt_cozy_bear_graphical_proton_task_names.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Diamond-Sleet\\dns_query_win_apt_diamond_steel_indicators.yml",
+      "reason": "category:dns_query"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Diamond-Sleet\\file_event_win_apt_diamond_sleet_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Diamond-Sleet\\image_load_apt_diamond_sleet_side_load.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Diamond-Sleet\\proc_creation_win_apt_diamond_sleet_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Diamond-Sleet\\registry_event_apt_diamond_sleet_scheduled_task.yml",
+      "reason": "category:registry_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Diamond-Sleet\\win_security_apt_diamond_sleet_scheduled_task.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\EquationGroup\\net_dns_apt_equation_group_triangulation_c2_coms.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\FIN7\\file_event_win_apt_fin7_powershell_scripts_naming_convention.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\FIN7\\posh_ps_apt_fin7_powerhold.yml",
+      "reason": "category:ps_script"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\FIN7\\posh_ps_apt_fin7_powertrash_execution.yml",
+      "reason": "category:ps_script"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\FIN7\\proc_creation_win_apt_fin7_powertrash_lateral_movement.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Lace-Tempest\\file_event_win_apt_lace_tempest_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Lace-Tempest\\posh_ps_apt_lace_tempest_eraser_script.yml",
+      "reason": "category:ps_script"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Lace-Tempest\\posh_ps_apt_lace_tempest_malware_launcher.yml",
+      "reason": "category:ps_script"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Lace-Tempest\\proc_creation_win_apt_lace_tempest_cobalt_strike_download.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Lace-Tempest\\proc_creation_win_apt_lace_tempest_loader_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Lazarus\\image_load_apt_lazarus_side_load_activity.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Mint-Sandstorm\\proc_creation_win_apt_mint_sandstorm_aspera_faspex_susp_child_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Mint-Sandstorm\\proc_creation_win_apt_mint_sandstorm_log4j_wstomcat_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Mint-Sandstorm\\proc_creation_win_apt_mint_sandstorm_manage_engine_susp_child_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Mustang-Panda-Australia-Campaign\\proc_creation_win_apt_mustang_panda_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Okta-Support-System-Breach\\okta_apt_suspicious_user_creation.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Onyx-Sleet\\file_event_win_apt_onyx_sleet_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\PaperCut-Print-Management-Exploitation\\proc_creation_win_papercut_print_management_exploitation_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\PaperCut-Print-Management-Exploitation\\proc_creation_win_papercut_print_management_exploitation_pc_app.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\Peach-Sandstorm\\proc_creation_win_apt_peach_sandstorm_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\UNC4841-Barracuda-ESG-Zero-Day-Exploitation\\file_event_lnx_apt_unc4841_exfil_mail_pattern.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\UNC4841-Barracuda-ESG-Zero-Day-Exploitation\\file_event_lnx_apt_unc4841_file_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\UNC4841-Barracuda-ESG-Zero-Day-Exploitation\\proc_creation_lnx_apt_unc4841_openssl_connection.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\UNC4841-Barracuda-ESG-Zero-Day-Exploitation\\proc_creation_lnx_apt_unc4841_wget_download_compressed_file_tmep_sh.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\UNC4841-Barracuda-ESG-Zero-Day-Exploitation\\proc_creation_lnx_apt_unc4841_wget_download_tar_files_direct_ip.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2023\\TA\\UNC4841-Barracuda-ESG-Zero-Day-Exploitation\\proc_creation_lnx_atp_unc4841_seaspy_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-1708\\file_event_win_exploit_cve_2024_1708_screenconnect.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-1708\\win_security_exploit_cve_2024_1708_screenconnect.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-1709\\file_event_win_exploit_cve_2024_1709_user_database_modification_screenconnect.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-1709\\win_security_exploit_cve_2024_1709_user_database_modification_screenconnect.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-3094\\proc_creation_lnx_exploit_cve_2024_3094_sshd_child_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-3400\\file_event_paloalto_globalprotect_exploit_cve_2024_3400_command_inject_file_creation.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-3400\\paloalto_globalprotect_exploit_cve_2024_3400_command_injection.yml",
+      "reason": "category:appliance"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-35250\\image_load_exploit_cve_2024_35250_privilege_escalation.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-37085\\proc_creation_win_exploit_cve_2024_37085_esxi_admins_group_creation.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-37085\\win_security_exploit_cve_2024_37085_esxi_admins_group.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-49113\\win_application_error_exploit_cve_2024_49113_ldap_nightmare.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Exploits\\CVE-2024-50623\\proc_creation_win_exploit_cve_2024_50623_cleo.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\CSharp-Streamer\\image_load_malware_csharp_streamer_dotnet_load.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\DarkGate\\file_event_win_malware_darkgate_autoit3_save_temp.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\Generic\\file_event_win_malware_generic_creation_configuration_rats.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\KamiKakaBot\\proc_creation_win_malware_kamikakabot_lnk_lure_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\KamiKakaBot\\proc_creation_win_malware_kamikakabot_schtasks_persistence.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\KamiKakaBot\\registry_set_malware_kamikakabot_winlogon_persistence.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\kapeka\\file_event_win_malware_kapeka_backdoor_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\kapeka\\image_load_malware_kapeka_backdoor_wll.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\kapeka\\proc_creation_win_malware_kapeka_backdoor_persistence.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\kapeka\\proc_creation_win_malware_kapeka_backdoor_rundll32_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\kapeka\\registry_set_malware_kapeka_backdoor_autorun_persistence.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\kapeka\\registry_set_malware_kapeka_backdoor_configuration.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\kapeka\\win_security_malware_kapeka_backdoor_scheduled_task_creation.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\Lummac-Stealer\\proc_creation_win_malware_lummac_more_vbc.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\Raspberry-Robin\\image_load_malware_raspberry_robin_side_load_aclui_oleview.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\Raspberry-Robin\\proc_creation_win_malware_raspberry_robin_rundll32_shell32_cpl_exection.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\Malware\\Raspberry-Robin\\registry_set_malware_raspberry_robin_internet_settings_zonemap_tamper.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\TA\\DPRK\\dns_query_win_apt_dprk_malicious_domains.yml",
+      "reason": "category:dns_query"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\TA\\FIN7\\proc_creation_win_apt_fin7_exploitation_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\TA\\Forest-Blizzard\\file_event_win_apt_forest_blizzard_activity.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\TA\\Forest-Blizzard\\file_event_win_apt_forest_blizzard_constrained_js.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\TA\\Forest-Blizzard\\proc_creation_win_apt_forest_blizzard_activity.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\TA\\Forest-Blizzard\\registry_set_apt_forest_blizzard_custom_protocol_handler.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\TA\\Forest-Blizzard\\registry_set_apt_forest_blizzard_custom_protocol_handler_dll.yml",
+      "reason": "category:registry_set"
+    },
+    {
+      "file": "rules-emerging-threats\\2024\\TA\\SlashAndGrab-Exploitation-In-Wild\\file_event_win_apt_unknown_exploitation_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-10035\\proc_creation_win_exploit_cve_2025_10035.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-24054\\file_event_win_exploit_cve_2025_24054_library_ms.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-30406\\proc_creation_win_exploit_cve_2025_30406_centrestack_portal_child_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-31161\\proc_creation_win_crushftp_susp_child_processes.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-31324\\file_event_lnx_sap_netweaver_webshell_creation.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-31324\\file_event_win_sap_netweaver_webshell_creation.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-31324\\proc_creation_lnx_sap_netweaver_susp_child_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-31324\\proc_creation_win_sap_netweaver_susp_child_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-31324\\web_lnx_exploit_cve_2025_31324_sap_netviewer_webshell_uploaded.yml",
+      "reason": "fields_absent:cs-content-type"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-32463\\file_event_lnx_exploit_cve_2025_32463.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-33053\\image_load_win_exploit_cve_2025_33053.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-33053\\proc_access_win_exploit_cve_2025_33053.yml",
+      "reason": "category:process_access"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-33053\\proc_creation_win_exploit_cve_2025_33053.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-40551\\proc_creation_win_exploit_cve_2025_40551.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-49144\\proc_creation_win_exploit_cve_2025_49144.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-53770\\file_event_win_exploit_cve_2025_53770.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-53770\\proc_creation_win_exploit_cve_2025_53770_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-54309\\proc_creation_win_exploit_cve_2025_54309.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-55182\\proc_creation_lnx_exploit_cve_2025_55182_susp_nodejs_server_child_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-55182\\proc_creation_win_exploit_cve_2025_55182_susp_nodejs_server_child_process.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-57788\\proc_creation_win_exploit_cve_2025_57788.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-57790\\proc_creation_win_exploit_cve_2025_57790.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-57791\\proc_creation_win_exploit_cve_2025_57791.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-59287\\proc_creation_win_exploit_cve_2025_59287.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE-2025-59287\\win_wsus_exploit_cve_2025_59287.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Exploits\\CVE_2025_4598\\proc_creation_lnx_exploit_cve_2025_5054_or_cve_2025_4598.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Atomic-MacOS-Stealer\\file_event_macos_malware_amos_persistence.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Atomic-MacOS-Stealer\\proc_creation_macos_malware_amos_curl_post.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\file_event_win_malware_funklocker_ransomware_extension.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Grixba\\proc_creation_win_malware_grixba_recon.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Katz-Stealer\\dns_query_win_katz_stealer_domain.yml",
+      "reason": "category:dns_query"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Katz-Stealer\\image_load_win_katz_stealer_payloads.yml",
+      "reason": "category:image_load"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Katz-Stealer\\net_dns_katz_stealer_domain.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Katz-Stealer\\zeek_http_katz_stealer_susp_useragent.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\proc_creation_win_malware_kalambur_curl_socks_tor.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Shai-Hulud\\file_event_lnx_mal_shai_hulud_workflow.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Shai-Hulud\\proc_creation_lnx_mal_shai_hulud_indicator.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Shai-Hulud\\proc_creation_lnx_mal_shai_hulud_malicious_node_bun_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Shai-Hulud\\proc_creation_lnx_mal_shai_hulud_malicious_npm_package_installation.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Shai-Hulud\\proc_creation_lnx_mal_shai_hululd_exfiltration.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Shai-Hulud\\proc_creation_win_mal_shai_hulud_indicator.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Shai-Hulud\\proc_creation_win_mal_shai_hulud_malicious_node_bun_execution.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2025\\Malware\\Shai-Hulud\\proc_creation_win_mal_shai_hulud_malicious_npm_package_installation.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\CVE-2026-31431\\lnx_auditd_exploit_cve_2026_31431_af_alg_socket_creation.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\CVE-2026-31431\\proc_creation_lnx_exploit_cve_2026_31431_copyfail.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\CVE-2026-33829\\proc_creation_win_exploit_cve_2026_33829.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\CVE-2026-41089\\win_application_error_exploit_cve_2026_41089_lsass_netlogon_crash.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\CVE-2026-54121\\win_security_adcs_certighost_cdc_chase_request.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\CVE-2026-54121\\win_security_adcs_certighost_cert_issued_via_chase.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\CVE-2026-54121\\win_security_adcs_certighost_ghost_machine_account_creation.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\RedSun\\file_event_win_exploit_redsun_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\RedSun\\pipe_created_win_exploit_redsun_named_pipe.yml",
+      "reason": "category:pipe_created"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\RedSun\\proc_creation_win_redsun_conhost_via_tiering_engine.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Exploits\\RedSun\\win_defender_exploit_redsun_tiering_engine_detected_as_eicar.yml",
+      "reason": "category:none"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\Axios-NPM-Compromise\\file_event_lnx_axios_npm_compromise_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\Axios-NPM-Compromise\\file_event_macos_axios_npm_compromise_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\Axios-NPM-Compromise\\file_event_win_axios_npm_compromise_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\Axios-NPM-Compromise\\net_dns_axios_npm_compromise_indicator.yml",
+      "reason": "category:dns"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\Axios-NPM-Compromise\\proc_creation_lnx_axios_npm_compromise_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\Axios-NPM-Compromise\\proc_creation_macos_axios_npm_compromise_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\Axios-NPM-Compromise\\proc_creation_win_axios_npm_compromise_indicators.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\EvilTokens\\proxy_eviltokens_cloudflare_worker_request.yml",
+      "reason": "incompatible:re_modifier_unsupported"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\Lynx-Ransomware\\proc_creation_win_malware_lynx.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\TanStack-Supply-Chain\\dns_query_win_malware_tanstack_supply_chain_c2.yml",
+      "reason": "category:dns_query"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\TanStack-Supply-Chain\\file_event_lnx_malware_tanstack_supply_chain.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\TanStack-Supply-Chain\\file_event_win_malware_tanstack_supply_chain.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\TanStack-Supply-Chain\\proc_creation_lnx_malware_tanstack_supply_chain.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\Malware\\TanStack-Supply-Chain\\proc_creation_win_malware_tanstack_supply_chain.yml",
+      "reason": "category:process_creation"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\TA\\TeamPCP\\file_event_lnx_teampcp_litellm_supply_chain_attack_indicators.yml",
+      "reason": "category:file_event"
+    },
+    {
+      "file": "rules-emerging-threats\\2026\\TA\\TeamPCP\\proc_creation_lnx_teampcp_litellm_supply_chain_attack_indicators.yml",
+      "reason": "category:process_creation"
+    }
+  ]
+}

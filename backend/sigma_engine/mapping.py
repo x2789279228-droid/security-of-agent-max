@@ -12,21 +12,28 @@ from typing import Dict, Any
 PLATFORM_TO_SIGMA: Dict[str, list[str]] = {
     "event": ["event", "event.category", "category"],     # 平台归一化事件类型
     "event_type": ["event", "event.category"],
-    "src_ip": ["src_ip", "source.ip"],
-    "source_ip": ["src_ip", "source.ip"],
-    "dst_ip": ["dst_ip", "destination.ip"],
-    "dest_ip": ["dst_ip", "destination.ip"],
-    "url": ["url", "http.url", "http.url_original", "cs-uri-query", "cs-uri-stem"],      # web 规则常用(SigmaHQ webserver 多用 cs-uri-query)
+    "src_ip": ["src_ip", "source.ip", "client-ip", "c-ip"],
+    "source_ip": ["src_ip", "source.ip", "client-ip", "c-ip"],
+    "dst_ip": ["dst_ip", "destination.ip", "dest_ip", "dst"],
+    "dest_ip": ["dst_ip", "destination.ip", "dest_ip", "dst"],
+    "url": ["url", "http.url", "http.url_original", "cs-uri-query", "cs-uri-stem",
+            # 2026-10-25 B1 扩容: SigmaHQ webserver/proxy 规则的高频 URI 字段
+            # (普查: c-uri×12 / cs-uri×2 / c-uri-query×1), 同源于平台 url
+            "c-uri", "cs-uri", "c-uri-query", "UriPath", "UriQuery"],
     "message": ["message", "details"],
-    "dst_port": ["dst_port", "destination.port"],
+    "dst_port": ["dst_port", "destination.port", "dest_port"],
     "protocol": ["protocol", "network.protocol"],
     "server": ["server", "destination.hostname"],
-    "host": ["host", "destination.hostname"],
+    "host": ["host", "destination.hostname",
+             # SigmaHQ proxy 规则的 cs-host(普查 ×11)同源于平台 host/server
+             "cs-host", "c-host", "Hostname"],
     # SigmaHQ web(webserver) 补充字段
-    "method": ["method", "http.method", "cs-method"],
-    "status": ["status", "http.response.status_code", "sc-status"],   # HTTP 状态码 (SigmaHQ 用 sc-status 做 filter)
-    "user_agent": ["user_agent", "http.user_agent", "cs-user-agent"],
-    "referer": ["referer", "http.referrer", "cs-referer"],
+    "method": ["method", "http.method", "cs-method", "c-method"],
+    "status": ["status", "http.response.status_code", "sc-status", "c-status"],   # HTTP 状态码 (SigmaHQ 用 sc-status 做 filter)
+    "user_agent": ["user_agent", "http.user_agent", "cs-user-agent",
+                   # SigmaHQ proxy 规则的 c-useragent(普查 ×24)同源于平台 user_agent
+                   "c-useragent", "UserAgent", "cs-UserAgent"],
+    "referer": ["referer", "http.referrer", "cs-referer", "c-referer"],
 }
 
 __all__ = ["PLATFORM_TO_SIGMA", "apply_mapping"]
