@@ -20,6 +20,9 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# feed 文本软上限: 免费源最大也就几百 KB, 10MB 足够容纳任何直出列表
+_MAX_FEED_BYTES = 10_000_000
+
 # STIX 2.1 IOC 类型映射
 _STIX_IOC_MAP = {
     "ipv4-addr": "ip",
@@ -57,6 +60,8 @@ class TaxiiClient:
             iocs = await self._poll_misp(feed_config)
         elif feed_type == "csv":
             iocs = await self._import_csv(feed_config)
+        elif feed_type == "csv_http":
+            iocs = await self._import_csv_http(feed_config)
         elif feed_type == "stix_bundle":
             iocs = await self._import_stix_bundle(feed_config)
         else:
@@ -192,22 +197,123 @@ class TaxiiClient:
         iocs = []
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    ioc_type = row.get("type", row.get("ioc_type", "ip"))
-                    ioc_value = row.get("value", row.get("ioc_value", ""))
-                    if ioc_value:
-                        iocs.append({
-                            "ioc_type": ioc_type,
-                            "ioc_value": ioc_value.strip(),
-                            "threat_type": row.get("threat_type", ""),
-                            "severity": row.get("severity", "medium"),
-                            "source": config.get("name", "csv"),
-                        })
+                iocs = self._parse_csv_text(f.read(), config)
         except Exception as e:
             logger.error("CSV 导入失败: %s", e)
 
         return iocs
+
+    async def _fetch_text(self, url: str, api_key: str = "") -> str:
+        """拉取远程情报文本 (免费 feed 直接给匿名 CSV / 纯文本)。
+
+        独立成方法供测试 monkeypatch —— 解析逻辑与传输解耦。
+        """
+        import httpx
+
+        headers = {
+            "User-Agent": "SOC-Platform/1.0 (threat-intel feed poller)",
+        }
+        if api_key:
+            headers["Authorization"] = f"Token {api_key}"
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            text = resp.text
+        if len(text) > _MAX_FEED_BYTES:
+            logger.warning(
+                "feed 响应超大(%d chars, url=%s), 截断到 %d",
+                len(text), url[:100], _MAX_FEED_BYTES,
+            )
+            text = text[:_MAX_FEED_BYTES]
+        return text
+
+    def _parse_csv_text(self, text: str, config: dict) -> list[dict]:
+        """把 feed 文本解析为规范 IOC 列表。
+
+        支持两种格式(config["config"] 里配 dialect):
+          csv(默认): 带表头 CSV —— abuse.ch Feodo ipblocklist 等
+              列映射: value_column(默认 value) / type_column / fixed_type /
+                      threat_column / fixed_threat / severity
+          plain: 每行一个指标 —— OpenPhish feed.txt 等
+              全部取 fixed_type(默认 url)作为类型
+        `#` 开头视为注释行(abuse.ch 三个头注释块)。
+        """
+        import csv
+        import io
+
+        cfg = config.get("config") or {}
+        fmt = str(cfg.get("format", "csv")).lower()
+        comment = str(cfg.get("comment_prefix", "#"))
+        source = str(config.get("name", "csv_http"))
+        lines = [
+            ln for ln in text.splitlines()
+            if ln.strip() and not ln.lstrip().startswith(comment)
+        ]
+        if not lines:
+            return []
+
+        value_col = str(cfg.get("value_column", "value"))
+        type_col = str(cfg.get("type_column", ""))
+        fixed_type = str(cfg.get("fixed_type", "ip"))
+        threat_col = str(cfg.get("threat_column", ""))
+        fixed_threat = str(cfg.get("fixed_threat", ""))
+        severity = str(cfg.get("severity", "medium"))
+
+        iocs: list[dict] = []
+        if fmt == "plain":
+            for ln in lines:
+                iocs.append({
+                    "ioc_type": fixed_type,
+                    "ioc_value": ln.strip(),
+                    "threat_type": fixed_threat,
+                    "severity": severity,
+                    "source": source,
+                })
+            return iocs
+
+        reader = csv.DictReader(io.StringIO("\n".join(lines)))
+        for row in reader:
+            # 列名回退链保持与旧本地 csv 路径兼容(value|ioc_value / type|ioc_type)
+            value = str(
+                row.get(value_col) or row.get("value") or row.get("ioc_value") or ""
+            ).strip()
+            if not value:
+                continue
+            ioc_type = str(
+                (row.get(type_col) if type_col else None)
+                or row.get("type") or row.get("ioc_type") or fixed_type
+            ).strip()
+            threat = str(
+                (row.get(threat_col) if threat_col else None)
+                or row.get("threat_type") or fixed_threat
+            ).strip()
+            iocs.append({
+                "ioc_type": ioc_type or fixed_type,
+                "ioc_value": value,
+                "threat_type": threat,
+                "severity": severity,
+                "source": source,
+            })
+        return iocs
+
+    async def _import_csv_http(self, config: dict) -> list[dict]:
+        """HTTP 情报源导入 (免费 feed: abuse.ch Feodo / OpenPhish / OTX 导出)。
+
+        2026-10-25 前平台只支持本地 csv 文件与 TAXII/MISP ——
+        免费源处于"客户端就绪、没有一条真实情报"状态。本方法接通:
+            threat_intel_feeds(feed_type='csv_http', url=..., config={dialect})
+        → scheduler 轮询 → store_iocs 落库 → ioc_matcher 命中富化。
+        """
+        url = str(config.get("url", "")).strip()
+        if not url.lower().startswith(("http://", "https://")):
+            logger.warning("csv_http 源 url 非法: %s", url[:100])
+            return []
+        try:
+            text = await self._fetch_text(url, api_key=str(config.get("api_key", "")))
+        except Exception as e:
+            logger.warning("feed 拉取失败 url=%s: %s", url[:100], e)
+            return []
+        return self._parse_csv_text(text, config)
 
     async def _import_stix_bundle(self, config: dict) -> list[dict]:
         """STIX Bundle JSON 文件导入"""

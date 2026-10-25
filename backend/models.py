@@ -692,7 +692,7 @@ class ThreatIntelFeed(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(200), nullable=False)
-    feed_type = Column(String(30), nullable=False)               # taxii | misp | csv | stix_bundle
+    feed_type = Column(String(30), nullable=False)               # taxii | misp | csv | csv_http | stix_bundle
     url = Column(String(1000), default="")
     api_key = Column(String(500), default="")
     collection = Column(String(200), default="")

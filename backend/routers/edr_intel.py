@@ -200,8 +200,8 @@ async def intel_create_feed(
     except Exception:
         raise HTTPException(400, "请求体必须是 JSON")
     feed_type = str(body.get("feed_type") or "").strip().lower()
-    if feed_type not in ("taxii", "misp", "csv", "stix_bundle"):
-        raise HTTPException(400, "feed_type 必须是 taxii|misp|csv|stix_bundle")
+    if feed_type not in ("taxii", "misp", "csv", "csv_http", "stix_bundle"):
+        raise HTTPException(400, "feed_type 必须是 taxii|misp|csv|csv_http|stix_bundle")
     from models import ThreatIntelFeed
 
     feed = ThreatIntelFeed(
@@ -236,6 +236,8 @@ async def intel_poll_feed(
         "api_key": feed.api_key,
         "collection": feed.collection,
         "name": feed.name,
+        # 与 scheduler._poll_due_feeds 对齐: 方言映射在 config 列
+        "config": getattr(feed, "config", None) or {},
     }
     try:
         from threat_intel.ioc_ingest import poll_feed_and_store

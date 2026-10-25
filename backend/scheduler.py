@@ -192,6 +192,9 @@ class Scheduler:
                 "feed_type": feed.feed_type, "url": feed.url,
                 "api_key": feed.api_key, "collection": feed.collection,
                 "name": feed.name,
+                # 2026-10-25: 方言映射(csv_http 的列名/format 等)放在 config 列,
+                # 此前构建 cfg 时漏掉该列 → 即使库里配了映射也永远按默认解析。
+                "config": getattr(feed, "config", None) or {},
             }
             try:
                 stats = await poll_feed_and_store(session, cfg)
