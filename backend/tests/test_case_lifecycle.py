@@ -240,18 +240,41 @@ class TestRuleManager:
         assert "已存在" in result["error"]
 
     def test_update_sigma_rule(self):
-        result = self.rm.update_rule("sigma", "SIG-001", {
-            "severity": "critical",
-        }, change_summary="测试修改")
-        assert result["success"] is True
-        assert "version_data" in result
+        # 2026-10-25: 此前直接 update 真实的 SIG-001 —— 每次跑测试给仓库里的
+        # 规则文件 x-soc-version +2(测试污染工作区, git diff 出现幽灵改动)。
+        # 改为自建一次性规则做更新语义验证, 结束清理。
+        create = self.rm.create_rule("sigma", {
+            "rule_id": "SIG-UPD-001",
+            "name": "更新语义验证",
+            "description": "单元测试用, 随删",
+            "severity": "high",
+            "attack_type": "test",
+            "confidence": "low",
+            "action_recommend": "alert",
+            "conditions": {"event_contains": ["UPD_SEMANTICS_TEST"]},
+        })
+        assert create["success"] is True, create
+        try:
+            result = self.rm.update_rule("sigma", "SIG-UPD-001", {
+                "severity": "critical",
+            }, change_summary="测试修改")
+            assert result["success"] is True
+            assert "version_data" in result
 
-        # 验证修改生效
-        rule = self.rm.get_rule("sigma", "SIG-001")
-        assert rule["severity"] == "critical"
-
-        # 恢复
-        self.rm.update_rule("sigma", "SIG-001", {"severity": "high"})
+            # 验证修改生效 + 版本真实递增(直接读落盘 YAML, 绕过 get_rule 投影)
+            rule = self.rm.get_rule("sigma", "SIG-UPD-001")
+            assert rule["severity"] == "critical"
+            import yaml as _yaml
+            from sigma_engine import store as _sigma_store
+            _fp = _sigma_store._file_for("SIG-UPD-001", _sigma_store.DEFAULT_RULES_DIR)
+            assert _fp, "更新后的规则文件应存在"
+            _raw = _yaml.safe_load(open(_fp, encoding="utf-8"))
+            assert int(_raw.get("x-soc-version") or 0) >= 2, (
+                "更新必须真实递增 x-soc-version (P2 修复语义)"
+            )
+        finally:
+            cleanup = self.rm.delete_rule("sigma", "SIG-UPD-001")
+            assert cleanup["success"] is True
 
     def test_update_nonexistent_rule_fails(self):
         result = self.rm.update_rule("sigma", "SIG-FAKE", {"name": "x"})

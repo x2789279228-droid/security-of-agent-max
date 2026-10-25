@@ -189,6 +189,28 @@ jobs:
       - name: Run PG integration tests
         run: pytest -q tests/integration -p no:cacheprovider
 
+  # ── 全链路集成: 真 Kafka + 真 PG (2026-10-25 第三阶段) ──
+  # 此前"真集成"仅覆盖 PG 迁移+审批表; Kafka 消费 → 检测 → 响应决策 →
+  # 落库的完整管道从未在测试中组装过。本 job 拉真 Kafka(cp-kafka 7.6)+PG16,
+  # 验证三条腿: enriched 落库 / 告警→响应决策留痕 / 畸形消息进 DLQ 不杀循环。
+  pipeline-integration:
+    name: Full pipeline integration (Kafka + PG)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install deps
+        run: pip install -r requirements.lock pytest pytest-asyncio "testcontainers[postgres,kafka]>=4.7"
+      - name: Run full-pipeline integration tests
+        run: pytest -q tests/integration/test_full_pipeline_integration.py -p no:cacheprovider
+
   # ── API 契约一致性 (2026-10-23 第三批) ──
   # backend/openapi.json(导出自 FastAPI) 与 frontend/src/types/api-generated.ts
   # 都提交入库; 本 job 重新生成并 diff —— 后端改了端点/模型但没重新导出 → PR 红。
@@ -506,13 +528,12 @@ jobs:
           fi
           echo "[leak-gate] git 跟踪文件中未发现密钥"
 
-      - name: Git 历史私钥扫描
+      - name: Git 历史完整私钥块扫描
+        # 2026-10-25 修复: 原 naive 正则 `BEGIN ... PRIVATE KEY` 把审计报告对
+        # 泄露事实的【文字引用】(docs/AUDIT-2026-10-03 表格里的 PEM 格式头)
+        # 也当成密钥 —— 而 git 历史不重写就清不掉旧文案, 误报一旦产生永远红。
+        # 真私钥必为完整 PEM 块(BEGIN+密文体+END), 文档引用只有孤立一行;
+        # 分类器改为块级判定, 且自带已知答案自检(坏了退出 2, 不会假绿)。
         run: |
-          set -euo pipefail
-          # 不要用 head：pipefail 下 grep 会因 SIGPIPE(141) 让 if 误判为“没找到”。
-          HITS=$(git log --all -p 2>/dev/null | grep -cE 'BEGIN (OPENSSH |RSA |EC |DSA )?PRIVATE KEY' || true)
-          if [ "${HITS:-0}" -gt 0 ]; then
-            echo "::error::Git 历史中检出 ${HITS} 处私钥内容 —— 视为已泄露，请轮换并清理历史"
-            exit 1
-          fi
-          echo "[leak-gate] Git 历史中未检出私钥"
+          python tools/scan-private-key-history.py --self-test
+          python tools/scan-private-key-history.py

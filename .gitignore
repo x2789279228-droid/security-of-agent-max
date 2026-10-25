@@ -115,3 +115,11 @@ r12_executive_summary.md
 backend/1
 # SSH 防火墙/响应密钥（含私钥）→ 仅本机测试, 不入库
 config/ssh/
+
+# ZCode 会话工作目录
+.zcode/
+
+# SigmaHQ 源码缓存(B1 批量导入工具的数据源, 不入库)
+tools/.sigmahq-cache/
+# 公开数据集缓存(B2 评测数据源, 许可与体积原因不入库)
+tools/datasets-cache/
