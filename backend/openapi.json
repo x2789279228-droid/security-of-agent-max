@@ -1698,7 +1698,7 @@
     ]
    },
    "post": {
-    "description": "注册/更新资产 (DB 持久化 + 内存缓存同步)",
+    "description": "注册/更新资产 (DB 持久化 + 内存缓存同步; 资产台账变更限操作员以上)",
     "operationId": "assets_register_api_assets_post",
     "parameters": [
      {
@@ -1898,7 +1898,7 @@
   },
   "/api/assets/{asset_id}": {
    "delete": {
-    "description": "下线资产 (软删除)",
+    "description": "下线资产 (软删除; 台账变更限操作员以上)",
     "operationId": "assets_remove_api_assets__asset_id__delete",
     "parameters": [
      {
@@ -2114,6 +2114,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Run Audit Llm Pipeline",
     "tags": [
      "audit"
@@ -3280,7 +3285,7 @@
   },
   "/api/cep/patterns/{pattern_id}/shadow": {
    "post": {
-    "description": "切换灰度模式（shadow mode: 仅记录不告警）",
+    "description": "切换灰度模式（shadow mode: 仅记录不告警; 检测配置热更限 admin）",
     "operationId": "cep_pattern_shadow_api_cep_patterns__pattern_id__shadow_post",
     "parameters": [
      {
@@ -3326,7 +3331,7 @@
   },
   "/api/cep/patterns/{pattern_id}/toggle": {
    "post": {
-    "description": "启用/禁用 CEP 模式（通过 Kafka Broadcast 热更新到 Flink）",
+    "description": "启用/禁用 CEP 模式（通过 Kafka Broadcast 热更新到 Flink; 检测配置热更限 admin）",
     "operationId": "cep_pattern_toggle_api_cep_patterns__pattern_id__toggle_post",
     "parameters": [
      {
@@ -3372,7 +3377,7 @@
   },
   "/api/cep/replay": {
    "post": {
-    "description": "CEP 回放验证：用历史事件回测攻击链模式命中率",
+    "description": "CEP 回放验证：用历史事件回测攻击链模式命中率 (批量扫描 DB, 限操作员以上)",
     "operationId": "cep_replay_api_cep_replay_post",
     "parameters": [
      {
@@ -3416,6 +3421,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Cep Replay",
     "tags": [
      "kafka"
@@ -3455,6 +3465,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Chat",
     "tags": [
      "chat"
@@ -3534,6 +3549,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Chat Stream",
     "tags": [
      "chat"
@@ -4570,7 +4590,7 @@
   },
   "/api/firewall/status": {
    "get": {
-    "description": "SSH 防火墙适配器状态",
+    "description": "SSH 防火墙适配器状态(含 Redis TTL 索引合并 — 重启后仍可见孤儿规则)",
     "operationId": "firewall_status_api_firewall_status_get",
     "responses": {
      "200": {
@@ -4704,7 +4724,7 @@
   },
   "/api/guard/call": {
    "post": {
-    "description": "通过 MCP Guard 网关调用安全工具（4 层检查）\n\n授权上下文一律取自 JWT 认证主体（user.role / user.username），\n请求体中的任何身份字段都不参与授权判定。",
+    "description": "通过 MCP Guard 网关调用安全工具（4 层检查；工具执行, 限操作员以上）\n\n授权上下文一律取自 JWT 认证主体（user.role / user.username），\n请求体中的任何身份字段都不参与授权判定。",
     "operationId": "guard_call_api_guard_call_post",
     "requestBody": {
      "content": {
@@ -5646,6 +5666,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Trigger Analysis",
     "tags": [
      "logs"
@@ -5823,7 +5848,7 @@
   },
   "/api/logs/reset-stuck": {
    "post": {
-    "description": "将所有卡住的事件标记为已分析（含错误标记），释放管道",
+    "description": "将所有卡住的事件标记为已分析（含错误标记），释放管道 (管道状态变更限操作员以上)",
     "operationId": "reset_stuck_api_logs_reset_stuck_post",
     "parameters": [
      {
@@ -7358,7 +7383,7 @@
     ]
    },
    "post": {
-    "description": "创建钓鱼演练",
+    "description": "创建钓鱼演练 (演练台账变更限操作员以上)",
     "operationId": "create_drill_api_phishing_drill_post",
     "requestBody": {
      "content": {
@@ -7390,6 +7415,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Create Drill",
     "tags": [
      "phishing"
@@ -7398,7 +7428,7 @@
   },
   "/api/phishing/drill/{drill_id}": {
    "delete": {
-    "description": "删除演练",
+    "description": "删除演练 (演练台账变更限操作员以上; 2026-10-25 RBAC 补齐)",
     "operationId": "delete_drill_api_phishing_drill__drill_id__delete",
     "parameters": [
      {
@@ -7431,6 +7461,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Delete Drill",
     "tags": [
      "phishing"
@@ -7478,7 +7513,7 @@
   },
   "/api/phishing/drill/{drill_id}/launch": {
    "post": {
-    "description": "发起演练（批量生成目标记录）",
+    "description": "发起演练（批量生成目标记录; 发起内部钓鱼演练属主动动作, 限操作员以上）",
     "operationId": "launch_drill_api_phishing_drill__drill_id__launch_post",
     "parameters": [
      {
@@ -7521,6 +7556,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Launch Drill",
     "tags": [
      "phishing"
@@ -7572,6 +7612,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Record Drill Event",
     "tags": [
      "phishing"
@@ -8385,7 +8430,7 @@
   },
   "/api/rag/verify": {
    "post": {
-    "description": "验证断言是否被知识库支撑（减少幻觉的核心功能）",
+    "description": "验证断言是否被知识库支撑（减少幻觉的核心功能; LLM 成本路径, 限操作员以上）",
     "operationId": "rag_verify_claim_api_rag_verify_post",
     "requestBody": {
      "content": {
@@ -10035,7 +10080,7 @@
   },
   "/api/security/review": {
    "post": {
-    "description": "手动触发 Agent-D 审查（检查已审核事件中是否有遗漏）",
+    "description": "手动触发 Agent-D 审查（检查已审核事件中是否有遗漏; 触发复核限操作员以上）",
     "operationId": "trigger_agent_d_review_api_security_review_post",
     "parameters": [
      {
@@ -10070,6 +10115,11 @@
       "description": "Validation Error"
      }
     },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
     "summary": "Trigger Agent D Review",
     "tags": [
      "ops"
@@ -10404,7 +10454,7 @@
   },
   "/api/sigma/detect": {
    "post": {
-    "description": "批量 Sigma 规则检测",
+    "description": "批量 Sigma 规则检测 (计算密集, 限操作员以上; 2026-10-25 RBAC 补齐)",
     "operationId": "sigma_detect_api_sigma_detect_post",
     "requestBody": {
      "content": {

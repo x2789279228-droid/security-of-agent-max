@@ -42,8 +42,8 @@ class SigmaDetectRequest(BaseModel):
     events: list[dict]
 
 @router.post("/sigma/detect")
-async def sigma_detect(req: SigmaDetectRequest, user: UserInfo = Depends(get_current_user)):
-    """批量 Sigma 规则检测"""
+async def sigma_detect(req: SigmaDetectRequest, user: UserInfo = Depends(RequireRole("admin", "operator"))):
+    """批量 Sigma 规则检测 (计算密集, 限操作员以上; 2026-10-25 RBAC 补齐)"""
     from sigma_detector import sigma_detector
     return sigma_detector.detect_batch(req.events)
 
@@ -200,8 +200,8 @@ class GuardCallRequest(BaseModel):
 
 
 @router.post("/guard/call")
-async def guard_call(req: GuardCallRequest, user: UserInfo = Depends(get_current_user)):
-    """通过 MCP Guard 网关调用安全工具（4 层检查）
+async def guard_call(req: GuardCallRequest, user: UserInfo = Depends(RequireRole("admin", "operator"))):
+    """通过 MCP Guard 网关调用安全工具（4 层检查；工具执行, 限操作员以上）
 
     授权上下文一律取自 JWT 认证主体（user.role / user.username），
     请求体中的任何身份字段都不参与授权判定。

@@ -275,9 +275,9 @@ class RAGVerifyRequest(BaseModel):
 async def rag_verify_claim(
     req: RAGVerifyRequest,
     session: AsyncSession = Depends(get_session),
-    user: UserInfo = Depends(get_current_user),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
-    """验证断言是否被知识库支撑（减少幻觉的核心功能）"""
+    """验证断言是否被知识库支撑（减少幻觉的核心功能; LLM 成本路径, 限操作员以上）"""
     claim = req.claim
     threat_type = req.threat_type
     severity = req.severity

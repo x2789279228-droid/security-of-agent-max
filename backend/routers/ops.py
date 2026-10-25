@@ -1361,9 +1361,10 @@ async def get_event_detail(
 @router.post("/security/review")
 async def trigger_agent_d_review(
     session_id: str = Query(..., description="会话ID"),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
-    """手动触发 Agent-D 审查（检查已审核事件中是否有遗漏）"""
+    """手动触发 Agent-D 审查（检查已审核事件中是否有遗漏; 触发复核限操作员以上）"""
     asyncio.create_task(_run_agent_d_review(session_id))
     return {"status": "agent_d_review_triggered", "session_id": session_id}
 

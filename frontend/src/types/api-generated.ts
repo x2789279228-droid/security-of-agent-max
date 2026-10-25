@@ -114,7 +114,7 @@ export interface paths {
         put?: never;
         /**
          * Assets Register
-         * @description 注册/更新资产 (DB 持久化 + 内存缓存同步)
+         * @description 注册/更新资产 (DB 持久化 + 内存缓存同步; 资产台账变更限操作员以上)
          */
         post: operations["assets_register_api_assets_post"];
         delete?: never;
@@ -175,7 +175,7 @@ export interface paths {
         post?: never;
         /**
          * Assets Remove
-         * @description 下线资产 (软删除)
+         * @description 下线资产 (软删除; 台账变更限操作员以上)
          */
         delete: operations["assets_remove_api_assets__asset_id__delete"];
         options?: never;
@@ -816,7 +816,7 @@ export interface paths {
         put?: never;
         /**
          * Cep Pattern Shadow
-         * @description 切换灰度模式（shadow mode: 仅记录不告警）
+         * @description 切换灰度模式（shadow mode: 仅记录不告警; 检测配置热更限 admin）
          */
         post: operations["cep_pattern_shadow_api_cep_patterns__pattern_id__shadow_post"];
         delete?: never;
@@ -836,7 +836,7 @@ export interface paths {
         put?: never;
         /**
          * Cep Pattern Toggle
-         * @description 启用/禁用 CEP 模式（通过 Kafka Broadcast 热更新到 Flink）
+         * @description 启用/禁用 CEP 模式（通过 Kafka Broadcast 热更新到 Flink; 检测配置热更限 admin）
          */
         post: operations["cep_pattern_toggle_api_cep_patterns__pattern_id__toggle_post"];
         delete?: never;
@@ -856,7 +856,7 @@ export interface paths {
         put?: never;
         /**
          * Cep Replay
-         * @description CEP 回放验证：用历史事件回测攻击链模式命中率
+         * @description CEP 回放验证：用历史事件回测攻击链模式命中率 (批量扫描 DB, 限操作员以上)
          */
         post: operations["cep_replay_api_cep_replay_post"];
         delete?: never;
@@ -1370,7 +1370,7 @@ export interface paths {
         };
         /**
          * Firewall Status
-         * @description SSH 防火墙适配器状态
+         * @description SSH 防火墙适配器状态(含 Redis TTL 索引合并 — 重启后仍可见孤儿规则)
          */
         get: operations["firewall_status_api_firewall_status_get"];
         put?: never;
@@ -1432,7 +1432,7 @@ export interface paths {
         put?: never;
         /**
          * Guard Call
-         * @description 通过 MCP Guard 网关调用安全工具（4 层检查）
+         * @description 通过 MCP Guard 网关调用安全工具（4 层检查；工具执行, 限操作员以上）
          *
          *     授权上下文一律取自 JWT 认证主体（user.role / user.username），
          *     请求体中的任何身份字段都不参与授权判定。
@@ -2023,7 +2023,7 @@ export interface paths {
         put?: never;
         /**
          * Reset Stuck
-         * @description 将所有卡住的事件标记为已分析（含错误标记），释放管道
+         * @description 将所有卡住的事件标记为已分析（含错误标记），释放管道 (管道状态变更限操作员以上)
          */
         post: operations["reset_stuck_api_logs_reset_stuck_post"];
         delete?: never;
@@ -2665,7 +2665,7 @@ export interface paths {
         put?: never;
         /**
          * Create Drill
-         * @description 创建钓鱼演练
+         * @description 创建钓鱼演练 (演练台账变更限操作员以上)
          */
         post: operations["create_drill_api_phishing_drill_post"];
         delete?: never;
@@ -2690,7 +2690,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Drill
-         * @description 删除演练
+         * @description 删除演练 (演练台账变更限操作员以上; 2026-10-25 RBAC 补齐)
          */
         delete: operations["delete_drill_api_phishing_drill__drill_id__delete"];
         options?: never;
@@ -2709,7 +2709,7 @@ export interface paths {
         put?: never;
         /**
          * Launch Drill
-         * @description 发起演练（批量生成目标记录）
+         * @description 发起演练（批量生成目标记录; 发起内部钓鱼演练属主动动作, 限操作员以上）
          */
         post: operations["launch_drill_api_phishing_drill__drill_id__launch_post"];
         delete?: never;
@@ -3069,7 +3069,7 @@ export interface paths {
         put?: never;
         /**
          * Rag Verify Claim
-         * @description 验证断言是否被知识库支撑（减少幻觉的核心功能）
+         * @description 验证断言是否被知识库支撑（减少幻觉的核心功能; LLM 成本路径, 限操作员以上）
          */
         post: operations["rag_verify_claim_api_rag_verify_post"];
         delete?: never;
@@ -3674,7 +3674,7 @@ export interface paths {
         put?: never;
         /**
          * Trigger Agent D Review
-         * @description 手动触发 Agent-D 审查（检查已审核事件中是否有遗漏）
+         * @description 手动触发 Agent-D 审查（检查已审核事件中是否有遗漏; 触发复核限操作员以上）
          */
         post: operations["trigger_agent_d_review_api_security_review_post"];
         delete?: never;
@@ -3831,7 +3831,7 @@ export interface paths {
         put?: never;
         /**
          * Sigma Detect
-         * @description 批量 Sigma 规则检测
+         * @description 批量 Sigma 规则检测 (计算密集, 限操作员以上; 2026-10-25 RBAC 补齐)
          */
         post: operations["sigma_detect_api_sigma_detect_post"];
         delete?: never;

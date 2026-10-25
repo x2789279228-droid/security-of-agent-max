@@ -436,8 +436,9 @@ class DrillRecordRequest(BaseModel):
 async def create_drill(
     req: DrillCreateRequest,
     session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
-    """创建钓鱼演练"""
+    """创建钓鱼演练 (演练台账变更限操作员以上)"""
     return await drill_manager.create_drill(
         session, req.name, req.drill_type,
         req.template_subject, req.template_body,
@@ -467,8 +468,9 @@ async def get_drill(
 async def delete_drill(
     drill_id: int,
     session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
-    """删除演练"""
+    """删除演练 (演练台账变更限操作员以上; 2026-10-25 RBAC 补齐)"""
     ok = await drill_manager.delete_drill(session, drill_id)
     if not ok:
         raise HTTPException(404, "Drill not found")
@@ -479,8 +481,9 @@ async def launch_drill(
     drill_id: int,
     req: DrillLaunchRequest,
     session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
-    """发起演练（批量生成目标记录）"""
+    """发起演练（批量生成目标记录; 发起内部钓鱼演练属主动动作, 限操作员以上）"""
     result = await drill_manager.launch_drill(session, drill_id, req.targets)
     if not result:
         raise HTTPException(404, "Drill not found")
@@ -493,6 +496,7 @@ async def record_drill_event(
     drill_id: int,
     req: DrillRecordRequest,
     session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
     """记录演练目标事件（opened / clicked / reported）"""
     result = await drill_manager.record_event(

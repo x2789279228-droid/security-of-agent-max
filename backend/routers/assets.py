@@ -95,9 +95,9 @@ async def assets_register(
     ip: str = "", hostname: str = "", level: str = "medium",
     label: str = "", business: str = "", asset_type: str = "host",
     session: AsyncSession = Depends(get_session),
-    user: UserInfo = Depends(get_current_user),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
-    """注册/更新资产 (DB 持久化 + 内存缓存同步)"""
+    """注册/更新资产 (DB 持久化 + 内存缓存同步; 资产台账变更限操作员以上)"""
     from asset import asset_manager
     tags = [label] if label else []
     result = await asset_manager.register(
@@ -114,9 +114,9 @@ async def assets_register(
 async def assets_remove(
     asset_id: int,
     session: AsyncSession = Depends(get_session),
-    user: UserInfo = Depends(get_current_user),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
-    """下线资产 (软删除)"""
+    """下线资产 (软删除; 台账变更限操作员以上)"""
     from asset import asset_manager
     result = await asset_manager.remove(session, asset_id, by=user.username)
     if result.get("success"):

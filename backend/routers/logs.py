@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from models import get_session, SecurityEvent, Memory
-from auth import get_current_user, RequireRole, UserInfo
+from auth import RequireRole, UserInfo
 from audit_trail import log_from_request
 from log_ingestion import log_ingestor
 from event_identity import ensure_identity, get_event_id
@@ -441,9 +441,9 @@ async def reset_stuck(
     request: Request,
     minutes: int = Query(5, description="超过多少分钟未分析视为卡住"),
     session: AsyncSession = Depends(get_session),
-    user: UserInfo = Depends(get_current_user),
+    user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
-    """将所有卡住的事件标记为已分析（含错误标记），释放管道"""
+    """将所有卡住的事件标记为已分析（含错误标记），释放管道 (管道状态变更限操作员以上)"""
     from datetime import timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     stmt = (

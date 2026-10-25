@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from models import get_session
-from auth import UserInfo, get_current_user
+from auth import RequireRole, UserInfo
 from audit_trail import log_from_request
 from kafka_consumer import kafka_consumer_manager
 from kafka_producer import kafka_producer
@@ -183,9 +183,9 @@ async def cep_pattern_toggle(
     pattern_id: str,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    user: UserInfo = Depends(get_current_user),
+    user: UserInfo = Depends(RequireRole("admin")),
 ):
-    """启用/禁用 CEP 模式（通过 Kafka Broadcast 热更新到 Flink）"""
+    """启用/禁用 CEP 模式（通过 Kafka Broadcast 热更新到 Flink; 检测配置热更限 admin）"""
     if pattern_id not in _CEP_PATTERNS_CACHE:
         return {"success": False, "error": f"模式 {pattern_id} 不存在"}
     p = _CEP_PATTERNS_CACHE[pattern_id]
@@ -207,9 +207,9 @@ async def cep_pattern_shadow(
     pattern_id: str,
     request: Request,
     session: AsyncSession = Depends(get_session),
-    user: UserInfo = Depends(get_current_user),
+    user: UserInfo = Depends(RequireRole("admin")),
 ):
-    """切换灰度模式（shadow mode: 仅记录不告警）"""
+    """切换灰度模式（shadow mode: 仅记录不告警; 检测配置热更限 admin）"""
     if pattern_id not in _CEP_PATTERNS_CACHE:
         return {"success": False, "error": f"模式 {pattern_id} 不存在"}
     p = _CEP_PATTERNS_CACHE[pattern_id]
@@ -227,8 +227,8 @@ async def cep_pattern_shadow(
 
 
 @router.post("/cep/replay")
-async def cep_replay(limit: int = 200, src_ip: str = ""):
-    """CEP 回放验证：用历史事件回测攻击链模式命中率"""
+async def cep_replay(limit: int = 200, src_ip: str = "", user: UserInfo = Depends(RequireRole("admin", "operator"))):
+    """CEP 回放验证：用历史事件回测攻击链模式命中率 (批量扫描 DB, 限操作员以上)"""
     from models import async_session as db_session, SecurityEvent
     from sqlalchemy import select, desc
 
