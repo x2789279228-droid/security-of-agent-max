@@ -38,6 +38,9 @@ async def firewall_status(user: UserInfo = Depends(RequireRole("operator"))):
         "enabled": ssh_firewall.enabled,
         "connected": ssh_firewall._connected,
         "host": settings.fw_ssh_host,
+        # 只读暴露当前执行模式: live 演练 preflight 需要脚本级验证
+        # "真在 live"而不是凭人眼看启动日志; operator 角色即可读, 无泄露面。
+        "execution_mode": settings.execution_mode,
         "active_rules": await ssh_firewall.get_active_rules_async(),
     }
 

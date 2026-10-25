@@ -1,0 +1,27 @@
+id: POL-DRILL-BRUTE
+name: 演练-暴力破解短TTL阻断
+enabled: false
+description: >
+  live 真机演练专用策略, 仓库内默认禁用。与 POL-BRUTE-FORCE 同一引擎
+  同一动作, 仅 TTL 缩短为 3 分钟, 让"自动解封"能在演练现场分钟级可见。
+  启用协议(由 demo/live-drill/run-live-drill.sh 自动执行):
+    1. PUT /api/response/policies {name: POL-DRILL-BRUTE, enabled: true}
+       —— priority 82 > POL-BRUTE-FORCE 的 80, 启用期间接管 BRUTE_FORCE 匹配;
+    2. 演练结束(含失败路径, 脚本 trap EXIT)再次 PUT enabled: false,
+       生产匹配权交还 POL-BRUTE-FORCE(30 分钟 TTL)。
+  禁止把本策略提交为 enabled: true —— 那会让生产防线的封禁 TTL 永久变 3 分钟。
+match:
+  threat_type: BRUTE_FORCE
+  min_confidence: 0.5
+  min_severity: medium
+actions:
+- name: block_ip
+  params:
+    duration_minutes: 3
+- name: send_alert
+  params:
+    severity: high
+auto_execute: true
+require_approval: false
+priority: 82
+cooldown_minutes: 0
