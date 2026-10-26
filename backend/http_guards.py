@@ -100,6 +100,9 @@ RATE_LIMIT_WHITELIST = (
     # 自博弈 / 能力矩阵
     "/api/self-play",
     "/api/capabilities",
+    # 竞赛演示道具 / 基准报告读取 (demo_seed 灌库, benchmark 报告查询)
+    "/api/demo",
+    "/api/benchmark",
 )
 
 # 点名强制限流:即使前缀已豁免,也必须计入全局限流(独立 crit: 桶)
@@ -119,6 +122,8 @@ RATE_LIMIT_FORCED = {
     # MCP Guard 真实工具调用(4 层检查后可能落到真实资产动作)
     "/api/guard/call": None,
     "/api/guard/calls/flush": ("POST",),
+    # MCP Guard 工单审批决策(改判安全状态; GET 查询走 /api/guard 豁免, 仅 POST 限)
+    "/api/guard/approvals": ("POST",),
     # 日志高频写入口(2026-09-01 曾因同机 ingest 打 429 而单独豁免,此处按前缀精确限流)
     "/api/logs/ingest": None,
     "/api/logs/analyze": None,

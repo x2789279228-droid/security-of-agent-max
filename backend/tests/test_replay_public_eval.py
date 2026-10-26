@@ -67,3 +67,67 @@ def test_malicious_enforced_and_shadow_hits(detector: PySigmaDetector, rows: lis
     # 指标结构完整(报告生成依赖这些键)
     for k in ("recall_enforced", "recall_with_shadow", "per_type", "per_rule_top"):
         assert k in res
+
+
+def test_pending_aggregation_hits_not_counted_as_enforced():
+    """2026-10-27 口径修正: 阈值规则的单事件命中([PENDING-AGG])是候选不是确认。
+
+    修正前 enforced 只按 "[SHADOW]" 过滤, 聚合候选(SigmaHit.
+    requires_aggregation=True)被计入确认 TP —— 全量 CSIC 回放里 SIG-001
+    的 43 个单 URL 命中因此虚高 enforced 召回。本测试用桩检测器钉住:
+    仅候选命中的事件不得进 enforced_tp / enforced_fp。
+    """
+    from types import SimpleNamespace
+
+    from eval_datasets.replay_public_datasets import evaluate
+
+    def _hit(rid, description="", requires_aggregation=False):
+        return SimpleNamespace(
+            rule_id=rid, description=description,
+            requires_aggregation=requires_aggregation,
+        )
+
+    class _StubDetector:
+        def __init__(self, hits):
+            self._hits = hits
+
+        def detect(self, ev):
+            return list(self._hits)
+
+    ev = {"url": "/tienda1/index.jsp", "event": "REQ"}
+
+    # 仅聚合候选 → 不算确认检出, 单列 pending_only
+    res = evaluate(_StubDetector([_hit("SIG-001", "x [PENDING-AGG]", True)]), [ev], "malicious")
+    assert res["enforced_tp"] == 0
+    assert res["pending_only_tp"] == 1
+    assert res["recall_enforced"] == 0
+    assert res["per_rule_pending_top"] == {"SIG-001": 1}
+
+    # 候选规则对良性样本也不产生确认 FP
+    res = evaluate(_StubDetector([_hit("SIG-001", "x [PENDING-AGG]", True)]), [ev], "benign")
+    assert res["enforced_fp"] == 0
+    assert res["per_type"].get("benign:pending") == 1
+
+    # 确认命中 + 候选命中并存 → 只按确认计
+    res = evaluate(
+        _StubDetector([_hit("C-001"), _hit("SIG-001", "x [PENDING-AGG]", True)]),
+        [ev], "malicious",
+    )
+    assert res["enforced_tp"] == 1
+    assert res["pending_only_tp"] == 0
+
+    # 引擎真实规则上: 夹具若触发阈值规则(SIG-001/007), enforced 桶里
+    # 不允许出现 requires_aggregation 的命中
+    d = PySigmaDetector(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "sigma_engine", "rules"), enforce=True)
+    with open(FIXTURE, encoding="utf-8") as f:
+        all_rows = [json.loads(ln) for ln in f if ln.strip()]
+    mal = [r["event"] for r in all_rows if r["label"] == "malicious"]
+    for e in mal:
+        for h in d.detect(e):
+            if "[SHADOW]" in (h.description or ""):
+                continue
+            assert not getattr(h, "requires_aggregation", False), (
+                f"{h.rule_id} 聚合候选漏进了 enforced 口径 (event={e.get('url')!r})"
+            )

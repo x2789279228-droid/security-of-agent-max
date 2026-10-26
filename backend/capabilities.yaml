@@ -7,7 +7,7 @@
 #
 # 每一项的 evidence 必须指向可复现的测试/报告；没有证据就不要写 verified。
 version: "1.0"
-updated_at: "2026-10-21"
+updated_at: "2026-10-25"
 capabilities:
   - id: ingest_kafka
     name: 日志接入 / Kafka 消费
@@ -79,15 +79,44 @@ capabilities:
     demo: ""
     notes: "样本注入生产隔离待修；缺一次完整对局指标导出。"
 
+  - id: ingest_normalization
+    name: 检测输入规范化（反规避）
+    status: verified
+    runtime_setting: ""
+    metric_prefix: ""
+    evidence: docs/benchmark/EVASION.md
+    last_verified: "2026-10-25"
+    demo: "对抗编码攻击(uencode/double/partial)全部保持检出，保持率 1.0（改前 0.438）"
+    notes: "canonical_matching_view 接入 sigma 引擎两条匹配路径；原始事件不改写；FP 硬门禁 REPLAY 良性 5000=0。Java 镜像见 flink-jobs UrlCanonicalizer。"
+
+  - id: behavior_anomaly
+    name: 行为面统计异常检测
+    status: experimental
+    runtime_setting: ""
+    metric_prefix: soc_anomaly_
+    evidence: docs/benchmark/PERF-2026-10-26.md
+    last_verified: "2026-10-26"
+    demo: "合成标定面 P=1.0 R=1.0（ABLATION L3）；真实流量首触实体 inconclusive 属设计语义（q6_3）"
+    notes: |
+      两个面分开标注（PERF-2026-10-26 压测后）：
+      · 合成标定面 verified —— L3 P=1.0/R=1.0，阈值可行区间 [0.3982, 0.6435) 非空且 0.60 在内；
+        5 证据维度（含 severity_shift 基线相对偏移）+ 2 上下文，权重和恒 1.0。
+      · 真实流量面 experimental —— 压测 15 分钟短窗全首触实体 → 100% inconclusive，
+        这是 q6_3 纪律（新实体不判、不假装能判）下的设计语义，不是缺陷；
+        改变它需要待决项 41 的冷启动规则（新实体+high/critical+罕见→升级），
+        需独立 FP 评估拍板（PERF-OPT-PLAN Wave 0-2 上报）。
+      2026-10-26 已落地：聚合降级（src 实体证据可用时按证据判定，其余维度逐维披露，
+      error_code=partial_evidence_disclosure）；标定集钉钟修复（锚点+13h，评测不随挂钟漂移）。
+
   - id: mcp_guard
     name: MCP Guard / 工具行为签名
     status: experimental
     runtime_setting: ""
     metric_prefix: ""
-    evidence: backend/tests/test_p0_guard_call_authz.py
-    last_verified: "2026-10-21"
+    evidence: backend/tests/test_p0_guard_call_authz.py; backend/tests/test_guard_approval_routes.py
+    last_verified: "2026-10-27"
     demo: ""
-    notes: "审批队列待收口；行为检测器故障仍是 fail-open。"
+    notes: "HTTP 审批闭环已接线(2026-10-27: POST /guard/approvals/{id}/approve|deny, admin RBAC+审计)；工具执行仍为模拟通道；行为检测器故障仍是 fail-open。"
 
   - id: threat_intel
     name: 威胁情报（IOC / MISP / TAXII）

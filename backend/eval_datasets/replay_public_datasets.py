@@ -14,8 +14,12 @@
           (traversal/sqli/xss/other), 仅用于分类型报表, 不进总体指标
 
 评测口径:
-    enforcement 检出 = 非 shadow 规则命中(平台的"确认检出"语义);
-    shadow 命中单列(影子层的召回/误报是 nightly backtest 晋升依据)。
+    enforcement 检出 = 非影子、非聚合候选的规则命中(平台的"确认检出"语义);
+    shadow 命中单列(影子层的召回/误报是 nightly backtest 晋升依据);
+    聚合候选(requires_aggregation=[PENDING-AGG])单列 —— 阈值规则的单事件
+    命中在平台契约下只是候选, 须等 Flink 事件时间窗口聚合确认; 回放是孤立
+    单事件流, 阈值证据永不满足, 计入 enforced 会虚高确认召回
+    (2026-10-27 口径修正: 修正前 SIG-001 的单 URL 命中被误计为确认 TP)。
     每规则 TP/FP 计数落 JSON —— 直接驱动规则晋升与 B3 消融。
 
 用法:
@@ -108,10 +112,17 @@ _DEEP_SIG = re.compile(
 
 
 def deep_decode(text: str, rounds: int = 2) -> str:
-    import urllib.parse
-    for _ in range(rounds):
-        text = urllib.parse.unquote(text)
-    return text
+    """深解码 —— 委托 ``normalization.deep_decode``（单一实现，防双实现漂移）。
+
+    历史：本函数曾是独立实现（固定 2 轮 unquote）。2026-10-25 检测输入
+    规范化升级后，生产侧的规范化解码器在 normalization.py（受限 3 轮 +
+    稳定即停 + %uXXXX）。两实现对 CSIC 双重编码载荷结果相同（2 轮后稳定），
+    等价性由 tests/test_normalization.py::test_replay_decoder_equivalence
+    在 fixture 全量 URL 上钉住 —— 评测口径与引擎匹配视图从此同源。
+    ``rounds`` 参数保留仅为兼容旧签名，不再使用。
+    """
+    from normalization import deep_decode as _canonical
+    return _canonical(text)
 
 
 def attack_type_of(event: dict) -> str:
@@ -143,21 +154,37 @@ def is_signature_bearing(event: dict) -> bool:
 def evaluate(detector, events: list[dict], label: str) -> dict:
     """跑检测并返回混淆矩阵 + 分类型 + per-rule 计数。
 
-    一条事件"被检出"= 至少一条规则命中。enforcement(非影子)与
-    shadow 分开统计 —— 影子命中是观察证据, 不是确认结论。
+    一条事件"被检出"= 至少一条规则命中。enforcement(确认)、shadow(影子)、
+    pending(待聚合候选)三桶分开统计 —— 影子与候选都是观察证据,
+    不是确认结论。
     """
     tp = fp = 0
     tp_shadow_only = 0
+    tp_pending_only = 0
     per_type = collections.Counter()
     per_rule = collections.Counter()
     per_rule_fp = collections.Counter()
+    per_rule_pending = collections.Counter()
     t0 = time.perf_counter()
     for ev in events:
         hits = detector.detect(ev)
-        enforced = [h for h in hits if "[SHADOW]" not in (h.description or "")]
-        shadowed = [h for h in hits if "[SHADOW]" in (h.description or "")]
+        enforced: list = []
+        shadowed: list = []
+        pending: list = []
+        for h in hits:
+            if "[SHADOW]" in (h.description or ""):
+                shadowed.append(h)
+            elif getattr(h, "requires_aggregation", False):
+                # 阈值/聚合规则的单事件命中只是候选([PENDING-AGG]): 平台契约下
+                # 须等 Flink 事件时间窗口聚合确认; 回放是孤立单事件流, 阈值证据
+                # 永不满足 —— 计入 enforced 会虚高确认召回(2026-10-27 口径修正)。
+                pending.append(h)
+            else:
+                enforced.append(h)
         for h in enforced:
             per_rule[h.rule_id] += 1
+        for h in pending:
+            per_rule_pending[h.rule_id] += 1
         for h in shadowed:
             per_rule["shadow:" + h.rule_id] += 1
             per_rule_fp["shadow:" + h.rule_id] += (label == "benign")
@@ -170,6 +197,9 @@ def evaluate(detector, events: list[dict], label: str) -> dict:
             elif detected_any:
                 tp_shadow_only += 1
                 per_type[attack_type_of(ev) + ":shadow_only"] += 1
+            elif pending:
+                tp_pending_only += 1
+                per_type[attack_type_of(ev) + ":pending_only"] += 1
             else:
                 per_type[attack_type_of(ev) + ":FN"] += 1
         else:
@@ -180,17 +210,21 @@ def evaluate(detector, events: list[dict], label: str) -> dict:
                     per_rule_fp[h.rule_id] += 1
             elif detected_any:
                 per_type["benign:shadow_fp"] += 1
+            elif pending:
+                per_type["benign:pending"] += 1
     elapsed = time.perf_counter() - t0
     return {
         "label": label, "n": len(events), "elapsed_s": round(elapsed, 1),
         "throughput_eps": round(len(events) / max(elapsed, 1e-6)),
         "enforced_tp": tp, "enforced_fp": fp,
         "shadow_only_tp": tp_shadow_only,
+        "pending_only_tp": tp_pending_only,
         "recall_enforced": round(tp / len(events), 4) if events else None,
         "recall_with_shadow": round((tp + tp_shadow_only) / len(events), 4) if events else None,
         "per_type": dict(per_type),
         "per_rule_top": dict(per_rule.most_common(20)),
         "per_rule_fp_top": {k: v for k, v in per_rule_fp.most_common(10)},
+        "per_rule_pending_top": dict(per_rule_pending.most_common(10)),
     }
 
 
@@ -263,7 +297,7 @@ def run_csic2010(root: Path, max_per_class: int = 0, limit_rules_note: str = "")
     return result
 
 
-def render_markdown(res: dict) -> str:
+def render_markdown(res: dict, baseline: dict | None = None) -> str:
     mal, ben = res["classes"]["malicious"], res["classes"]["benign"]
     nrm, ben_n = mal.get("normalized", {}), ben.get("normalized", {})
     fpr = round(ben["enforced_fp"] / max(ben["n"], 1), 4)
@@ -275,6 +309,18 @@ def render_markdown(res: dict) -> str:
         f"- 样本: 攻击 {mal['n']}(签名可测子集 {mal['signature_subset_n']}) / 良性 {ben['n']}",
         f"- 吞吐: ~{mal['throughput_eps']} eps(155 规则/事件, 单事件私有 SQLite)",
         "",
+        *(
+            [
+                f"- 规范化前基线(2026-10-25 之前, 抽样 5000/5000, 见"
+                f" REPLAY-CSIC-2010-result-pre-normalization.json): 全类召回 0.0132 /"
+                f" 签名子集 0.3452 / 良性 FP 0/5000 → 本轮(规范化接入引擎后, 全量"
+                f" {mal['n']}/{ben['n']}) 全类召回 {mal['recall_enforced']} /"
+                f" 签名子集 {nrm.get('recall_enforced') if nrm else 'n/a'} /"
+                f" 良性 FP {ben['enforced_fp']}/{ben['n']}"
+                f" —— 升级证据: docs/upgrade/evidence/DETECTION-NORMALIZATION-2026-10-25.md",
+                "",
+            ] if baseline else []
+        ),
         "## 核心指标", "",
         "| 指标 | 数值 | 口径说明 |",
         "|---|---|---|",
@@ -284,18 +330,24 @@ def render_markdown(res: dict) -> str:
         f"| 良性误报 FP | **{ben['enforced_fp']}** / {ben['n']} (FPR={fpr}) | enforced=非影子规则 |",
         f"| 规范化口径良性误报 | {ben_n.get('enforced_fp', 0)} / {ben_n.get('n', 0)}" + (f" (FPR={fpr_norm})" if fpr_norm is not None else "") + " | 仅对良性签名子集重跑 |",
         f"| 仅影子命中的攻击样本(全类) | {mal['shadow_only_tp']} | 影子晋升候选池 |",
+        f"| 仅待聚合候选命中(未确认) | {mal.get('pending_only_tp', 0)} | 阈值规则单事件命中=[PENDING-AGG]候选, 不计入确认召回(2026-10-27 口径修正) |",
         "",
-        "> 签名子集原始与规范化召回的差值 = **双重编码规范化缺口**,".rstrip(),
-        "> 是已知的工程改进点(真实 IDS 均在匹配前做 URL 解码;平台接入",
-        "> 面的解码器属 ingest 规范化范畴, 记入 roadmap 而非规则缺陷)。",
+        "> 两口径相等是**构造使然**(2026-10-25 起): 规范化解码器".rstrip(),
+        "> (`normalization.canonical_matching_view`)已接入引擎匹配视图,",
+        "> 原始口径与规范化口径走同一条匹配路径 —— 改前两者的差值",
+        "> (双重编码规范化缺口)已由该升级关闭, 见",
+        "> docs/upgrade/evidence/DETECTION-NORMALIZATION-2026-10-25.md。",
         "",
         "## 分攻击类型(深解码签名启发式标签, 仅报表用)", "",
-        "| 类型 | TP(原始) | 仅影子 | FN |", "|---|---|---|---|",
+        "| 类型 | TP(原始) | 仅影子 | 仅候选 | FN |", "|---|---|---|---|---|",
     ]
     types = sorted({k.rsplit(":", 1)[0] for k in mal.get("per_type", {})})
     for t in types:
         p = mal.get("per_type", {})
-        lines.append(f"| {t} | {p.get(t + ':TP', 0)} | {p.get(t + ':shadow_only', 0)} | {p.get(t + ':FN', 0)} |")
+        lines.append(
+            f"| {t} | {p.get(t + ':TP', 0)} | {p.get(t + ':shadow_only', 0)} | "
+            f"{p.get(t + ':pending_only', 0)} | {p.get(t + ':FN', 0)} |"
+        )
     lines += [
         "", "## 攻击侧命中最多规则(enforced, 原始口径)", "",
         "| 规则 | 命中数 |", "|---|---|",
@@ -306,11 +358,20 @@ def render_markdown(res: dict) -> str:
               "| 规则 | 计数 |", "|---|---|"]
     for rid, n in list(ben.get("per_rule_fp_top", {}).items())[:10]:
         lines.append(f"| {rid} | {n} |")
+    lines += ["", "## 待聚合候选命中 top(未确认; 聚合确认前不计检出)", "",
+              "| 规则 | 命中数 |", "|---|---|",
+              ]
+    for rid, n in list(mal.get("per_rule_pending_top", {}).items())[:10]:
+        lines.append(f"| {rid} | {n} |")
     lines += ["", "## 结论边界", "",
               "- CSIC-2010 是 2010 年单一电商应用的合成注入流量, 规模/分布不代表生产;",
               "- 签名子集由本工具的启发式正则界定(保守, 含经典 SQLi/XSS/遍历签名),",
               "  其余为行为异常样本 —— 对签名引擎报告全类低召回是口径使然,",
               "  行为面由平台 `anomaly_detector`/Flink 行为基线负责(见 B3 消融)。",
+              "- 2026-10-27 口径修正: `requires_aggregation`([PENDING-AGG])命中不再",
+              "  计入确认检出(单事件回放无阈值证据, 平台契约须等 Flink 窗口聚合确认),",
+              "  修正前 SIG-001 的单 URL 命中被误计为确认 TP —— 改前数字见",
+              "  REPLAY-CSIC-2010-result-pre-scope-fix.json。",
               ]
     return "\n".join(lines) + "\n"
 
@@ -321,7 +382,26 @@ def main() -> int:
     ap.add_argument("--root", default="../tools/datasets-cache")
     ap.add_argument("--max-per-class", type=int, default=0, help="0 = 全量")
     ap.add_argument("--out", default="", help="写 report.md 与 result.json 的目录")
+    ap.add_argument("--from-json", default="",
+                    help="从已有 result JSON 重渲染报告(不重跑评测)")
+    ap.add_argument("--baseline", default="",
+                    help="改前 result JSON, 提供时报告头部附改前改后对照")
     args = ap.parse_args()
+
+    if args.from_json:
+        res = json.loads(Path(args.from_json).read_text(encoding="utf-8"))
+        baseline = None
+        if args.baseline and Path(args.baseline).is_file():
+            baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+        md = render_markdown(res, baseline)
+        if args.out:
+            out = Path(args.out)
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "REPLAY-CSIC-2010.md").write_text(md, encoding="utf-8")
+            print(f"报告已写 {out}/REPLAY-CSIC-2010.md")
+        else:
+            print(md)
+        return 0
 
     res = run_csic2010(Path(args.root), args.max_per_class)
     print(json.dumps({k: v for k, v in res.items() if k != "classes"}, ensure_ascii=False))

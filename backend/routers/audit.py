@@ -178,6 +178,66 @@ async def guard_approvals(
         raise HTTPException(500, "mcp_guard init failed (singleton is None)")
     return mcp_guard.approvals.list_all(page=page, page_size=page_size)
 
+
+@router.post("/guard/approvals/{ticket_id}/approve")
+async def guard_approval_approve(
+    ticket_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
+):
+    """批准 MCP Guard 人工确认工单（仅决策记录，不自动执行工具）。
+
+    与 /response/approvals 的差异：guard 工单不携带可执行载荷，通过后由
+    调用方按工单状态自行重放 /guard/call；本端点只落决策与审计。
+    decided_by 强制取 JWT 身份，不信任请求体（与审批 actor 原则一致）。
+    """
+    try:
+        from mcp_guard import mcp_guard
+    except ImportError:
+        raise HTTPException(500, "mcp_guard module not available")
+    if mcp_guard is None or not hasattr(mcp_guard, "approvals"):
+        raise HTTPException(500, "mcp_guard init failed (singleton is None)")
+    ticket = mcp_guard.approvals.approve(ticket_id, decided_by=user.username)
+    if not ticket:
+        raise HTTPException(404, f"Ticket not found or already processed: {ticket_id}")
+    await log_from_request(
+        session, request, user, action="guard.approval_approve",
+        target_type="guard_approval_ticket", target_id=ticket_id,
+        after={"tool": ticket.get("tool_name"), "trigger": ticket.get("trigger")},
+    )
+    return {"status": "approved", "ticket_id": ticket_id, "ticket": ticket}
+
+
+@router.post("/guard/approvals/{ticket_id}/deny")
+async def guard_approval_deny(
+    ticket_id: str,
+    request: Request,
+    reason: str = Query("", description="拒绝原因"),
+    session: AsyncSession = Depends(get_session),
+    user: UserInfo = Depends(RequireRole("admin")),
+):
+    """拒绝 MCP Guard 人工确认工单（reason 走 query，与 /response/approvals 同风格）。"""
+    try:
+        from mcp_guard import mcp_guard
+    except ImportError:
+        raise HTTPException(500, "mcp_guard module not available")
+    if mcp_guard is None or not hasattr(mcp_guard, "approvals"):
+        raise HTTPException(500, "mcp_guard init failed (singleton is None)")
+    ticket = mcp_guard.approvals.deny(
+        ticket_id, decided_by=user.username, reason=reason,
+    )
+    if not ticket:
+        raise HTTPException(404, f"Ticket not found or already processed: {ticket_id}")
+    await log_from_request(
+        session, request, user, action="guard.approval_deny",
+        target_type="guard_approval_ticket", target_id=ticket_id,
+        after={"tool": ticket.get("tool_name"), "trigger": ticket.get("trigger")},
+        reason=reason,
+    )
+    return {"status": "denied", "ticket_id": ticket_id, "reason": reason}
+
+
 class GuardCallRequest(BaseModel):
     """MCP Guard 网关调用请求体。
 

@@ -1,0 +1,88 @@
+{
+  "dataset": "CSIC-2010",
+  "source": "https://gitlab.fing.edu.uy/gsi/web-application-attacks-datasets (csic_2010)",
+  "rules_total": 150,
+  "rules_shadow": 125,
+  "max_per_class": 0,
+  "note": "三种口径: raw_recall=原始 URL 上的确认检出(引擎按真实接入口径工作); normalized_recall=URL 双重解码后的确认检出(衡量'若接入规范化解码器'的可达召回, CSIC 载荷普遍双重编码); signature_subset=深解码后含经典签名的子集 —— 签名引擎的主评审口径(其余为纯行为异常, 是异常检测器的工作面)。",
+  "classes": {
+    "malicious": {
+      "label": "malicious",
+      "n": 25065,
+      "elapsed_s": 729.3,
+      "throughput_eps": 34,
+      "enforced_tp": 757,
+      "enforced_fp": 0,
+      "shadow_only_tp": 82,
+      "recall_enforced": 0.0302,
+      "recall_with_shadow": 0.0335,
+      "per_type": {
+        "other:FN": 23282,
+        "xss:FN": 302,
+        "sqli:FN": 642,
+        "xss:TP": 450,
+        "other:TP": 210,
+        "sqli:shadow_only": 82,
+        "traversal:TP": 97
+      },
+      "per_rule_top": {
+        "C-005": 450,
+        "shadow:C-014": 450,
+        "SIG-016": 264,
+        "SIG-003": 97,
+        "shadow:C-010": 82,
+        "SIG-001": 43
+      },
+      "per_rule_fp_top": {
+        "shadow:C-014": 0,
+        "shadow:C-010": 0
+      },
+      "signature_subset_n": 1577,
+      "normalized": {
+        "label": "malicious",
+        "n": 1577,
+        "elapsed_s": 45.0,
+        "throughput_eps": 35,
+        "enforced_tp": 547,
+        "enforced_fp": 0,
+        "shadow_only_tp": 0,
+        "recall_enforced": 0.3469,
+        "recall_with_shadow": 0.3469,
+        "per_type": {
+          "xss:FN": 302,
+          "sqli:FN": 642,
+          "xss:TP": 450,
+          "traversal:TP": 97,
+          "other:FN": 86
+        },
+        "per_rule_top": {
+          "C-005": 450,
+          "shadow:C-014": 450,
+          "SIG-003": 97,
+          "SIG-016": 97
+        },
+        "per_rule_fp_top": {
+          "shadow:C-014": 0
+        }
+      }
+    },
+    "benign": {
+      "label": "benign",
+      "n": 36000,
+      "elapsed_s": 1026.5,
+      "throughput_eps": 35,
+      "enforced_tp": 0,
+      "enforced_fp": 0,
+      "shadow_only_tp": 0,
+      "recall_enforced": 0.0,
+      "recall_with_shadow": 0.0,
+      "per_type": {},
+      "per_rule_top": {},
+      "per_rule_fp_top": {},
+      "normalized": {
+        "n": 0,
+        "enforced_fp": 0
+      }
+    }
+  }
+}
