@@ -12,7 +12,7 @@
 | :--- | :--- |
 | **项目代号** | shared-memory-platform |
 | **当前版本** | 与 `docker-compose.yml` 镜像 `:dev` 同步（2026-08-25） |
-| **核心栈** | Kafka 7.6.0 + Flink 1.19.3（Java 11）+ FastAPI（Python 3.12）+ React 19.2.7 |
+| **核心栈** | Kafka 7.6.0 + Flink 1.20.5（Java 11）+ FastAPI（Python 3.12）+ React 19.2.7 |
 | **代码规模** | 后端 200+ Python 模块（28 子目录，46 个 LLM 提示词模板）+ Flink 8 个 Java 作业 + 11 条 Sigma 规则 + 13 个 React 页面 |
 | **阅读时长** | 通读 1 小时 / 精读 + 动手 1–2 周 |
 | **配套文档** | `知识手册.md`（18 章 71 KB 完整版） / 11 篇分章节 / 速查 / 5 份升级方案 |
@@ -108,7 +108,7 @@
 
 **一个端到端的安全运营平台**——从 syslog / API 接入开始，经历
 **校验 → 异常检测 → 攻击链 CEP → LLM 深度审计 → 独立监督 → 响应执行 → 复盘反馈**
-的完整链路，全部在 Docker 化的 Kafka + Flink 1.19.3 + FastAPI + React 集群上跑通。
+的完整链路，全部在 Docker 化的 Kafka + Flink 1.20.5 + FastAPI + React 集群上跑通。
 
 > 它不是单一工具，而是把 SOC 日常工作的"流水线"做成了可一键启动的工程产物。
 >
@@ -174,7 +174,7 @@
 
 | 维度 | 传统 SIEM | 单 LLM Agent | **本平台** |
 | :--- | :---: | :---: | :---: |
-| 实时流处理 | ✅ 强 | ❌ | ✅ Kafka + Flink 1.19.3，秒级延迟 |
+| 实时流处理 | ✅ 强 | ❌ | ✅ Kafka + Flink 1.20.5，秒级延迟 |
 | LLM 审计 | ❌ | ✅ 但易幻觉 | ✅ 4 层 + CAD 监督 + Grounding |
 | 工具调用安全 | N/A | ⚠️ 无控制 | ✅ MCP Guard 4 层 |
 | 真实响应 | ⚠️ 半自动 | ⚠️ 单次 | ✅ 编排 + 审批 + 回滚 |
@@ -214,7 +214,7 @@
    └──────────────┬─────────────────┘
                   ▼
    ┌──────────────────────────────────────────┐
-   │  Flink 1.19.3 集群 (Java 11)              │
+   │  Flink 1.20.5 集群 (Java 11)              │
    │  ┌──────────────────┐  ┌────────────────┐  │
    │  │ Job 1: Validation │→│ Job 2: Anomaly │  │
    │  │  · 解析 校验 认证   │  │  · 评分  CEP    │  │
@@ -1362,7 +1362,7 @@ python -m pytest tests/test_prompts_integrity.py -v
 
 **亮点清单**（按评委喜好排序）：
 
-1. **真流处理架构**（Kafka + Flink 1.19.3）— 区别于"单 LLM Agent"
+1. **真流处理架构**（Kafka + Flink 1.20.5）— 区别于"单 LLM Agent"
 2. **LLM 4 层 + CAD 监督**（反幻觉）— 不是"让 LLM 自己审自己"
 3. **5 道安全闸**（Guard / Stabilizer / SecurityGuard / Grounding / CAD）— 平台自身安全
 4. **真实执行**（iptables / netsh / paramiko）— 不是模拟
@@ -1405,7 +1405,7 @@ python -m pytest tests/test_prompts_integrity.py -v
 
 > **第二段**（60 秒）· 3 个差异点
 >
-> "和传统 SIEM 比，我们强在 AI 原生；和单 LLM Agent 比，我们强在实时、**可审计、可监督**。具体地：1) **真流处理架构**——Kafka + Flink 1.19.3 做秒级流式处理；2) **LLM 4 层 + CAD 独立监督**——拆解 / 拼工具 / 执行 / 复核 4 层流水线，每层都有产物可校验，CAD 不信 LLM 汇报自己去 PG 反查；3) **5 道安全闸**——MCP Guard、Stabilizer、SecurityGuard、Grounding、CAD 熔断器，平台自身不是裸的。"
+> "和传统 SIEM 比，我们强在 AI 原生；和单 LLM Agent 比，我们强在实时、**可审计、可监督**。具体地：1) **真流处理架构**——Kafka + Flink 1.20.5 做秒级流式处理；2) **LLM 4 层 + CAD 独立监督**——拆解 / 拼工具 / 执行 / 复核 4 层流水线，每层都有产物可校验，CAD 不信 LLM 汇报自己去 PG 反查；3) **5 道安全闸**——MCP Guard、Stabilizer、SecurityGuard、Grounding、CAD 熔断器，平台自身不是裸的。"
 
 > **第三段**（60 秒）· 现场 demo
 >
@@ -1549,23 +1549,23 @@ backend/
     └── ...
 ```
 
-### 流处理（Java · Flink 1.19.3 · 8 个作业/工具）
+### 流处理（Java · Flink 1.20.5 · 6 个作业 + 2 个辅助类）
 
 ```
 flink-jobs/
-├── pom.xml                    ← Maven 项目 (Flink 1.19.3 + Java 11 + CEP + Kafka Connector 3.2.0-1.19)
+├── pom.xml                    ← Maven 项目 (Flink 1.20.5 + Java 11 + CEP + Kafka Connector 3.3.0-1.20)
 ├── Dockerfile                 ← 多阶段构建
 ├── submit-jobs.sh             ← 作业提交脚本
 └── src/main/java/com/soc/
     ├── job/
-    │   ├── LogValidationJob.java          ← 验证+认证+去重
+    │   ├── LogValidationJob.java          ← 验证+认证+去重（内嵌 SourceReputationFunction 源信誉评分）
     │   ├── AnomalyDetectionJob.java       ← 异常评分+CEP
-    │   ├── CepPatternConfig.java          ← CEP 攻击链模式
-    │   ├── CepPartialMatchFunction.java   ← CEP 部分匹配
+    │   ├── CepPatternConfig.java          ← CEP 攻击链模式（辅助类）
+    │   ├── CepPartialMatchFunction.java   ← CEP 部分匹配（辅助类）
     │   ├── SigmaThresholdAggregationJob.java ← Sigma 阈值去抖
     │   ├── FlowAggregationJob.java        ← NDR 流量聚合（需开关）
     │   ├── TlsFingerprintJob.java         ← TLS JA3/JA4（需开关）
-    │   └── SourceReputationFunction.java  ← 数据源信誉
+    │   └── BehaviorAnomalyJob.java        ← 跨域行为异常（需开关）
     ├── model/
     │   ├── SecurityEvent.java             ← 安全事件模型
     │   └── AlertEvent.java                ← 告警事件模型

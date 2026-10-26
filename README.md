@@ -3,9 +3,12 @@
 > 🚀 **第一次接触本项目？** 请先看 [`docs/study-guide/知识手册.md`](docs/study-guide/知识手册.md)（18 章连贯学习手册，71 KB）；速通者看 [`docs/study-guide/速查.md`](docs/study-guide/速查.md)；喜欢 PDF 排版看 [`docs/study-guide/总览-PDF风.md`](docs/study-guide/总览-PDF风.md)。
 > 📚 完整文档导航见 [`docs/INDEX.md`](docs/INDEX.md)。
 
-> **2026-10-21 升级进行中**：响应执行默认 `dry_run`（真实执行需显式开启）；能力状态以
-> [`backend/capabilities.yaml`](backend/capabilities.yaml) 为准（verified / experimental / disabled）；
-> 升级计划与证据见 [`docs/upgrade/`](docs/upgrade/)。
+> **能力状态以 [`backend/capabilities.yaml`](backend/capabilities.yaml) 为准**
+> （2026-10-25 快照：4 verified / 13 experimental / 1 disabled）；
+> 响应执行默认 `dry_run`（真实执行需显式开启）；升级计划与证据见 [`docs/upgrade/`](docs/upgrade/)。
+>
+> 📊 **检测能力评测**（真实数据回放，报告在 [`docs/benchmark/`](docs/benchmark/)）：
+> CSIC-2010 全量回放（6 万条）+ 分层消融 + 对抗保持率 + Sigma 吞吐，见 §[评测基准](#评测基准)。
 
 **全自动安全审计 Agent 平台**：从日志接入、实时异常检测、攻击链 CEP、LLM 智能审计，到响应执行、复盘沉淀，形成闭环。基于 **Kafka + Flink 1.20.5 + Java 11** 流处理主干，叠加 NDR / EDR / Threat Intel / 反钓鱼 / 红蓝自博弈 / UEBA-for-AI / 因果推断等后端模块。
 
@@ -17,24 +20,24 @@
 |------|------|
 | **业务问题** | 安全运营中心 (SOC) 的告警噪声、跨域关联、响应滞后、规则僵化、Agent 行为失控五大痛点 |
 | **解决方式** | 流式数据底座 + 规则/Sigma 引擎兜底 + LLM 智能审计 + 自动响应 + 红蓝自博弈持续进化 + 工具调用四层控制 |
-| **核心能力** | 30 个后端子模块、16 个 Router、219 个 REST 端点、16 个前端页面、9 个 Flink 作业、7 类 Kafka Topic、98 项后端测试 |
+| **核心能力** | 27 个后端能力子模块、19 个 Router、231 个 REST 端点、16 个路由页面（22 个页面文件）、6 个 Flink 作业、16 个 Kafka Topic、3084 项后端测试 |
 | **目标用户** | 企业 SOC 运营方 / MSSP 安全托管 / 高校与竞赛团队 / 平台自审计研究 |
 | **场景** | 揭榜挂帅（共享记忆）智能体竞赛 · 校级 SOC 试点 · 攻防演练与红蓝自博弈训练 |
 
 ---
 
-## 架构 (Kafka + Flink 1.19.3)
+## 架构 (Kafka + Flink 1.20.5)
 
 ```
 日志源 (syslog/API/EDR/NDR/反钓鱼)
     │  经 API Key 或 SASL_SSL 认证
     ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Kafka: security-logs-raw (7 类 Topic 分级路由)         │
+│  Kafka: security-logs-raw (16 个 Topic 分级路由)        │
 └────────────────────┬────────────────────────────────────┘
                      ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Flink 作业群 (3 核心 + 4 扩展)                          │
+│  Flink 作业群 (3 核心 + 3 NDR/EDR 扩展)                  │
 │  ── 核心 ──                                              │
 │  LogValidationJob              ① 校验 ② 认证 ③ 去重     │
 │  AnomalyDetectionJob           ④ 异常评分 ⑤ CEP 攻击链   │
@@ -57,7 +60,7 @@
           白名单/SSH/执行)            Decomposer→ToolBuilder
                   │                  →Executor→Reviewer
                   ▼                       │
-          8 类动作 + 5 种执行模式         ▼
+          6 个动作 + 3 种执行模式         ▼
                   │                 CAD 独立监督
                   ▼                 (熔断器+穿透验证)
           安全执行器 + 回滚                │
@@ -74,7 +77,7 @@
      (self_play)            (规则挖掘+改进)         (work_order/case/post_mortem)
 ```
 
-辅助通路（横向能力）：`causal_chain` 因果推断（PC / GES-style / do-calculus）→ `phishing_guard` 反钓鱼 6 通道 → `mcp_guard` 4 层工具调用控制 → `security_guard` 调用安全守卫 → `tool_behavior_signature` UEBA-for-AI → `sigma_engine` 25+ 规则动态管理。
+辅助通路（横向能力）：`causal_chain` 因果推断（PC / GES-style / do-calculus）→ `phishing_guard` 反钓鱼 6 通道 → `mcp_guard` 4 层工具调用控制 → `security_guard` 调用安全守卫 → `tool_behavior_signature` UEBA-for-AI → `sigma_engine` 150 条规则动态管理（20 自研 + 130 SigmaHQ 社区规则，社区规则默认影子模式）。
 
 ---
 
@@ -142,7 +145,7 @@
 
 | 模块 | 说明 |
 |------|------|
-| **Sigma 检测引擎 (sigma_engine / sigma_detector)** | 25+ 规则 (4 类目录：默认 / 社区活跃 / 社区候选 / 自博弈影子)，动态启停 + 规则导入 (dry_run_import) + 引擎 (engine) + 映射 (mapping) |
+| **Sigma 检测引擎 (sigma_engine / sigma_detector)** | 150 条规则（`rules/` 自研 20 条 + `rules_community_active/` 社区 130 条，其中 SigmaHQ 批量导入 116 条编译通过、125 条默认 `x-soc-shadow` 影子模式仅记录不告警；候选/自博弈影子目录预留）。动态启停 + 影子切换 + SigmaHQ 批量导入管线 (dry_run_import / tools/import_sigmahq.py) + 引擎 (engine) + 映射 (mapping) |
 | **CEP 攻击链 (CepPatternConfig / CepPartialMatchFunction)** | 端口扫描→C2 / 横向移动 / 数据外泄 3 模式 + 部分匹配 |
 | **源信誉评分 (SourceReputationFunction)** | 数据源动态信誉 + 信誉衰减 |
 | **异常检测 (anomaly_detector)** | Python 侧兼容 HTTP 模式 + 频率/严重度/时段多维评分 |
@@ -237,16 +240,16 @@
 
 ## 技术栈
 
-- **消息总线**: Apache Kafka 3.7 (KRaft 模式)
-- **流处理**: Apache Flink **1.19.3** (Java 11, CEP + DataStream API, Kafka Connector 3.2.0-1.19)
+- **消息总线**: Confluent Platform Kafka 7.6.0 (KRaft 模式, 3 broker)
+- **流处理**: Apache Flink **1.20.5** (Java 11, CEP + DataStream API, Kafka Connector 3.3.0-1.20)
 - **后端**: FastAPI + SQLAlchemy (async) + pgvector + Qdrant + Redis + aiokafka + Temporal
-- **AI**: OpenAI 兼容 LLM + Embedding (mimo-v2.5) + UEBA-for-AI (tool_behavior_signature)
+- **AI**: OpenAI 兼容 LLM (默认 mimo-v2.5) + 可配置 Embedding 模型 + UEBA-for-AI (tool_behavior_signature)
 - **安全工具**: paramiko SSH + iptables + Suricata + nmap (真实防火墙操作)
 - **工具调用控制**: MCP Guard 4 层检查 + Security Guard 安全守卫 + Veto Gates
-- **前端**: React 19 + TypeScript + Tailwind CSS 4 + Framer Motion + 自研组件库 (`components/{brand,home,monitor,operations,rag,phishing,ui,hero,common,chat,login,memories}`)
+- **前端**: React 19 + TypeScript + Vite 7 + Tailwind CSS 4 + Framer Motion + 自研组件库 (`components/{brand,charts,common,demo,home,login,logs,monitor,operations,phishing,rag,ui}`)
 - **可视化**: Kafka UI (Topic 监控 / 消息浏览) + Prometheus + Grafana (经 OTEL)
 - **部署**: Docker Compose (PostgreSQL 16 + Redis 7 + Kafka + Flink + Qdrant + Temporal)
-- **测试**: pytest (98 项后端测试) + 前端 lint/build + Flink 编译 + Docker 构建校验
+- **测试**: pytest (3084 项后端测试, 含 Kafka+PG testcontainers 集成测试) + 前端 lint/build + Flink 编译 + Docker 构建校验
 
 ---
 
@@ -346,16 +349,20 @@ python log_simulator.py --mode chain --api http://localhost:8001
 
 ### 6. 端到端验证
 
-```bash
-python demo_e2e.py          # 一键全链路验证
-python demo_start.bat       # Windows 批处理版
+```powershell
+# 5 分钟确定性演示：注入攻击场景 → 打印验证清单（含 Session ID 供审计页复查）
+.\demo\run_demo.ps1              # 调用 tools/generate_test_feed.py --inject
+.\demo\run_demo.ps1 -OpenBrowser # 同时打开前端
+
+bash demo/run-demo.sh            # Linux/macOS 等价脚本
+bash demo/production-drill.sh    # 生产演练剧本（含核实步骤）
 ```
 
 ---
 
 ## CI/CD 与部署
 
-- **CI (合并门禁)**: 每次 PR / push main 自动执行 后端 pytest(覆盖率门禁, 98 项) → 前端 lint+build → Flink 编译 → Docker 构建校验 (`publish.yml` 推送 GHCR 镜像 `ghcr.io/<owner>/soc-{backend,frontend,flink}`)。
+- **CI (合并门禁)**: 每次 PR / push main 自动执行 后端 pytest(覆盖率门禁 `--cov-fail-under=55`, 3084 项测试, 约 7 分钟) + Kafka/PG testcontainers 集成测试 → 前端 lint+build → Flink 编译+窗口真执行 → API 契约 diff → 密钥泄漏扫描 → Docker 构建校验 (`publish.yml` 推送 GHCR 镜像 `ghcr.io/<owner>/soc-{backend,frontend,flink}`)。
 - **镜像版本**: main → `:main` + `:sha-<7>`; 打 `v*` 标签 → `:<semver>` + `:latest`; 生产必须显式指定 `IMAGE_TAG`。
 - **环境分离**: dev = `docker-compose.yml`(源码构建); prod = 叠加 `docker-compose.prod.yml`(拉取预构建镜像 + 关闭调试端口)。
 - **部署**: `deploy.yml` 手动触发, staging/production 双环境 (production 人工审批), 暂无远程服务器前默认禁用。
@@ -371,19 +378,35 @@ IMAGE_TAG=1.2.3 docker compose -f docker-compose.yml -f docker-compose.prod.yml 
 
 ---
 
-## Kafka Topic 说明
+## Kafka Topic 说明（16 个）
 
-| Topic | 说明 | 生产者 | 消费者 |
-|-------|------|--------|--------|
-| `security-logs-raw` | 原始日志入口 | syslog-adapter / log_simulator / EDR / NDR | Flink Job 1 |
-| `security-logs-validated` | 已验证日志 | Flink Job 1 | Flink Job 2 |
-| `security-logs-rejected` | 被拒绝日志 (含原因) | Flink Job 1 | 审计归档 |
-| `security-events-enriched` | 富化事件 (含异常分) | Flink Job 2 | Backend (存储) |
-| `security-alerts` | 高优先级告警 | Flink Job 2 | Backend (响应引擎) |
-| `security-audit-queue` | LLM 审计队列 | Flink Job 2 | Backend (Audit-LLM) |
-| `security-audit-results` | 审计结果 | Backend | 前端 SSE / 归档 |
+数据面主链路：
 
-NDR/EDR 扩展作业输出 topic 见 `flink-jobs/src/main/java/com/soc/util/KafkaConfig.java`。
+| Topic | 分区 | 说明 | 生产者 → 消费者 |
+|-------|-----|------|----------------|
+| `security-logs-raw` | 3 | 原始日志入口（保留 3 天） | syslog-adapter / log_simulator / EDR / NDR → Flink LogValidationJob |
+| `security-logs-validated` | 3 | 已验证日志（保留 5 天） | LogValidationJob → AnomalyDetectionJob |
+| `security-logs-rejected` | 1 | 被拒绝日志含原因（保留 14 天, 审计） | LogValidationJob → Backend 归档 |
+| `security-logs-duplicate` | 3 | 重复事件分流（与 rejected 分开, 不污染拒绝口径） | LogValidationJob → 归档 |
+| `security-events-ingest` | 3 | HTTP 网关 → Python 检测主通道 | Backend 网关 → ingest worker (anomaly + pySigma) |
+| `security-events-enriched` | 3 | 富化事件含异常分 | AnomalyDetectionJob → Backend (存储) |
+| `security-sigma-hit` | 3 | Sigma 单事件命中候选 → 事件时间阈值聚合 | Backend pySigma → SigmaThresholdAggregationJob |
+| `security-alerts` | — | 高优先级告警 | Flink → Backend (响应引擎) |
+| `security-audit-queue` | 2 | LLM 审计队列 | Flink / Backend → Backend (Audit-LLM) |
+
+可靠性与扩展链路：
+
+| Topic | 分区 | 说明 | 生产者 → 消费者 |
+|-------|-----|------|----------------|
+| `security-logs-retry` | — | 消费失败重试 | Backend → Backend |
+| `security-logs-dlq` | 1 | 死信队列（两阶段确认后才提交原 offset） | Backend → Backend DLQ 管理 (`/api/dlq`) |
+| `security-audit-overflow` | — | 审计过载分流（满载 shed 时 P0/P1 优先级队列） | Backend → Backend |
+| `security-audit-results` | — | 审计结果回写（**当前预留, 暂无消费者**; 结果落库走 EventStore 直写） | Backend → 预留 |
+| `security-behavior-alerts` | 1 | Flink 行为基线告警（保留 30 天, 允许阻塞式自动处置） | BehaviorAnomalyJob → Backend |
+| `security-cep-partial` | 1 | CEP 部分匹配预警 | Flink → Backend |
+| `security-cep-patterns` | 1 | CEP 模式配置广播热更新 | Backend → Flink (Broadcast) |
+
+分区/保留策略以 `tools/init-kafka-topics.sh` 为准；NDR/EDR 扩展作业输出 topic 见 `flink-jobs/src/main/java/com/soc/util/KafkaConfig.java`。
 
 ---
 
@@ -428,8 +451,8 @@ NDR/EDR 扩展作业输出 topic 见 `flink-jobs/src/main/java/com/soc/util/Kafk
 
 | 类别 | 规则 | 示例 |
 |------|------|------|
-| 豁免 (`RATE_LIMIT_WHITELIST`, 51 条前缀/端点) | 全部业务域 / 运营只读端点 / 探针 / 文档不计入滑窗 | `/api/cases`、`/api/agent-traces/*`、`/api/observability/*`、`/api/tree/*`、`/api/cad/*`、`/api/audit-llm/*`、`/metrics` |
-| 点名限流 (`RATE_LIMIT_FORCED`, 31 条) | 已豁免前缀中的**不可逆高危动作 + LLM 重端点**仍限流, 并使用独立 `crit:` 桶 (不被普通流量占额度) | `POST /api/response/execute`、`POST /api/response/rollback`、`POST /api/firewall/connect`、`POST /api/guard/call`、`POST /api/logs/ingest`、`POST /api/rules`、`POST /api/phishing/detect/*` |
+| 豁免 (`RATE_LIMIT_WHITELIST`, 88 条前缀/端点) | 全部业务域 / 运营只读端点 / 探针 / 文档不计入滑窗 | `/api/cases`、`/api/agent-traces/*`、`/api/observability/*`、`/api/tree/*`、`/api/cad/*`、`/api/audit-llm/*`、`/metrics` |
+| 点名限流 (`RATE_LIMIT_FORCED`, 34 条) | 已豁免前缀中的**不可逆高危动作 + LLM 重端点**仍限流, 并使用独立 `crit:` 桶 (不被普通流量占额度) | `POST /api/response/execute`、`POST /api/response/rollback`、`POST /api/firewall/connect`、`POST /api/guard/call`、`POST /api/logs/ingest`、`POST /api/rules`、`POST /api/phishing/detect/*` |
 | 未归类 | 走全局 `std:` 桶 (默认限流) | 新增业务域未归类时 |
 
 - 方法敏感: 如 `/api/response/approvals` 的 `GET` 豁免、`POST` (审批/预览) 限流; `/api/rules` 读豁免、写限流。
@@ -462,9 +485,9 @@ ufw deny 9093
 
 ---
 
-## 能力索引（16 个后端 Router · 16 个前端页面 · 9 个 Flink 作业）
+## 能力索引（19 个后端 Router · 16 个路由页面 · 6 个 Flink 作业）
 
-### 后端 REST 端点（按 router 聚合, 总计 219）
+### 后端 REST 端点（按 router 聚合, 总计 231）
 
 | Router | 端点数 | 端点前缀 |
 |--------|------:|---------|
@@ -474,51 +497,56 @@ ufw deny 9093
 | `phishing.py` | 20 | 邮件 / BEC / 网站 / SMS / 二维码 / 附件 + 演练 |
 | `rag.py` | 19 | 检索 / 重排 / 导入 / 评估 |
 | `chat.py` | 13 | 对话 / 解释 / 摘要 |
+| `edr_intel.py` | 12 | EDR 接入 / 威胁情报 / 免费情报源 (csv_http) |
 | `logs.py` | 10 | 日志接入 / 查询 / 富化 |
-| `edr_intel.py` | 9 | EDR 接入 / 威胁情报 |
 | `self_play.py` | 9 | 自博弈 / 红蓝 / 课程 / 评估 |
 | `kafka.py` | 8 | Kafka 拓扑 / 主题 / 偏移 |
+| `auth.py` | 6 | 登录 / 注册 / 刷新 |
 | `assets.py` | 6 | 资产 CRUD / 关联 |
-| `auth.py` | 5 | 登录 / 注册 / 刷新 |
-| `causal.py` | 4 | 因果链 / PC / GES-style / do-calculus |
-| `ndr.py` | 4 | NDR 流 / TLS / 会话 |
 | `sources.py` | 4 | 数据源 CRUD / 认证 |
+| `ndr.py` | 4 | NDR 流 / TLS / 会话 |
+| `dlq.py` | 4 | 死信队列查看 / 重放 / 清空 |
+| `causal.py` | 4 | 因果链 / PC / GES-style / do-calculus |
+| `demo_seed.py` | 3 | 演示数据注入 (/api/demo) |
+| `benchmark.py` | 2 | 评测基准报告 (/api/benchmark) |
 | `capabilities.py` | 1 | B 类能力开关 + Prometheus 聚合 |
 
-### 前端页面（16 个）
+> 端点数为代码内路由装饰器实测（2026-10-27）；`backend/openapi.json` 为快照（226），实时以 `http://localhost:8001/docs` 为准。变更型端点已全部声明 RBAC 角色，并由 `tests/test_rbac_write_endpoints_guard.py` AST 守卫锁定。
 
-| 页面 | 路径 |
-|------|------|
-| **Home** | `pages/Home.tsx` — 守望品牌首页（Hero / Blueprint / Manifesto / ShiftConsole） |
-| **Monitor** | `pages/Monitor.tsx` — 实时监控（事件流 / 思维链 / 工具签名 / 管道） |
-| **Operations** | `pages/Operations.tsx` — 运营中心（14 个 Tab：概览 / KPI / 工单 / 案例 / 反馈 / 复盘 / 规则 / 审计 / 跟踪 / 学习 / 资产 / 成本 / 生命周期 / 徽记） |
-| **Logs** | `pages/Logs.tsx` — 日志检索 / 富化 |
-| **Response** | `pages/Response.tsx` — 响应编排 / 审批 / 执行 |
-| **RAG** | `pages/RAG.tsx` — 知识库检索 / 重排 / 质量 |
-| **Phishing** | `pages/PhishingDetect.tsx` — 反钓鱼演练 / 检测（独立组件，因含 6 通道） |
-| **Intel** | `pages/Intel.tsx` — 威胁情报 / IOC |
-| **EDR** | `pages/EDR.tsx` — EDR 融合视图 |
-| **Traffic** | `pages/Traffic.tsx` — 流量基线 / 异常 |
-| **Encrypted** | `pages/Encrypted.tsx` — 加密流量 / TLS 指纹 |
-| **Sandbox** | `pages/Sandbox.tsx` — 0day 沙箱 |
-| **SelfPlay** | `pages/SelfPlay.tsx` — 红蓝自博弈 |
-| **SecurityAudit** | `pages/SecurityAudit.tsx` — 平台自审计 |
-| **CapabilitiesDashboard** | `pages/CapabilitiesDashboard.tsx` — 能力开关总览 |
-| **Login / Register** | `pages/{Login,Register}.tsx` |
+### 前端页面（16 个路由 · 22 个页面文件）
 
-### Flink 作业（9 个 Java 作业）
+16 个路由页面注册于 `App.tsx`；另有 6 个感知域页面（Traffic / Encrypted / Intel / Sandbox / EDR / CapabilitiesDashboard）作为 **Sensing 感知中心的域 Tab** 渲染（旧路由 `/traffic` 等已 301 到 `/sensing?t=...`）。
+
+| 页面 | 路径 | 说明 |
+|------|------|------|
+| **Home** | `pages/Home.tsx` | 守望品牌首页（Hero / Blueprint / Manifesto / ShiftConsole） |
+| **Monitor** | `pages/Monitor.tsx` | 实时监控（事件流 / 思维链 / 工具签名 / 管道） |
+| **Operations** | `pages/Operations.tsx` | 运营中心（14 个 Tab：概览 / KPI / 工单 / 案例 / 反馈 / 复盘 / 规则 / 审计 / 跟踪 / 学习 / 资产 / 成本 / 生命周期 / 徽记） |
+| **Sensing** | `pages/Sensing.tsx` | 感知中心（6 域 Tab：Traffic 流量基线 / Encrypted 加密流量 / Intel 威胁情报 / Sandbox 0day / EDR 融合 / Capabilities 能力开关） |
+| **AntiPhishing** | `pages/AntiPhishing.tsx` | 反钓鱼演练 / 检测（6 通道） |
+| **Logs** | `pages/Logs.tsx` | 日志检索 / 富化 |
+| **Response** | `pages/Response.tsx` | 响应编排 / 审批 / 执行 |
+| **RAG** | `pages/RAG.tsx` | 知识库检索 / 重排 / 质量 |
+| **SecurityAudit** | `pages/SecurityAudit.tsx` | 平台自审计（四阶段流水线复查） |
+| **SelfPlay** | `pages/SelfPlay.tsx` | 红蓝自博弈 |
+| **Benchmark** | `pages/Benchmark.tsx` | 评测基准报告展示（读 `docs/benchmark/`） |
+| **Demo** | `pages/Demo.tsx` | 演示引导页 |
+| **Screen** | `pages/Screen.tsx` | 投屏大屏模式 |
+| **Poster** | `pages/Poster.tsx` | 项目海报页 |
+| **Login / Register** | `pages/{Login,Register}.tsx` | JWT 登录 / 注册 |
+
+### Flink 作业（6 个作业 + 2 个 CEP 辅助类）
 
 | 作业 | 角色 | 默认启用 |
 |------|------|---------|
-| **LogValidationJob** | 校验 + 认证 + 去重 | ✅ |
+| **LogValidationJob** | 校验 + 认证 + 去重 + 源信誉评分（`SourceReputationFunction` 内嵌于本作业） | ✅ |
 | **AnomalyDetectionJob** | 多维异常 + CEP 攻击链 | ✅ |
-| **SigmaThresholdAggregationJob** | Sigma 规则阈值聚合 | ✅ |
+| **SigmaThresholdAggregationJob** | Sigma 规则阈值聚合（消费 `security-sigma-hit`） | ✅ |
 | **FlowAggregationJob** | NDR 5 元组聚合 | 可选 (`SUBMIT_NDR_JOBS=1`) |
 | **TlsFingerprintJob** | TLS/JA3 指纹 | 可选 |
 | **BehaviorAnomalyJob** | 跨域行为异常 | 可选 |
-| `CepPatternConfig` | CEP 模式定义 (内嵌) | ✅ |
-| `CepPartialMatchFunction` | CEP 部分匹配 (内嵌) | ✅ |
-| `SourceReputationFunction` | 数据源信誉 (内嵌) | ✅ |
+| `CepPatternConfig` | CEP 模式定义（辅助类） | 随 AnomalyDetectionJob |
+| `CepPartialMatchFunction` | CEP 部分匹配（辅助类） | 随 AnomalyDetectionJob |
 
 ---
 
@@ -526,12 +554,26 @@ ufw deny 9093
 
 | 层级 | 命令 | 覆盖 |
 |------|------|------|
-| 后端单元/集成 | `pytest backend/tests -q` | 98 项测试, 覆盖审计流水线 / 限流分类 / 路由白名单 / 沙箱 / 反馈闭环 / 自博弈 / Sigma / 工具行为签名 / 因果链 / 撤销门 |
+| 后端单元/集成 | `pytest backend/tests -q` | 3084 项测试（252 个文件，全量约 7 分钟）: 审计流水线 / 限流分类 / 路由白名单 / RBAC AST 守卫 / 沙箱 / 反馈闭环 / 自博弈 / Sigma 动作链 / 工具行为签名 / 因果链 / 撤销门 / 休眠模块守卫 |
+| 后端集成 (testcontainers) | `pytest backend/tests/integration -q` | 真 Kafka (cp-kafka 7.6) + PG16 容器：enriched 落库 / 告警→响应留痕 / 畸形消息进 DLQ |
+| 检测评测 | `python -m backend.eval_datasets.evaluate_detection` 等 | CSIC-2010 全量回放 / 分层消融 / 对抗保持率 / 阈值扫描（见下节） |
 | 后端导入检查 | `python -c "import app"` | 主应用可启动 |
-| 前端 | `cd frontend && npm run lint && npm run build` | 16 页 + 100+ 组件 |
-| Flink | `cd flink-jobs && mvn -DskipTests package` | 9 个 Java 作业编译 |
+| 前端 | `cd frontend && npm run lint && npm run build` | 16 路由页 + 71 组件 |
+| Flink | `cd flink-jobs && mvn -DskipTests package` | 6 作业 + 2 辅助类编译（CI 另含窗口函数真执行测试, 0 skip 门禁） |
 | Docker | `docker compose config` | compose 文件可解析 |
-| 端到端 | `python demo_e2e.py` | 全链路验证 |
+
+## 评测基准（真实数据回放，非自生成数据）
+
+报告位于 [`docs/benchmark/`](docs/benchmark/)（`/api/benchmark` 端点可直接展示），全部保留整改前后两份数字：
+
+| 报告 | 内容 | 关键结论 |
+|------|------|---------|
+| [REPLAY-CSIC-2010](docs/benchmark/REPLAY-CSIC-2010.md) | CSIC-2010 全量回放（25065 攻击 / 36000 良性） | 签名子集召回 0.347，全类召回 0.030 —— 真实水位如实公开 |
+| [ABLATION](docs/benchmark/ABLATION.md) | L0-L4 分层消融（无检测/纯 Sigma/纯异常/组合/全量） | 各层贡献度可复现 |
+| [EVASION](docs/benchmark/EVASION.md) | 对抗保持率（变异/混淆攻击下检出保持度） | 规则僵化面量化 |
+| [PERF-2026-10-26](docs/benchmark/PERF-2026-10-26.md) | Sigma 吞吐（每事件私有 :memory: 库 + 150 规则） | ~34 eps, 生产接入需扩容（已知断点） |
+
+配套评测代码在 [`backend/eval_datasets/`](backend/eval_datasets/)（detection / behavior / grounding 三族评测器 + 阈值扫描 + ablation）。
 
 ---
 
@@ -539,26 +581,25 @@ ufw deny 9093
 
 ```
 ├── flink-jobs/                              # ★ Flink 流处理作业 (Java 11)
-│   ├── pom.xml                              # Maven (Flink 1.19.3 + Java 11 + CEP + Kafka Connector 3.2.0-1.19)
+│   ├── pom.xml                              # Maven (Flink 1.20.5 + Java 11 + CEP + Kafka Connector 3.3.0-1.20)
 │   ├── Dockerfile                           # 多阶段构建: Maven → Flink 运行时
 │   ├── submit-jobs.sh / auto-submit.sh      # 守护式作业提交
 │   ├── schemas/                             # AVRO Schema
 │   │   ├── security-event.avsc
 │   │   └── alert-event.avsc
 │   └── src/main/java/com/soc/
-│       ├── job/                             # 9 个 Flink 作业
-│       │   ├── LogValidationJob.java        # 校验+认证+去重
+│       ├── job/                             # 6 个 Flink 作业 + 2 个 CEP 辅助类
+│       │   ├── LogValidationJob.java        # 校验+认证+去重（内嵌 SourceReputationFunction 源信誉评分）
 │       │   ├── AnomalyDetectionJob.java     # 异常评分+CEP攻击链
 │       │   ├── SigmaThresholdAggregationJob.java
 │       │   ├── FlowAggregationJob.java      # NDR 扩展
 │       │   ├── TlsFingerprintJob.java       # NDR 扩展
 │       │   ├── BehaviorAnomalyJob.java      # EDR 扩展
-│       │   ├── CepPatternConfig.java        # CEP 模式定义
-│       │   ├── CepPartialMatchFunction.java # CEP 部分匹配
-│       │   └── SourceReputationFunction.java
+│       │   ├── CepPatternConfig.java        # CEP 模式定义（辅助类）
+│       │   └── CepPartialMatchFunction.java # CEP 部分匹配（辅助类）
 │       ├── model/                           # 事件模型
 │       └── util/                            # KafkaConfig / TraceUtil / TraceIdHeaderProvider
-├── backend/                                 # ★ Python 后端 (FastAPI + 30 子模块)
+├── backend/                                 # ★ Python 后端 (FastAPI + 27 个能力子模块)
 │   ├── app.py                               # 主应用入口（中间件 / 路由挂载 / 限流）
 │   ├── http_guards.py                       # 限流白名单 / 点名分类
 │   ├── config.py / settings                 # 配置中心
@@ -586,7 +627,7 @@ ufw deny 9093
 │   │   ├── agent_a.py / agent_b.py / agent_c.py / agent_d.py / agent_cad.py
 │   │   ├── agent_decomposer.py / agent_tool_builder.py / agent_executor.py / agent_reviewer.py
 │   │   ├── audit_single.py / sub_auditor.py / chunker.py / llm_fallback.py / base.py
-│   ├── routers/                             # ★ 16 个 FastAPI Router（218 端点）
+│   ├── routers/                             # ★ 19 个 FastAPI Router（231 端点）
 │   ├── response_engine/                     # 响应引擎（18 模块 + containment/）
 │   ├── security_guard/                      # 调用安全守卫（7 模块）
 │   ├── mcp_guard/                           # MCP 工具调用控制（10 模块）
@@ -610,46 +651,47 @@ ufw deny 9093
 │   ├── session_reconstruct/                 # 会话重建
 │   ├── event_archive/                       # 长期归档
 │   ├── schemas/                             # AVRO Schema (Python 端)
-│   ├── tests/                               # ★ 98 项 pytest
+│   ├── eval_datasets/                       # ★ 评测体系（detection/behavior/grounding 三族 + CSIC-2010 回放 + 消融 + 对抗保持）
+│   ├── tests/                               # ★ 3084 项 pytest（252 文件, 含 testcontainers 集成测试）
 │   └── tools/                               # 维护脚本
 ├── frontend/                                # ★ React 19 前端
 │   ├── src/
 │   │   ├── App.tsx / main.tsx / index.css
-│   │   ├── pages/                           # 16 个页面
-│   │   ├── components/                      # 13 个组件分类
+│   │   ├── pages/                           # 16 个路由页面（22 个页面文件, 6 个感知域并入 Sensing Tab）
+│   │   ├── components/                      # 12 个组件分类（71 组件）
 │   │   │   ├── brand/ (BrandCrest/BrandMark/BrandSeal)
 │   │   │   ├── home/ (Blueprint/EventTicker/ShiftConsole/ShiftOrbit)
-│   │   │   ├── monitor/ (12 个监控组件)
+│   │   │   ├── monitor/ (监控组件)
 │   │   │   ├── operations/ (14 个运营 Tab)
-│   │   │   ├── phishing/ (Detect/Drill)
-│   │   │   ├── rag/ (QualityPanel/TracePanel)
+│   │   │   ├── phishing/ rag/ logs/ charts/ demo/ login/
 │   │   │   ├── ui/ (20+ UI 基础组件)
-│   │   │   ├── hero/ charts/ common/ login/ memories/ chat/
-│   │   ├── hooks/ (useTilt)
-│   │   ├── layouts/ (RootLayout/Sidebar/TopNav/nav)
+│   │   │   └── common/ (PageTransition 等)
+│   │   ├── hooks/ layouts/ (RootLayout/Sidebar/TopNav/nav)
 │   │   ├── lib/ (api/eventStream/agentPipeline/thoughtChain/...)
 │   │   ├── stores/ (authStore/serviceStore)
 │   │   └── types/ (index/operations)
 │   ├── scripts/ public/
 │   ├── package.json / vite.config.ts / tsconfig.json
 │   └── README.md
-├── tools/                                   # 运维 / 注入 / 证书 / 部署脚本
+├── tools/                                   # 运维 / 注入 / 证书 / 部署 / 守卫脚本
 │   ├── syslog-adapter.py                    # syslog → Kafka
-│   ├── monitor-2026-09-10.py                # 性能监控
-│   ├── attack-simulator.sh / attack-large-scale-2026-09-10.py
-│   ├── generate_test_feed.py / kali_sim_perf.py
+│   ├── generate_test_feed.py / kali_sim_perf.py / attack-simulator.sh
+│   ├── import_sigmahq.py                    # ★ SigmaHQ 批量导入（dry-run → 编译 → 影子写入）
+│   ├── init-kafka-cluster.sh / init-kafka-topics.sh / register-schemas.sh
 │   ├── gen-kafka-certs.sh / create-kafka-users.sh  # Kafka TLS + SCRAM
 │   ├── gen-htpasswd.sh                      # Flink Basic Auth
-│   ├── init-kafka-topics.sh / register-schemas.sh
-│   ├── install-service.ps1 / windows-log-collector.ps1
-│   ├── security-tray.ps1 / enable-rerank.ps1
-├── docker-compose.yml                       # ★ 主编排（含 Kafka + Flink + Kafka UI）
-├── docker-compose.dev.yml / docker-compose.prod.yml  # 环境分离
+│   ├── preflight-check.sh / flink-savepoint.sh / release.sh
+│   ├── assert-no-assert-weakening.py / assert-junit-no-skip.py  # 反"假绿"元守卫
+│   └── install-service.ps1 / windows-log-collector.ps1 / security-tray.ps1
+├── docker-compose.yml                       # ★ 主编排（34 服务, profile: full/lite/edge/ndr/sandbox/rerank/optional）
+├── docker-compose.dev.yml / .prod.yml / .ha.yml  # 环境 / 生产 / Flink HA 叠加
 ├── init.sql                                 # PostgreSQL Schema (30 KB)
 ├── log_simulator.py                         # ★ 日志模拟器（Kafka/HTTP 双模式）
-├── demo_e2e.py / demo_start.bat             # 端到端演示
-├── .env.example                             # 环境变量模板 (12 KB)
-└── docs/                                    # ★ 60+ 文档
+├── demo/                                    # ★ 5 分钟演示（run_demo.ps1 / run-demo.sh / live-drill / production-drill.sh）
+├── reports/                                 # 评测结果 JSON/MD（消融 / 对抗 / 性能 / CSIC 回放, 含整改前后对照）
+├── certs/ config/ contracts/                # Kafka 证书 / Nginx·Flink 配置 / 跨运行时契约
+├── .env.example                             # 环境变量模板（157 个变量, 分层注释）
+└── docs/                                    # ★ 105 篇文档
     ├── INDEX.md                             # 文档导航
     ├── deployment.md / dependency_versions.md
     ├── advanced_capabilities.md
@@ -673,6 +715,7 @@ ufw deny 9093
 | 看 PDF 风总览 | [`docs/study-guide/总览-PDF风.md`](docs/study-guide/总览-PDF风.md) |
 | 了解部署细节 | [`docs/deployment.md`](docs/deployment.md) |
 | 看 NDR/EDR/反钓鱼/0day | [`docs/advanced_capabilities.md`](docs/advanced_capabilities.md) |
+| 看检测能力评测（CSIC-2010 回放 / 消融 / 对抗保持 / 吞吐） | [`docs/benchmark/`](docs/benchmark/)（REPLAY / ABLATION / EVASION / PERF 四份报告） |
 | 看技术栈演进 | [`docs/upgrade-proposals/`](docs/upgrade-proposals/) (v1→v8 + 创新矩阵) |
 | 看安全审计报告 | [`docs/security-audit/AUDIT_REPORT.md`](docs/security-audit/AUDIT_REPORT.md) |
 | 看大规模压测 | [`docs/security-audit/attack-perf-large-scale-2026-09-10.md`](docs/security-audit/attack-perf-large-scale-2026-09-10.md) |
@@ -684,4 +727,5 @@ ufw deny 9093
 ---
 
 > 说明: 仓库会同步推送到 `security-of-agent` 与 `security-of-agent-max` 两个远端。
-> 最后一次大审计：2026-09-10（HTTP 限流分类 / 端口矩阵 / 模块清单同步代码现状）。
+> 最后一次全量数字对账：**2026-10-27**（逐项实测：测试数 = `pytest --collect-only`；端点数 = 路由装饰器计数；规则/Topic/服务数 = 目录与脚本实测）。
+> 历史大审计：2026-09-10（HTTP 限流分类 / 端口矩阵 / 模块清单）、2026-10-21（全量代码审计 + capabilities.yaml 登记制）。

@@ -1,6 +1,6 @@
 # 04 · Flink 流处理作业
 
-> 平台用 Apache Flink 1.19.3（Java 11）做实时流处理（实测 `flink-jobs/pom.xml` `<flink.version>1.19.3</flink.version>`，Kafka Connector 3.2.0-1.19）。本章讲清**两个核心作业**和**三个辅助作业**的代码逻辑、CEP 模式、数据契约。
+> 平台用 Apache Flink 1.20.5（Java 11）做实时流处理（实测 `flink-jobs/pom.xml` `<flink.version>1.20.5</flink.version>`，Kafka Connector 3.3.0-1.20）。本章讲清**两个核心作业**、**Sigma 阈值聚合作业**和 **NDR/EDR 扩展作业**的代码逻辑、CEP 模式、数据契约。
 
 ---
 
