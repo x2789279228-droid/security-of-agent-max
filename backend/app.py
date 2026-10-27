@@ -346,6 +346,17 @@ async def lifespan(app: FastAPI):
         await edr_adapter.start()
         logger.info("EDR 融合适配器已启动")
 
+    if settings.suricata_enabled:
+        # IDS 接入(2026-10-27 路线 2): 连接器消费 suricata-eve topic,
+        # 默认处理器转 SecurityEvent → detect → 落库。需 kafka_enabled 同开。
+        if not settings.kafka_enabled:
+            logger.warning("suricata_enabled=true 但 kafka_enabled=false, IDS 接入跳过")
+        else:
+            from ids_connector.suricata_connector import suricata_connector
+            await suricata_connector.start()
+            logger.info("Suricata IDS 连接器已启动 (topic=%s)",
+                        settings.suricata_eve_topic or "suricata-eve")
+
     if settings.intel_enabled:
         from threat_intel.ioc_matcher import ioc_matcher
         await ioc_matcher.refresh_cache()

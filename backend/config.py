@@ -437,6 +437,11 @@ class Settings(BaseSettings):
     winevent_kafka_topic: str = "edr-winevent"  # Windows Event Log Topic
     edr_correlation_window: int = 300        # 跨源关联时间窗口 (秒)
 
+    # ── IDS 接入 (Suricata EVE) ──
+    # 2026-10-27 路线 2: 连接器接线(需 kafka_enabled 同开); 回放评测
+    # 不经 Kafka, 直接读 eve.json(见 eval_datasets/replay_pcap_suricata.py)。
+    suricata_enabled: bool = False
+
     # ── 威胁情报 ──
     intel_enabled: bool = False              # 启用威胁情报拉取
     intel_poll_interval: int = 60            # 默认拉取间隔 (分钟)

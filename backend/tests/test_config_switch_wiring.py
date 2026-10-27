@@ -179,8 +179,8 @@ def test_settings_field_count_is_unchanged():
     字段数再变说明 config.py 被大改，本文件里所有清单都需要重新核实。
     """
     fields = _settings_fields()
-    assert len(fields) == 356, (
-        f"Settings 字段数从 356 变成 {len(fields)} —— "
+    assert len(fields) == 357, (
+        f"Settings 字段数从 357 变成 {len(fields)} —— "
         "请重新跑全量普查并更新整改报告 §7.1.11"
     )
 
@@ -221,7 +221,8 @@ def test_env_example_parses_and_ships_the_keys_we_care_about():
     #   ATTACK_GEO_MAX_POINTS / HOME_LAT / HOME_LON / HOME_LABEL)
     # 2026-10-27 路线3: +2 = INTEL_ENRICH_ENABLED / INTEL_ENRICH_TIMEOUT_MS
     #   (富化旁路与拉取解耦, fail-open 契约见 intel_enricher.enrich_event_if_enabled)
-    assert len(shipped) == 163, f"出货键数从 163 变成 {len(shipped)}，出货口径需重估"
+    # 2026-10-27 路线2: +1 = SURICATA_ENABLED (IDS 接入启动分支)
+    assert len(shipped) == 164, f"出货键数从 164 变成 {len(shipped)}，出货口径需重估"
     for key in ("SHARED_MEMORY_SELF_PLAY_DECOY_RATIO",
                 "SHARED_MEMORY_SELF_PLAY_DEFAULT_ROUNDS",
                 "SHARED_MEMORY_TAXII_PASSWORD",

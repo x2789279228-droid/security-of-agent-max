@@ -148,6 +148,8 @@ DORMANT_CAPABILITIES = [
     # kafka_consumer._handle_enriched 经 enrich_event_if_enabled 调用)，
     # 同样从 dormant 清单移除 —— 接线即转红的守卫机制反向验证接线完成。
     ("threat_intel/llm_context.py", "LLM 情报上下文：intel_enricher 已接线但本模块暂无生产调用方"),
+    # 2026-10-27 路线 2: ids_connector/suricata_connector 已接线(app.py 启动
+    # 分支 + 默认落库处理器 + pcap 回放评测器), 从 dormant 清单移除。
     ("session_reconstruct/timeline.py", "会话时间线重建"),
     ("session_reconstruct/http_linker.py", "HTTP 会话串联"),
     ("session_reconstruct/tcp_reassembler.py", "TCP 流重组"),
@@ -156,7 +158,8 @@ DORMANT_CAPABILITIES = [
     ("response_engine/containment/mail_adapter.py", "邮箱处置适配器"),
     ("traffic_baseline/traffic_profiler.py", "流量画像基线"),
     ("traffic_baseline/peer_group.py", "对等组基线"),
-    ("ids_connector/suricata_connector.py", "Suricata IDS 接入"),
+    # ("ids_connector/suricata_connector.py", "Suricata IDS 接入")
+    # —— 2026-10-27 路线 2 接线, 移出 dormant(见上方注释)。
     ("encrypted_traffic/mitm_proxy.py", "加密流量 MITM"),
     ("edr_fusion/llm_correlation.py", "EDR LLM 跨源关联"),
     ("agents/audit_single.py", "单事件审计 Agent"),

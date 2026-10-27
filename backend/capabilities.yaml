@@ -129,12 +129,12 @@ capabilities:
     notes: "免费源 csv_http/kev_json 已真通；富化旁路已接线(intel_enrich_enabled, KEV 命中自动提级)。缺真实 MISP/TAXII 拉取演练；生产开箱需跑 seed 脚本拉一次真实源。"
 
   - id: ndr
-    name: NDR 流量分析
+    name: NDR 流量分析（含 Suricata IDS 接入）
     status: experimental
     runtime_setting: capture_enabled
     metric_prefix: soc_ndr_flows_
-    evidence: backend/tests/test_active_module_coverage_gap.py
-    last_verified: "2026-10-21"
+    evidence: backend/tests/test_active_module_coverage_gap.py; backend/tests/test_replay_pcap_suricata.py
+    last_verified: "2026-10-27"
     demo: ""
     notes: "保留；协议解析/PCAP 仍零覆盖，作为 lab profile 展示。"
 

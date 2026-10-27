@@ -1,0 +1,16 @@
+{
+  "version": "1.0-fixture",
+  "note": "fixture 场景清单: 钉住对账/去重/映射语义。真实评测替换 eve 文件并在 scenarios 追加条目(来源 malware-traffic-analysis.net, 注明情景)。",
+  "scenarios": [
+    {
+      "name": "fixture-mixed-web-c2",
+      "source": "hand-authored EVE fixture (Suricata 8 官方 EVE schema)",
+      "eve_file": "suricata_eve_sample.jsonl",
+      "expected_categories": [
+        "web-application-attack",
+        "attempted-admin",
+        "command-and-control"
+      ]
+    }
+  ]
+}

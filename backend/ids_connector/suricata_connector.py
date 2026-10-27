@@ -89,6 +89,14 @@ class SuricataConnector:
 
     async def start(self):
         """启动 Suricata EVE 消费"""
+        # 默认告警处理器(2026-10-27 路线 2): 此前 process_eve 只计数发回调,
+        # 没有任何回调被注册 —— IDS 告警进来后凭空消失。现在无人注册时
+        # 挂默认处理器: SuricataAlert → SecurityEvent → detect → 落库。
+        # 注册与 Kafka 无关(Kafka 只决定消费循环), 放在检查之前,
+        # 让回放评测器与显式 process_eve 调用方也具备完整语义。
+        if not self._alert_callbacks:
+            self._alert_callbacks.append(self._default_alert_handler)
+
         if not settings.kafka_enabled:
             logger.info("Kafka 未启用，Suricata 连接器跳过")
             return
@@ -96,6 +104,31 @@ class SuricataConnector:
         self._running = True
         self._task = asyncio.create_task(self._consume_loop())
         logger.info("Suricata 连接器启动")
+
+    async def _default_alert_handler(self, alert: "SuricataAlert") -> None:
+        """IDS 告警进平台主链路: 转事件 → 检测(含 ATT&CK 提取) → 落库。
+
+        去重已在 process_eve 层做(signature+src+dst, 60s), 这里只管转换与
+        持久化; 单条失败仅计数告警, 不影响消费循环。
+        """
+        from event_store import event_store
+        from ingest_pipeline import detect
+        from models import async_session
+
+        event = alert.to_security_event()
+        event.setdefault("source_id", "suricata")
+        try:
+            result = await detect(event)
+            anomaly_score = result.anomaly.anomaly_score if result.anomaly else 0.0
+            async with async_session() as session:
+                await event_store.store(
+                    session, result.log_data, "suricata",
+                    anomaly_score=anomaly_score,
+                )
+        except Exception as e:
+            self._stats.setdefault("store_failures", 0)
+            self._stats["store_failures"] += 1
+            logger.warning("Suricata 告警落库失败 [%d]: %s", alert.signature_id, e)
 
     async def stop(self):
         """停止消费"""

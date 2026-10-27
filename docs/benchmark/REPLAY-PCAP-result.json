@@ -1,0 +1,77 @@
+{
+  "reconciled": true,
+  "scenarios": [
+    {
+      "eve_lines": 10,
+      "eve_alert_lines": 6,
+      "type_counts": {
+        "alert": 6,
+        "dns": 1,
+        "tls": 1,
+        "http": 1,
+        "flow": 1
+      },
+      "accepted": 5,
+      "deduped": 1,
+      "reconciled": true,
+      "platform_events": 5,
+      "store_failures": 0,
+      "observed_categories": [
+        "attempted-admin",
+        "command-and-control",
+        "web-application-attack"
+      ],
+      "detect_results": [
+        {
+          "event_type": "SURICATA:web-application-attack",
+          "category": "web-application-attack",
+          "src_ip": "203.0.113.50",
+          "dst_ip": "10.30.0.10",
+          "techniques": [],
+          "sigma_hits": []
+        },
+        {
+          "event_type": "SURICATA:attempted-admin",
+          "category": "attempted-admin",
+          "src_ip": "203.0.113.51",
+          "dst_ip": "10.30.0.15",
+          "techniques": [],
+          "sigma_hits": []
+        },
+        {
+          "event_type": "SURICATA:attempted-admin",
+          "category": "attempted-admin",
+          "src_ip": "203.0.113.51",
+          "dst_ip": "10.30.0.16",
+          "techniques": [],
+          "sigma_hits": []
+        },
+        {
+          "event_type": "SURICATA:command-and-control",
+          "category": "command-and-control",
+          "src_ip": "203.0.113.52",
+          "dst_ip": "185.2.14.9",
+          "techniques": [],
+          "sigma_hits": []
+        },
+        {
+          "event_type": "SURICATA:attempted-admin",
+          "category": "attempted-admin",
+          "src_ip": "203.0.113.53",
+          "dst_ip": "10.30.0.20",
+          "techniques": [],
+          "sigma_hits": []
+        }
+      ],
+      "elapsed_ms": 2163.2,
+      "scenario": "fixture-mixed-web-c2",
+      "source": "hand-authored EVE fixture (Suricata 8 官方 EVE schema)",
+      "expected_categories": [
+        "attempted-admin",
+        "command-and-control",
+        "web-application-attack"
+      ],
+      "detected": true
+    }
+  ]
+}

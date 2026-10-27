@@ -1037,6 +1037,29 @@ services:
       - ./config/suricata:/etc/suricata/custom:ro
     network_mode: host
 
+  # ── Suricata pcap 回放 (2026-10-27 路线 2) ──
+  # 用 -r 离线回放 pcap 产出 eve.json, 不依赖 host 网卡(规避 Windows Docker
+  # host 网络限制)。用法: 把 pcap 放进 ./pcaps/, docker compose --profile ndr
+  # run --rm soc-suricata-replay, eve 落 ./pcaps/eve-out/ 供
+  # eval_datasets.replay_pcap_suricata 消费。
+  soc-suricata-replay:
+    image: jasonish/suricata:8.0.6
+    profiles: ["ndr"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for pcap in /pcaps/*.pcap /pcaps/*.pcapng; do
+          [ -e "$$pcap" ] || continue
+          echo "[replay] $$pcap"
+          suricata -r "$$pcap" -l /var/log/suricata --runmode=single
+          cp /var/log/suricata/eve.json "/pcaps/eve-out/$(basename "$${pcap%.*}").eve.json" || true
+          rm -f /var/log/suricata/eve.json
+        done
+    volumes:
+      - ./pcaps:/pcaps
+      - suricata_rules:/var/lib/suricata/rules
+      - ./config/suricata:/etc/suricata/custom:ro
+
   # ── CAPE Sandbox (恶意软件动态分析) ──
   # NOTE: `capev2/cape` 在 Docker Hub 不存在 (无官方镜像)。本服务列为可选(optional)。
   #   演示: 用 backend/tests/inc_mock_servers.py 的 mock CAPE(本地, 零外部依赖)替代,
