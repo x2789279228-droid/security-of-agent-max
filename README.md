@@ -568,7 +568,7 @@ ufw deny 9093
 
 | 报告 | 内容 | 关键结论 |
 |------|------|---------|
-| [REPLAY-CSIC-2010](docs/benchmark/REPLAY-CSIC-2010.md) | CSIC-2010 全量回放（25065 攻击 / 36000 良性） | 签名子集召回 0.347，全类召回 0.030 —— 真实水位如实公开 |
+| [REPLAY-CSIC-2010](docs/benchmark/REPLAY-CSIC-2010.md) | CSIC-2010 全量回放（25065 攻击 / 36000 良性） | 签名子集召回 0.347，全类召回 0.029（2026-10-27 口径修正：聚合候选不再计入确认检出，改前数字见 `*-pre-scope-fix.json`） |
 | [ABLATION](docs/benchmark/ABLATION.md) | L0-L4 分层消融（无检测/纯 Sigma/纯异常/组合/全量） | 各层贡献度可复现 |
 | [EVASION](docs/benchmark/EVASION.md) | 对抗保持率（变异/混淆攻击下检出保持度） | 规则僵化面量化 |
 | [PERF-2026-10-26](docs/benchmark/PERF-2026-10-26.md) | Sigma 吞吐（每事件私有 :memory: 库 + 150 规则） | ~34 eps, 生产接入需扩容（已知断点） |

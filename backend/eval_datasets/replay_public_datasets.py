@@ -311,13 +311,16 @@ def render_markdown(res: dict, baseline: dict | None = None) -> str:
         "",
         *(
             [
-                f"- 规范化前基线(2026-10-25 之前, 抽样 5000/5000, 见"
-                f" REPLAY-CSIC-2010-result-pre-normalization.json): 全类召回 0.0132 /"
-                f" 签名子集 0.3452 / 良性 FP 0/5000 → 本轮(规范化接入引擎后, 全量"
-                f" {mal['n']}/{ben['n']}) 全类召回 {mal['recall_enforced']} /"
+                f"- 改前基线(样本 {baseline['classes']['malicious']['n']}/"
+                f"{baseline['classes']['benign']['n']}): "
+                f"全类召回 {baseline['classes']['malicious']['recall_enforced']} /"
+                f" 签名子集 {(baseline['classes']['malicious'].get('normalized') or {}).get('recall_enforced')} /"
+                f" 良性 FP {baseline['classes']['benign'].get('enforced_fp')}/"
+                f"{baseline['classes']['benign']['n']}"
+                f" → 本轮(全量 {mal['n']}/{ben['n']}) 全类召回 {mal['recall_enforced']} /"
                 f" 签名子集 {nrm.get('recall_enforced') if nrm else 'n/a'} /"
                 f" 良性 FP {ben['enforced_fp']}/{ben['n']}"
-                f" —— 升级证据: docs/upgrade/evidence/DETECTION-NORMALIZATION-2026-10-25.md",
+                f" —— 差异原因见报告末尾口径说明与改前 JSON 文件名",
                 "",
             ] if baseline else []
         ),
