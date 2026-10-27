@@ -180,11 +180,14 @@ def test_something_persists_iocs_into_the_threat_iocs_table():
 
 
 @pytest.mark.parametrize("name", [
-    "threat_intel/intel_enricher.py",
+    # 2026-10-27 路线 3: intel_enricher 已接线(ingest_pipeline.detect 与
+    # kafka_consumer._handle_enriched 经 enrich_event_if_enabled 调用)并从
+    # dormant 清单移除 —— "链路缺一环"的旧结论随之退役: ioc_matcher 现在
+    # 有真实消费方(富化旁路), 情报→匹配→告警闭环成立。llm_context 仍休眠。
     "threat_intel/llm_context.py",
 ])
 def test_intel_pipeline_modules_are_all_still_unwired(name):
-    """守卫本文件的前提：这三块仍处于休眠状态。
+    """守卫本文件的前提：仍处于休眠状态的模块清单。
 
     一旦它们被接线，本文件关于「链路缺一环」的描述需要重新评估
     （可能是修好了，也可能是缺口的形状变了）。

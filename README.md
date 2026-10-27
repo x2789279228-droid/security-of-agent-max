@@ -161,15 +161,17 @@
 | **协议解析 (protocol_parser/)** | TLS / SMB / HTTP / DNS / 通用 dissector |
 | **流量基线 (traffic_baseline/)** | 时序季节性 (seasonal) + 同侪组 (peer_group ⚠未接线) + LLM 异常 (llm_anomaly) |
 | **EDR 融合 (edr_fusion/)** | 适配器 (edr_adapter) + Sysmon/WinEvent 解析 (sysmon_parser / winevent_parser) + LLM 关联 (llm_correlation ⚠未接线) + 跨源关联 (cross_correlator) |
-| **IDS 对接 (ids_connector/suricata_connector)** ⚠未接线 | Suricata EVE JSON 接入 |
-| **威胁情报 (threat_intel/)** | STIX/TAXII 拉取 (stix_taxii) + IOC 落库 (ioc_ingest) + IOC 匹配 (ioc_matcher) + 信誉 (reputation) + 富化 (intel_enricher ⚠未接线) + LLM 上下文 (llm_context ⚠未接线) |
+| **IDS 对接 (ids_connector/suricata_connector)** | Suricata EVE JSON 接入（2026-10-27 路线 2 接线：app 启动分支 + 默认落库处理器 + pcap 回放评测） |
+| **威胁情报 (threat_intel/)** | STIX/TAXII 拉取 (stix_taxii) + IOC 落库 (ioc_ingest) + IOC 匹配 (ioc_matcher) + 信誉 (reputation) + 富化 (intel_enricher，2026-10-27 路线 3 接线) + LLM 上下文 (llm_context ⚠未接线) |
 | **反钓鱼 (phishing_guard/)** | 6 通道：邮件 (email_detector) / BEC (bec_detector) / 网站 (web_detector) / SMS / 二维码 (qrcode_detector) / 附件 (attachment_detector) + LLM 维度 (llm_dimension) + 评分 (scoring) + 演练 (drill_manager) |
 
 > **⚠未接线** = 该模块的代码存在且有测试，但**生产代码里没有任何导入方**，
-> 即实现从未被执行过。本表里带这个标记的 **9 个模块**是这种情况
+> 即实现从未被执行过。本表里带这个标记的 **7 个模块**是这种情况
 > （`behavior_analyzer` / `llm_behavior` / `variant_cluster` 的聚类能力 /
-> `mitm_proxy` / `peer_group` / `llm_correlation` / `suricata_connector` /
-> `intel_enricher` / `llm_context`）。
+> `mitm_proxy` / `peer_group` / `llm_correlation` / `llm_context`）。
+> 2026-10-27：`suricata_connector` 与 `intel_enricher` 已接线并从本清单移除
+> （守卫测试 `test_dormant_modules_guard` / `test_threat_intel_pipeline_gap`
+> 同步收口）。
 >
 > 「有测试」只说明规则写对了，**不代表它在跑**。
 > 这些模块的代码质量结论见

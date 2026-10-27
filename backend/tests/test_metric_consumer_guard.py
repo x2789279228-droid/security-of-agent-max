@@ -202,6 +202,9 @@ def prom_consumed() -> set[str]:
 #! 它们留在下面正是为了让 `test_detection_metrics_have_a_prometheus_consumer`
 #! 这条 strict xfail 保持红色。
 UNWATCHED: dict[str, str] = {
+    # ── 2026-10-27 路线 3(情报富化)新增 ──
+    "soc_intel_enrich_events_total": "富化旁路执行分账(enriched/no_hit/failed/timeout), Grafana 直查, 面板接入待排期",
+    "soc_intel_enrich_kev_total": "KEV 命中提级计数, 答辩演示指标, 面板接入待排期",
     # ── 2026-10-23 第二阶段(可靠性)新增 ──
     "soc_audit_dead_letter_total": "PQ 丢失任务死信落库, 运营面板待建",
     "soc_audit_dead_letter_replayed_total": "死信重放计数, 运营面板待建",
