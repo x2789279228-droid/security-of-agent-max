@@ -1,0 +1,1097 @@
+{
+  "mode": "lexical_bm25",
+  "corpus_n": 60,
+  "queries_n": 60,
+  "mrr": 0.9917,
+  "recall_at_5": 1.0,
+  "recall_at_10": 1.0,
+  "elapsed_ms": 24.0,
+  "per_category": {
+    "intel": {
+      "n": 6,
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0
+    },
+    "mitigation": {
+      "n": 10,
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0
+    },
+    "ops": {
+      "n": 8,
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0
+    },
+    "platform": {
+      "n": 13,
+      "mrr": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0
+    },
+    "technique": {
+      "n": 23,
+      "mrr": 0.9783,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0
+    }
+  },
+  "queries": [
+    {
+      "id": "Q001",
+      "query": "暴力破解怎么检测",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1110",
+        "KB-M1027",
+        "KB-INT-CAPEC",
+        "KB-T1568",
+        "KB-OPS-PHISHING"
+      ],
+      "relevant": [
+        "KB-T1110"
+      ]
+    },
+    {
+      "id": "Q002",
+      "query": "password spraying credential stuffing 防护",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1110",
+        "KB-M1027",
+        "KB-T1003",
+        "KB-M1042",
+        "KB-INT-ATTACK"
+      ],
+      "relevant": [
+        "KB-T1110",
+        "KB-M1027"
+      ]
+    },
+    {
+      "id": "Q003",
+      "query": "T1110 相关的缓解措施",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1110",
+        "KB-M1027",
+        "KB-M1017",
+        "KB-M1054",
+        "KB-M1018"
+      ],
+      "relevant": [
+        "KB-T1110",
+        "KB-M1036",
+        "KB-M1027"
+      ]
+    },
+    {
+      "id": "Q004",
+      "query": "PowerShell encoded command 执行攻击",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1059",
+        "KB-M1054",
+        "KB-PLAT-DRYRUN",
+        "KB-INT-ATTACK",
+        "KB-T1505"
+      ],
+      "relevant": [
+        "KB-T1059"
+      ]
+    },
+    {
+      "id": "Q005",
+      "query": "mimikatz lsass 凭证转储检测",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1003",
+        "KB-M1042",
+        "KB-T1078",
+        "KB-T1087",
+        "KB-T1110"
+      ],
+      "relevant": [
+        "KB-T1003",
+        "KB-M1042"
+      ]
+    },
+    {
+      "id": "Q006",
+      "query": "C2 beacon 周期性外联怎么发现",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1071",
+        "KB-PLAT-CEP",
+        "KB-T1046",
+        "KB-T1041",
+        "KB-INT-CAPEC"
+      ],
+      "relevant": [
+        "KB-T1071"
+      ]
+    },
+    {
+      "id": "Q007",
+      "query": "数据外泄的时序特征",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1041",
+        "KB-M1057",
+        "KB-PLAT-CEP",
+        "KB-T1048",
+        "KB-T1083"
+      ],
+      "relevant": [
+        "KB-T1041",
+        "KB-M1057"
+      ]
+    },
+    {
+      "id": "Q008",
+      "query": "webshell 检测规则",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1505",
+        "KB-PLAT-NORMALIZATION",
+        "KB-T1027",
+        "KB-PLAT-FEEDBACK",
+        "KB-PLAT-SHADOW"
+      ],
+      "relevant": [
+        "KB-T1505"
+      ]
+    },
+    {
+      "id": "Q009",
+      "query": "Log4Shell CVE-2021-44228",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1190",
+        "KB-INT-ATTACK",
+        "KB-INT-CAPEC",
+        "KB-INT-IOCTYPES",
+        "KB-INT-MISP"
+      ],
+      "relevant": [
+        "KB-T1190",
+        "KB-PLAT-KEV"
+      ]
+    },
+    {
+      "id": "Q010",
+      "query": "有效账户滥用怎么排查",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1018",
+        "KB-T1078",
+        "KB-INT-CAPEC",
+        "KB-T1098",
+        "KB-T1136"
+      ],
+      "relevant": [
+        "KB-T1078",
+        "KB-M1018"
+      ]
+    },
+    {
+      "id": "Q011",
+      "query": "横向移动 SMB RDP 检测",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1021",
+        "KB-PLAT-CEP",
+        "KB-T1003",
+        "KB-T1087",
+        "KB-T1568"
+      ],
+      "relevant": [
+        "KB-T1021"
+      ]
+    },
+    {
+      "id": "Q012",
+      "query": "schtasks 计划任务持久化",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1053",
+        "KB-T1136",
+        "KB-INT-ATTACK",
+        "KB-OPS-SELFPPLAY",
+        "KB-T1078"
+      ],
+      "relevant": [
+        "KB-T1053"
+      ]
+    },
+    {
+      "id": "Q013",
+      "query": "钓鱼邮件检测通道有哪些",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1566",
+        "KB-OPS-PHISHING",
+        "KB-M1017",
+        "KB-T1041",
+        "KB-M1057"
+      ],
+      "relevant": [
+        "KB-T1566",
+        "KB-OPS-PHISHING"
+      ]
+    },
+    {
+      "id": "Q014",
+      "query": "DGA 域名 fast-flux 检测",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1568",
+        "KB-INT-REPUTATION",
+        "KB-INT-IOCTYPES",
+        "KB-OPS-PHISHING",
+        "KB-PLAT-NORMALIZATION"
+      ],
+      "relevant": [
+        "KB-T1568"
+      ]
+    },
+    {
+      "id": "Q015",
+      "query": "双重 URL 编码绕过怎么处理",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1027",
+        "KB-PLAT-NORMALIZATION",
+        "KB-INT-CAPEC",
+        "KB-M1036",
+        "KB-INT-IOCTYPES"
+      ],
+      "relevant": [
+        "KB-T1027",
+        "KB-PLAT-NORMALIZATION"
+      ]
+    },
+    {
+      "id": "Q016",
+      "query": "内网端口扫描告警",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1046",
+        "KB-PLAT-CEP",
+        "KB-T1595",
+        "KB-T1071",
+        "KB-T1110"
+      ],
+      "relevant": [
+        "KB-T1046"
+      ]
+    },
+    {
+      "id": "Q017",
+      "query": "net user 账户枚举",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1087",
+        "KB-M1017",
+        "KB-M1018",
+        "KB-T1098",
+        "KB-T1136"
+      ],
+      "relevant": [
+        "KB-T1087"
+      ]
+    },
+    {
+      "id": "Q018",
+      "query": "勒索软件前兆指标",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1486",
+        "KB-M1049",
+        "KB-M1054",
+        "KB-PLAT-FEEDDIALECT",
+        "KB-PLAT-CASE"
+      ],
+      "relevant": [
+        "KB-T1486"
+      ]
+    },
+    {
+      "id": "Q019",
+      "query": "外网资产漏洞利用初始访问",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1190",
+        "KB-INT-ATTACK",
+        "KB-T1078",
+        "KB-PLAT-KEV",
+        "KB-T1595"
+      ],
+      "relevant": [
+        "KB-T1190"
+      ]
+    },
+    {
+      "id": "Q020",
+      "query": "T1595 主动扫描和内网扫描区别",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1595",
+        "KB-T1046",
+        "KB-INT-SIGMAHQ",
+        "KB-OPS-WORKORDER",
+        "KB-PLAT-CEP"
+      ],
+      "relevant": [
+        "KB-T1595",
+        "KB-T1046"
+      ]
+    },
+    {
+      "id": "Q021",
+      "query": "DNS 隧道外传数据",
+      "category": "technique",
+      "mrr_rr": 0.5,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1041",
+        "KB-T1048",
+        "KB-T1071",
+        "KB-T1568",
+        "KB-T1486"
+      ],
+      "relevant": [
+        "KB-T1048"
+      ]
+    },
+    {
+      "id": "Q022",
+      "query": "新建账户持久化事件",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1136",
+        "KB-T1098",
+        "KB-M1018",
+        "KB-T1078",
+        "KB-INT-ATTACK"
+      ],
+      "relevant": [
+        "KB-T1136",
+        "KB-T1098"
+      ]
+    },
+    {
+      "id": "Q023",
+      "query": "文件发现枚举侦察",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1083",
+        "KB-T1087",
+        "KB-T1046",
+        "KB-T1595",
+        "KB-T1486"
+      ],
+      "relevant": [
+        "KB-T1083"
+      ]
+    },
+    {
+      "id": "Q024",
+      "query": "账户组成员变更监控 4728",
+      "category": "technique",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-T1098",
+        "KB-OPS-RBAC",
+        "KB-M1018",
+        "KB-T1136",
+        "KB-T1078"
+      ],
+      "relevant": [
+        "KB-T1098",
+        "KB-M1018"
+      ]
+    },
+    {
+      "id": "Q025",
+      "query": "口令策略怎么定",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1027",
+        "KB-T1110",
+        "KB-M1036",
+        "KB-INT-CAPEC",
+        "KB-INT-ATTACK"
+      ],
+      "relevant": [
+        "KB-M1027",
+        "KB-M1036"
+      ]
+    },
+    {
+      "id": "Q026",
+      "query": "账户锁定阈值防爆破",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1036",
+        "KB-T1110",
+        "KB-M1018",
+        "KB-T1098",
+        "KB-T1136"
+      ],
+      "relevant": [
+        "KB-M1036",
+        "KB-M1027"
+      ]
+    },
+    {
+      "id": "Q027",
+      "query": "终端杀毒与 EDR 关联",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1049",
+        "KB-OPS-EDRFUSION",
+        "KB-T1041",
+        "KB-M1042",
+        "KB-T1087"
+      ],
+      "relevant": [
+        "KB-M1049",
+        "KB-OPS-EDRFUSION"
+      ]
+    },
+    {
+      "id": "Q028",
+      "query": "网络分段限制横向移动",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1030",
+        "KB-T1021",
+        "KB-PLAT-CEP",
+        "KB-T1003",
+        "KB-OPS-LEARNLOOP"
+      ],
+      "relevant": [
+        "KB-M1030"
+      ]
+    },
+    {
+      "id": "Q029",
+      "query": "PowerShell 最小权限配置",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1054",
+        "KB-M1018",
+        "KB-T1059",
+        "KB-PLAT-FEEDDIALECT",
+        "KB-M1030"
+      ],
+      "relevant": [
+        "KB-M1054"
+      ]
+    },
+    {
+      "id": "Q030",
+      "query": "安全意识培训有效性度量",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1017",
+        "KB-OPS-PHISHING",
+        "KB-PLAT-WATERMARK",
+        "KB-T1078",
+        "KB-M1018"
+      ],
+      "relevant": [
+        "KB-M1017",
+        "KB-OPS-PHISHING"
+      ]
+    },
+    {
+      "id": "Q031",
+      "query": "Suricata 网络入侵检测对接",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1031",
+        "KB-T1568",
+        "KB-INT-MISP",
+        "KB-T1046",
+        "KB-T1087"
+      ],
+      "relevant": [
+        "KB-M1031"
+      ]
+    },
+    {
+      "id": "Q032",
+      "query": "LSASS 保护 Credential Guard",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1042",
+        "KB-T1003",
+        "KB-T1110",
+        "KB-INT-ATTACK",
+        "KB-INT-CAPEC"
+      ],
+      "relevant": [
+        "KB-M1042",
+        "KB-T1003"
+      ]
+    },
+    {
+      "id": "Q033",
+      "query": "DLP 数据防泄漏和检测互补",
+      "category": "mitigation",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-M1057",
+        "KB-T1048",
+        "KB-OPS-PHISHING",
+        "KB-M1031",
+        "KB-T1083"
+      ],
+      "relevant": [
+        "KB-M1057",
+        "KB-T1041"
+      ]
+    },
+    {
+      "id": "Q034",
+      "query": "响应执行 dry_run 模式是什么",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-DRYRUN",
+        "KB-INT-CAPEC",
+        "KB-T1059",
+        "KB-PLAT-SHADOW",
+        "KB-M1027"
+      ],
+      "relevant": [
+        "KB-PLAT-DRYRUN"
+      ]
+    },
+    {
+      "id": "Q035",
+      "query": "审计日志防篡改哈希链",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-AUDITCHAIN",
+        "KB-OPS-WORKORDER",
+        "KB-PLAT-TEMPORAL",
+        "KB-M1031",
+        "KB-T1505"
+      ],
+      "relevant": [
+        "KB-PLAT-AUDITCHAIN"
+      ]
+    },
+    {
+      "id": "Q036",
+      "query": "案例状态机自动建案",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-CASE",
+        "KB-OPS-POSTMORTEM",
+        "KB-OPS-LEARNLOOP",
+        "KB-OPS-WORKORDER",
+        "KB-PLAT-KPI"
+      ],
+      "relevant": [
+        "KB-PLAT-CASE"
+      ]
+    },
+    {
+      "id": "Q037",
+      "query": "误报反馈降级规则机制",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-FEEDBACK",
+        "KB-PLAT-SHADOW",
+        "KB-OPS-SELFPPLAY",
+        "KB-OPS-POSTMORTEM",
+        "KB-T1046"
+      ],
+      "relevant": [
+        "KB-PLAT-FEEDBACK",
+        "KB-OPS-LEARNLOOP"
+      ]
+    },
+    {
+      "id": "Q038",
+      "query": "KEV 命中会提级吗",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-KEV",
+        "KB-T1190",
+        "KB-INT-REPUTATION",
+        "KB-PLAT-SHADOW",
+        "KB-INT-IOCTYPES"
+      ],
+      "relevant": [
+        "KB-PLAT-KEV",
+        "KB-INT-ATTACK"
+      ]
+    },
+    {
+      "id": "Q039",
+      "query": "情报源方言怎么配 URLhaus",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-FEEDDIALECT",
+        "KB-PLAT-KEV",
+        "KB-T1071",
+        "KB-INT-MISP",
+        "KB-INT-CAPEC"
+      ],
+      "relevant": [
+        "KB-PLAT-FEEDDIALECT",
+        "KB-INT-SIGMAHQ"
+      ]
+    },
+    {
+      "id": "Q040",
+      "query": "影子模式灰度规则",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-SHADOW",
+        "KB-OPS-LEARNLOOP",
+        "KB-INT-SIGMAHQ",
+        "KB-INT-CAPEC",
+        "KB-PLAT-DRYRUN"
+      ],
+      "relevant": [
+        "KB-PLAT-SHADOW",
+        "KB-INT-SIGMAHQ"
+      ]
+    },
+    {
+      "id": "Q041",
+      "query": "毒丸消息死信队列怎么保证不丢",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-DLQ",
+        "KB-INT-CAPEC",
+        "KB-PLAT-TEMPORAL",
+        "KB-INT-ATTACK",
+        "KB-INT-IOCTYPES"
+      ],
+      "relevant": [
+        "KB-PLAT-DLQ",
+        "KB-PLAT-WATERMARK"
+      ]
+    },
+    {
+      "id": "Q042",
+      "query": "Kafka 消费 offset 提交语义",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-WATERMARK",
+        "KB-PLAT-DLQ",
+        "KB-M1031",
+        "KB-INT-IOCTYPES",
+        "KB-PLAT-FEEDBACK"
+      ],
+      "relevant": [
+        "KB-PLAT-WATERMARK",
+        "KB-PLAT-DLQ"
+      ]
+    },
+    {
+      "id": "Q043",
+      "query": "Temporal 审计工作流重试",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-TEMPORAL",
+        "KB-PLAT-AUDITCHAIN",
+        "KB-T1098",
+        "KB-M1018",
+        "KB-T1136"
+      ],
+      "relevant": [
+        "KB-PLAT-TEMPORAL"
+      ]
+    },
+    {
+      "id": "Q044",
+      "query": "CEP 攻击链有哪些",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-CEP",
+        "KB-T1071",
+        "KB-OPS-CAUSAL",
+        "KB-INT-CAPEC",
+        "KB-T1046"
+      ],
+      "relevant": [
+        "KB-PLAT-CEP"
+      ]
+    },
+    {
+      "id": "Q045",
+      "query": "MTTD 口径为什么偏大",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-KPI",
+        "KB-INT-CAPEC",
+        "KB-INT-ATTACK",
+        "KB-INT-IOCTYPES",
+        "KB-INT-MISP"
+      ],
+      "relevant": [
+        "KB-PLAT-KPI"
+      ]
+    },
+    {
+      "id": "Q046",
+      "query": "IOC 类型匹配语义",
+      "category": "intel",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-INT-IOCTYPES",
+        "KB-OPS-SELFPPLAY",
+        "KB-PLAT-WATERMARK",
+        "KB-M1057",
+        "KB-INT-MISP"
+      ],
+      "relevant": [
+        "KB-INT-IOCTYPES"
+      ]
+    },
+    {
+      "id": "Q047",
+      "query": "源信誉评分怎么算",
+      "category": "intel",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-INT-REPUTATION",
+        "KB-T1595",
+        "KB-INT-CAPEC",
+        "KB-OPS-PHISHING",
+        "KB-OPS-LEARNLOOP"
+      ],
+      "relevant": [
+        "KB-INT-REPUTATION"
+      ]
+    },
+    {
+      "id": "Q048",
+      "query": "ATT&CK 框架平台怎么用",
+      "category": "intel",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-INT-ATTACK",
+        "KB-INT-CAPEC",
+        "KB-INT-MISP",
+        "KB-INT-SIGMAHQ",
+        "KB-T1136"
+      ],
+      "relevant": [
+        "KB-INT-ATTACK",
+        "KB-OPS-ASSESSMENT"
+      ]
+    },
+    {
+      "id": "Q049",
+      "query": "CAPEC 和 ATT&CK 的关系",
+      "category": "intel",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-INT-CAPEC",
+        "KB-INT-ATTACK",
+        "KB-PLAT-KPI",
+        "KB-INT-IOCTYPES",
+        "KB-INT-MISP"
+      ],
+      "relevant": [
+        "KB-INT-CAPEC",
+        "KB-INT-ATTACK"
+      ]
+    },
+    {
+      "id": "Q050",
+      "query": "MISP 情报拉取接口",
+      "category": "intel",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-INT-MISP",
+        "KB-PLAT-KEV",
+        "KB-INT-TAXII",
+        "KB-PLAT-FEEDDIALECT",
+        "KB-T1110"
+      ],
+      "relevant": [
+        "KB-INT-MISP",
+        "KB-INT-TAXII"
+      ]
+    },
+    {
+      "id": "Q051",
+      "query": "SigmaHQ 导入兼容率低的原因",
+      "category": "intel",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-INT-SIGMAHQ",
+        "KB-INT-CAPEC",
+        "KB-INT-ATTACK",
+        "KB-INT-IOCTYPES",
+        "KB-INT-MISP"
+      ],
+      "relevant": [
+        "KB-INT-SIGMAHQ",
+        "KB-PLAT-SHADOW"
+      ]
+    },
+    {
+      "id": "Q052",
+      "query": "工单审批超时会自动批准吗",
+      "category": "ops",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-OPS-WORKORDER",
+        "KB-OPS-LEARNLOOP",
+        "KB-PLAT-CASE",
+        "KB-OPS-RBAC",
+        "KB-PLAT-KPI"
+      ],
+      "relevant": [
+        "KB-OPS-WORKORDER",
+        "KB-PLAT-DRYRUN"
+      ]
+    },
+    {
+      "id": "Q053",
+      "query": "复盘草稿怎么回流学习",
+      "category": "ops",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-OPS-POSTMORTEM",
+        "KB-OPS-LEARNLOOP",
+        "KB-INT-CAPEC",
+        "KB-INT-ATTACK",
+        "KB-INT-IOCTYPES"
+      ],
+      "relevant": [
+        "KB-OPS-POSTMORTEM",
+        "KB-OPS-LEARNLOOP"
+      ]
+    },
+    {
+      "id": "Q054",
+      "query": "自动学习动作的白名单边界",
+      "category": "ops",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-OPS-LEARNLOOP",
+        "KB-T1059",
+        "KB-T1046",
+        "KB-OPS-POSTMORTEM",
+        "KB-OPS-WORKORDER"
+      ],
+      "relevant": [
+        "KB-OPS-LEARNLOOP",
+        "KB-PLAT-FEEDBACK"
+      ]
+    },
+    {
+      "id": "Q055",
+      "query": "EDR 跨源关联类型",
+      "category": "ops",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-OPS-EDRFUSION",
+        "KB-M1049",
+        "KB-T1041",
+        "KB-T1021",
+        "KB-INT-IOCTYPES"
+      ],
+      "relevant": [
+        "KB-OPS-EDRFUSION",
+        "KB-T1021"
+      ]
+    },
+    {
+      "id": "Q056",
+      "query": "因果推断能用来封禁 IP 吗",
+      "category": "ops",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-OPS-CAUSAL",
+        "KB-PLAT-DRYRUN",
+        "KB-INT-IOCTYPES",
+        "KB-INT-REPUTATION",
+        "KB-T1071"
+      ],
+      "relevant": [
+        "KB-OPS-CAUSAL"
+      ]
+    },
+    {
+      "id": "Q057",
+      "query": "自博弈怎么证明越打越强",
+      "category": "ops",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-OPS-SELFPPLAY",
+        "KB-INT-CAPEC",
+        "KB-INT-ATTACK",
+        "KB-INT-IOCTYPES",
+        "KB-INT-MISP"
+      ],
+      "relevant": [
+        "KB-OPS-SELFPPLAY",
+        "KB-OPS-ASSESSMENT"
+      ]
+    },
+    {
+      "id": "Q058",
+      "query": "评测体系分几层",
+      "category": "ops",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-OPS-ASSESSMENT",
+        "KB-OPS-PHISHING",
+        "KB-PLAT-SHADOW",
+        "KB-T1566",
+        "KB-INT-ATTACK"
+      ],
+      "relevant": [
+        "KB-OPS-ASSESSMENT"
+      ]
+    },
+    {
+      "id": "Q059",
+      "query": "RBAC 变更端点守卫",
+      "category": "ops",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-OPS-RBAC",
+        "KB-T1098",
+        "KB-INT-ATTACK",
+        "KB-INT-CAPEC",
+        "KB-INT-IOCTYPES"
+      ],
+      "relevant": [
+        "KB-OPS-RBAC"
+      ]
+    },
+    {
+      "id": "Q060",
+      "query": "输入规范化对抗编码绕过",
+      "category": "platform",
+      "mrr_rr": 1.0,
+      "top5_hit": true,
+      "ranked_top5": [
+        "KB-PLAT-NORMALIZATION",
+        "KB-T1027",
+        "KB-T1059",
+        "KB-M1036",
+        "KB-OPS-SELFPPLAY"
+      ],
+      "relevant": [
+        "KB-PLAT-NORMALIZATION",
+        "KB-T1027"
+      ]
+    }
+  ]
+}

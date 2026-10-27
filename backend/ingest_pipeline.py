@@ -514,6 +514,15 @@ async def detect(log_data: dict) -> DetectResult:
     }
     log_data["_sigma"] = sigma_result
 
+    # ATT&CK 技术标签(2026-10-27 路线 5): sigma 命中的 mitre_attack_id 此前
+    # 只躺在 _sigma 落库里无人消费 —— 规范化提取后随事件持久化,
+    # 告警/案例/ATT&CK 覆盖矩阵统一从 techniques 字段读。
+    try:
+        from sigma_detector import extract_attack_techniques
+        log_data["techniques"] = extract_attack_techniques(log_data)
+    except Exception:
+        log_data.setdefault("techniques", [])
+
     detect_ms = (time.perf_counter() - t0) * 1000.0
     try:
         from metrics import observe_ingest_stage, inc_detector_error

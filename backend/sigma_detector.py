@@ -25,6 +25,7 @@ Sigma 风格检测引擎 — 规则化安全检测（检测能力核心）
     report = sigma_detector.detect_batch([event1, event2, ...])
 """
 import logging
+import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, asdict
@@ -78,6 +79,45 @@ class DetectionResult:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+_TECHNIQUE_RE = re.compile(r"(?i)\bt(\d{4})(?:\.\d{3})?\b")
+_TACTIC_RE = re.compile(r"(?i)attack\.([a-z-]+)\.t\d{4}")
+
+
+def extract_attack_techniques(log_data: dict) -> list[str]:
+    """从事件的 _sigma 命中里提取规范化的 ATT&CK 技术 ID（如 T1110）。
+
+    路线 5(2026-10-27): DetectionResult.asdict() 本就携带 mitre_attack_id,
+    但此前只有存储侧的 _sigma 落库, 告警面没有任何消费方 —— 本函数是
+    "告警携带 technique 标签"的统一提取点。
+
+    归一化口径:
+      - "attack.credential-access.t1110"(规则 tag 形态) → ("credential-access", "T1110")
+      - "T1059.001" / "t1059" → "T1059"（保留子技术时另归并父技术, 此处取主 ID）
+      - 返回大写、去重、稳定排序 —— 上游直接写 log_data["techniques"]。
+    """
+    out: set[str] = set()
+    tactics: set[str] = set()
+    sigma = log_data.get("_sigma") or {}
+    hits = sigma.get("hits") or []
+    if isinstance(hits, list):
+        for h in hits:
+            if not isinstance(h, dict):
+                continue
+            raw = str(h.get("mitre_attack_id")
+                      or (h.get("matched_fields") or {}).get("mitre_attack_id") or "")
+            # 规则 tag 形态: "attack.credential-access.t1110" 或列表 str 化后的串
+            for tid in _TECHNIQUE_RE.findall(raw):
+                out.add(f"T{tid.upper()}")
+            for tac in _TACTIC_RE.findall(raw):
+                tactics.add(tac.lower())
+            if not raw and h.get("mitre_tactic"):
+                tactics.add(str(h["mitre_tactic"]).lower())
+    log_data.setdefault("raw_data", {})
+    if tactics:
+        log_data["raw_data"]["attack_tactics"] = sorted(tactics)
+    return sorted(out)
 
 
 class SigmaDetector:
@@ -355,6 +395,13 @@ class SigmaDetector:
                 attack_type=rule.attack_type,
                 confidence=rule.confidence,
                 action_recommend=action,
+                # 2026-10-27 路线 5: mitre/shadow 字段此前只在 matched_fields
+                # 里藏着, 数据类字段从未被填充(消费方读顶层全拿 None)。
+                # 现在两类位置都写: matched_fields 保持兼容, 顶层供
+                # extract_attack_techniques/告警面结构化消费。
+                mitre_attack_id=rule.mitre_attack_id,
+                mitre_tactic=rule.mitre_tactic,
+                shadow_mode=rule.shadow_mode,
                 matched_fields={
                     "event_type": event_type,
                     "src_ip": src_ip,
