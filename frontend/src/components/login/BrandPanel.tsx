@@ -30,7 +30,7 @@ export default function BrandPanel({ compact = false }: { compact?: boolean }) {
         background:
           'radial-gradient(120% 90% at 88% -8%, rgba(58,101,112,0.08), transparent 55%),' +
           'radial-gradient(100% 80% at 0% 110%, rgba(62,122,100,0.06), transparent 60%),' +
-          '#f1f4f6',
+          'var(--color-card)',
       }}
     >
       <div

@@ -79,10 +79,10 @@ export function EventTicker({
   const doubled = [...rows, ...rows]
 
   return (
-    <div className="relative border-y border-line bg-[#e3eae6] overflow-hidden">
+    <div className="relative border-y border-line bg-qing overflow-hidden">
       {/* 左右羽化 */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-24 z-10 bg-gradient-to-r from-[#e3eae6] to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-24 z-10 bg-gradient-to-l from-[#e3eae6] to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-24 z-10 bg-gradient-to-r from-qing to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-24 z-10 bg-gradient-to-l from-qing to-transparent" />
 
       <div className="ticker-track py-3">
         {doubled.map((r, i) => (

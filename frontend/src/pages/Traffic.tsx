@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PageFrame } from '../components/common/PageFrame'
 import { api } from '../lib/api'
+import { StatBand } from '../components/common/StatBand'
 
 interface FlowRecord {
   id: number
@@ -20,11 +21,13 @@ export default function Traffic() {
   const [flows, setFlows] = useState<FlowRecord[]>([])
   const [stats, setStats] = useState<any>(null)
   const [filter, setFilter] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    api.get('/ndr/flows?limit=100').then(setFlows).catch(() => {})
+    api.get('/ndr/flows?limit=100').then(setFlows).then(() => setLoadError('')).catch((e: any) => setLoadError(e?.message || '加载失败'))
     api.get('/ndr/capture/stats').then(setStats).catch(() => {})
-  }, [])
+  }, [refreshKey])
 
   const filtered = filter
     ? flows.filter(
@@ -57,6 +60,14 @@ export default function Traffic() {
         )
       }
     >
+      <StatBand
+        items={[
+          { label: '流记录', value: flows.length },
+          { label: '出站', value: flows.filter((f) => f.direction === 'outbound').length },
+          { label: '横向移动', value: flows.filter((f) => f.direction === 'lateral').length, tone: 'warn' as const },
+          { label: '平均下行', value: flows.length ? Math.round(flows.reduce((a, f) => a + (f.bytes_in || 0), 0) / flows.length / 1024) : 0, hint: 'KB / 流' },
+        ]}
+      />
       <input
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
@@ -113,6 +124,20 @@ export default function Traffic() {
                 </td>
               </tr>
             ))}
+            {loadError && (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center">
+                  <p className="text-[13px] text-warn">加载失败:{loadError}</p>
+                  <button
+                    onClick={() => setRefreshKey((k) => k + 1)}
+                    className="mt-2 border border-line px-3 py-1.5 text-[11px] text-ink transition-colors hover:border-accent hover:text-accent"
+                  >
+                    重试
+                  </button>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">后端不可达已与「暂无数据」区分;可点上方「演示补给」一键灌入演示数据。</p>
+                </td>
+              </tr>
+            )}
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-20 text-center text-[13px] text-ink-faint">

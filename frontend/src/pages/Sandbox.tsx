@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PageFrame } from '../components/common/PageFrame'
 import { api } from '../lib/api'
+import { StatBand } from '../components/common/StatBand'
 
 interface SandboxTask {
   id: number
@@ -32,10 +33,12 @@ const verdictBadge: Record<string, string> = {
 
 export default function Sandbox() {
   const [tasks, setTasks] = useState<SandboxTask[]>([])
+  const [loadError, setLoadError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    api.get('/sandbox/tasks?limit=50').then(setTasks).catch(() => {})
-  }, [])
+    api.get('/sandbox/tasks?limit=50').then(setTasks).then(() => setLoadError('')).catch((e: any) => setLoadError(e?.message || '加载失败'))
+  }, [refreshKey])
 
   return (
     <PageFrame
@@ -43,6 +46,14 @@ export default function Sandbox() {
       hint="CAPE 动态分析 · 行为报告 · 变种聚类。怀疑但无法判断时，扔进沙箱。"
       marginalia="——真伪的最后一道，不靠签名，靠行为。"
     >
+      <StatBand
+        items={[
+          { label: '沙箱任务', value: tasks.length },
+          { label: '恶意判定', value: tasks.filter((t) => t.verdict === 'malicious').length, tone: 'alert' as const },
+          { label: '可疑判定', value: tasks.filter((t) => t.verdict === 'suspicious').length, tone: 'warn' as const },
+          { label: '平均分', value: (() => { const c = tasks.filter((t) => t.status === 'completed'); return c.length ? Number((c.reduce((a, t) => a + (t.score || 0), 0) / c.length).toFixed(1)) : 0 })(), decimals: 1 },
+        ]}
+      />
       <div className="border border-line bg-paper">
         {tasks.map((t, i) => (
           <article
@@ -105,6 +116,20 @@ export default function Sandbox() {
             </div>
           </article>
         ))}
+        {loadError && (
+          <div className="mx-6 my-4 border border-warn/40 bg-warn/5 px-5 py-4 text-center">
+            <p className="text-[13px] text-warn">加载失败:{loadError}</p>
+            <button
+              onClick={() => setRefreshKey((k) => k + 1)}
+              className="mt-2 border border-line px-3 py-1.5 text-[11px] text-ink transition-colors hover:border-accent hover:text-accent"
+            >
+              重试
+            </button>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+              后端不可达已与「暂无数据」区分;可点上方「演示补给」一键灌入演示数据。
+            </p>
+          </div>
+        )}
         {tasks.length === 0 && (
           <div className="px-6 py-20 text-center text-[13px] text-ink-faint">
             暂无沙箱任务

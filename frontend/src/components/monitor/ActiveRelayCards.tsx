@@ -32,6 +32,7 @@ function emptyStages(): Record<string, StageCellStatus> {
 /** 将 /observability/active-pipelines 或 recent-pipelines 载荷转为 RelayState */
 export function relayFromHydration(p: any): RelayState {
   const stages = emptyStages()
+  const stageSince: Record<string, number> = {}
   for (const s of p.completed_stages || []) {
     if (s in stages) stages[s] = 'success'
   }
@@ -53,6 +54,7 @@ export function relayFromHydration(p: any): RelayState {
     traceId: String(p.trace_id || ''),
     currentStage: cur,
     stages,
+    stageSince,
     startedAt,
     updatedAt: startedAt,
     lastError: '',

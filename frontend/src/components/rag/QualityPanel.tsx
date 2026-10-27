@@ -123,19 +123,24 @@ export function QualityPanel() {
         <button onClick={loadReport} className="px-3 py-1.5 text-xs font-sans font-medium bg-gray-100 rounded-lg hover:bg-gray-200">刷新报告</button>
       </div>
 
-      {/* 指标报告 */}
+      {/* 指标报告(P4:条形绘入动效;无评估记录时明示而非整块消失) */}
       {report && report.run_count > 0 && (
         <div className="border border-line rounded-lg p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-sans font-semibold">指标健康度</h3>
             <span className="text-[10px] font-sans text-ink-faint">共 {report.run_count} 次评估 · {Object.keys(report.metric_averages || {}).length} 个指标</span>
           </div>
-          <div className="space-y-2">
-            {Object.entries(report.metric_averages || {}).map(([metric, avg]: any) => (
+          <div className="space-y-2.5">
+            {Object.entries(report.metric_averages || {}).map(([metric, avg]: any, i: number) => (
               <div key={metric} className="flex items-center gap-3">
                 <span className="w-36 shrink-0 text-xs font-sans text-ink-soft">{METRIC_LABELS[metric] || metric}</span>
-                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-accent rounded-full" style={{ width: `${avg * 100}%` }} />
+                <div className="h-2 flex-1 bg-mist overflow-hidden">
+                  <motion.div
+                    className={`h-full ${(avg as number) >= 0.8 ? 'bg-ok' : (avg as number) >= 0.5 ? 'bg-warn' : 'bg-alert'}`}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(avg as number) * 100}%` }}
+                    transition={{ duration: 0.6, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
+                  />
                 </div>
                 <span className="text-[10px] font-sans text-ink-faint shrink-0">
                   通过率 {(report.pass_rates?.[metric] ?? 0) * 100}%
@@ -144,6 +149,12 @@ export function QualityPanel() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {report && report.run_count === 0 && (
+        <div className="border border-line rounded-lg p-4">
+          <h3 className="text-sm font-sans font-semibold">指标健康度</h3>
+          <p className="mt-2 text-xs text-ink-faint">尚无评估记录 — 运行一次下方「检索质量评估」后,此处给出各指标健康度条形。</p>
         </div>
       )}
 

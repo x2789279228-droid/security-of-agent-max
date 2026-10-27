@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api } from '../../lib/api'
+import { DistBars } from '../common/StatBand'
 
 const OPERATION_LABELS: Record<string, string> = {
   decompose: '分解分析',
@@ -55,6 +57,7 @@ function fmtTime(iso: string): string {
 }
 
 export function TracePanel() {
+  const navigate = useNavigate()
   const [stats, setStats] = useState<any>(null)
   const [traces, setTraces] = useState<any[]>([])
   const [total, setTotal] = useState(0)
@@ -144,26 +147,14 @@ export function TracePanel() {
         <div className="grid grid-cols-2 gap-px bg-line border border-line rounded-lg overflow-hidden">
           {stats?.by_error_type && Object.keys(stats.by_error_type).length > 0 && (
             <div className="bg-card p-3">
-              <p className="text-[10px] font-sans text-ink-faint mb-1">失败原因分布 (error)</p>
-              <div className="space-y-1">
-                {Object.entries(stats.by_error_type).map(([k, v]) => (
-                  <div key={`e-${k}`} className="flex justify-between text-xs font-sans text-ink-soft">
-                    <span>{k || 'unknown'}</span><span className="tabular-nums text-red-700">{String(v)}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="text-[10px] font-sans text-ink-faint mb-1.5">失败原因分布 (error)</p>
+              <DistBars rows={Object.entries(stats.by_error_type).map(([k, v]) => [String(k || 'unknown'), Number(v)])} tone="bg-alert" />
             </div>
           )}
           {stats?.by_degraded_type && Object.keys(stats.by_degraded_type).length > 0 && (
             <div className="bg-card p-3">
-              <p className="text-[10px] font-sans text-ink-faint mb-1">降级原因分布 (degraded)</p>
-              <div className="space-y-1">
-                {Object.entries(stats.by_degraded_type).map(([k, v]) => (
-                  <div key={`d-${k}`} className="flex justify-between text-xs font-sans text-ink-soft">
-                    <span>{k || 'unknown'}</span><span className="tabular-nums text-amber-700">{String(v)}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="text-[10px] font-sans text-ink-faint mb-1.5">降级原因分布 (degraded)</p>
+              <DistBars rows={Object.entries(stats.by_degraded_type).map(([k, v]) => [String(k || 'unknown'), Number(v)])} tone="bg-warn" />
             </div>
           )}
         </div>
@@ -178,6 +169,14 @@ export function TracePanel() {
         ) : traces.length === 0 ? (
           <div className="text-center text-xs text-ink-faint font-sans py-10">
             暂无 LLM 调用记录 — 触发一次审计流水线（注入安全日志）后数据将在此显示
+            <div className="mt-3">
+              <button
+                onClick={() => navigate('/logs')}
+                className="border border-line px-3 py-1.5 text-[11px] font-medium text-accent hover:bg-mist transition-colors"
+              >
+                去日志中心注入一条 →
+              </button>
+            </div>
           </div>
         ) : (
           <div className="overflow-x-auto">

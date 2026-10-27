@@ -17,14 +17,17 @@ export const ROUTES = {
   RAG: '/rag',
   OPERATIONS: '/operations',
   SELF_PLAY: '/self-play',
-  // NDR 扩展
-  TRAFFIC: '/traffic',
-  ENCRYPTED: '/encrypted',
-  INTEL: '/intel',
-  SANDBOX: '/sandbox',
-  EDR: '/edr',
-  // B 类能力总览
-  CAPABILITIES: '/capabilities',
+  // 感知中心(阶段 5 合并页,旧 NDR 路由重定向至此)
+  SENSING: '/sensing',
+  ANTI_PHISHING: '/phishing',
+  // 评测战绩(阶段 2)
+  BENCHMARK: '/benchmark',
+  // 攻击剧本沉浸演示（阶段 3）
+  DEMO: '/demo',
+  // 作战大屏 kiosk 直达（路演机免登录,/screen?token=&event=）
+  SCREEN: '/screen',
+  // 系统全景海报（一屏读懂 · 会呼吸的架构图）
+  POSTER: '/poster',
 } as const
 
 /** 守望签名 — 暮青 → 灰青 → 松绿 → 柿黄 */

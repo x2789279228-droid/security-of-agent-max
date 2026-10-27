@@ -61,14 +61,14 @@ export function BrandSeal({
         role="img"
         aria-label="守望正印"
       >
-        {/* 圆角底：浅纸色微暖底，洗掉纯白 */}
+        {/* 圆角底：纸面色 token（battle 模式随变量翻转） */}
         {tone === 'paper' && (
           <rect
             x="2"
             y="2"
             width="196"
             height="196"
-            fill="#f1f4f6"
+            style={{ fill: 'var(--color-card)' }}
             stroke={ringStroke}
             strokeWidth="1.2"
           />

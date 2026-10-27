@@ -16,12 +16,12 @@ const Response = lazy(() => import('./pages/Response'))
 const RAG = lazy(() => import('./pages/RAG'))
 const Operations = lazy(() => import('./pages/Operations'))
 const SelfPlay = lazy(() => import('./pages/SelfPlay'))
-const Traffic = lazy(() => import('./pages/Traffic'))
-const Encrypted = lazy(() => import('./pages/Encrypted'))
-const Intel = lazy(() => import('./pages/Intel'))
-const Sandbox = lazy(() => import('./pages/Sandbox'))
-const EDR = lazy(() => import('./pages/EDR'))
-const CapabilitiesDashboard = lazy(() => import('./pages/CapabilitiesDashboard'))
+const Sensing = lazy(() => import('./pages/Sensing'))
+const AntiPhishing = lazy(() => import('./pages/AntiPhishing'))
+const Benchmark = lazy(() => import('./pages/Benchmark'))
+const Demo = lazy(() => import('./pages/Demo'))
+const Screen = lazy(() => import('./pages/Screen'))
+const Poster = lazy(() => import('./pages/Poster'))
 
 function PageLoader() {
   return (
@@ -65,6 +65,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
         <Route path="/register" element={<Suspense fallback={<PageLoader />}><Register /></Suspense>} />
+        {/* 攻击剧本:独立全屏舞台,不套 RootLayout(无 TopNav,自带 data-mode=battle) */}
+        <Route path={ROUTES.DEMO} element={page(<Demo />)} />
         <Route element={<RootLayout />}>
           <Route index element={page(<Home />)} />
           <Route path={ROUTES.LOGS} element={page(<Logs />)} />
@@ -74,13 +76,28 @@ export default function App() {
           <Route path={ROUTES.OPERATIONS} element={page(<Operations />)} />
           <Route path={ROUTES.SELF_PLAY} element={page(<SelfPlay />)} />
           <Route path={ROUTES.RAG} element={page(<RAG />)} />
-          <Route path={ROUTES.TRAFFIC} element={page(<Traffic />)} />
-          <Route path={ROUTES.ENCRYPTED} element={page(<Encrypted />)} />
-          <Route path={ROUTES.INTEL} element={page(<Intel />)} />
-          <Route path={ROUTES.SANDBOX} element={page(<Sandbox />)} />
-          <Route path={ROUTES.EDR} element={page(<EDR />)} />
-          <Route path={ROUTES.CAPABILITIES} element={page(<CapabilitiesDashboard />)} />
+          {/* 感知中心:旧六条平页路由重定向至对应标签 */}
+          <Route path={ROUTES.SENSING} element={page(<Sensing />)} />
+          <Route path={ROUTES.ANTI_PHISHING} element={page(<AntiPhishing />)} />
+          <Route path="/traffic" element={<Navigate to="/sensing?t=traffic" replace />} />
+          <Route path="/encrypted" element={<Navigate to="/sensing?t=encrypted" replace />} />
+          <Route path="/intel" element={<Navigate to="/sensing?t=intel" replace />} />
+          <Route path="/sandbox" element={<Navigate to="/sensing?t=sandbox" replace />} />
+          <Route path="/edr" element={<Navigate to="/sensing?t=edr" replace />} />
+          <Route path="/capabilities" element={<Navigate to="/sensing?t=capabilities" replace />} />
+          <Route path={ROUTES.BENCHMARK} element={page(<Benchmark />)} />
         </Route>
+        {/* 作战大屏 kiosk:独立全屏舞台,不套 RootLayout、不经 Guard —— 路演机 URL 直达。
+            认证可选(?token=),无凭据时幕布由回放口径兜底。 */}
+        <Route
+          path={ROUTES.SCREEN}
+          element={<Suspense fallback={<PageLoader />}><Screen /></Suspense>}
+        />
+        {/* 系统全景海报:同 kiosk 口径,投屏即海报 */}
+        <Route
+          path={ROUTES.POSTER}
+          element={<Suspense fallback={<PageLoader />}><Poster /></Suspense>}
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

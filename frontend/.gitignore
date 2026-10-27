@@ -1,5 +1,10 @@
 # Logs
-logs
+# 2026-10-26: 原来是裸 "logs", 会匹配**任意层级**名为 logs 的目录 ——
+# 连 src/components/logs/(Logs 页组件目录) 一起被忽略 ⇒ 整个目录从未进 git,
+# 新克隆/CI 构建会丢掉 Logs 页; 且 Tailwind v4 扫描源码时遵守 .gitignore,
+# 本地构建因此漏掉该目录里用到的工具类(如 line-clamp-3) ⇒ 本地 dist 与
+# 容器构建产物哈希不一致。锚定为根目录级, 只忽略运行期日志目录。
+/logs
 *.log
 npm-debug.log*
 yarn-debug.log*

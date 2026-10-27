@@ -32,16 +32,22 @@ export function KpiStat({
   delta?: number
   spark?: number[]
   live?: boolean
-  size?: 'sm' | 'md'
+  /** lg:作战大屏距离字号;wall:大屏英雄数字(红色裂口时整屏第一主体) */
+  size?: 'sm' | 'md' | 'lg' | 'wall'
   className?: string
 }) {
   const t = TONE[tone]
   const hero = tone === 'hero'
+  const labelSize = size === 'lg' || size === 'wall' ? 'text-[13px]' : 'text-[10px]'
   const valueSize = hero
     ? 'text-[52px] leading-[0.95] md:text-[64px]'
-    : size === 'sm'
-      ? 'text-[22px] leading-none md:text-[26px]'
-      : 'text-[32px] leading-none md:text-[36px]'
+    : size === 'wall'
+      ? 'text-[92px] leading-[0.88] md:text-[112px]'
+      : size === 'lg'
+        ? 'text-[44px] leading-none md:text-[52px]'
+        : size === 'sm'
+          ? 'text-[22px] leading-none md:text-[26px]'
+          : 'text-[32px] leading-none md:text-[36px]'
   const deltaUp = typeof delta === 'number' && delta > 0
   const deltaDown = typeof delta === 'number' && delta < 0
 
@@ -51,7 +57,7 @@ export function KpiStat({
         <span className="absolute left-0 top-1 bottom-1 w-px bg-[#0e1a26]" aria-hidden />
       )}
       <div className="flex items-center justify-between gap-3">
-        <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
+        <p className={`font-mono tracking-[0.22em] uppercase text-ink-faint ${labelSize}`}>
           {label}
         </p>
         {live ? <LiveBadge live /> : null}

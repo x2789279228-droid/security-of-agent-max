@@ -47,6 +47,8 @@ export interface RelayState {
   traceId: string
   currentStage: string
   stages: Record<string, StageCellStatus>
+  /** 各阶段 start 时刻(承接"活秒表") */
+  stageSince: Record<string, number>
   startedAt: number
   updatedAt: number
   lastError: string
@@ -68,12 +70,13 @@ export function deriveRelays(buffer: StreamEvent[]): {
   active: RelayState[]
   recent: RelayState[]
   nodeStats: Record<string, { running: number; completed: number; errors: number }>
+  /** 各阶段最早一次 start 的时刻(仅 running 中的),供接力条活秒表 */
+  stageRunningSince: Record<string, number>
 } {
   const map = new Map<number, RelayState>()
   const nodeStats: Record<string, { running: number; completed: number; errors: number }> = {}
-  for (const s of AGENT_RELAY_STAGES) {
-    nodeStats[s] = { running: 0, completed: 0, errors: 0 }
-  }
+  for (const s of AGENT_RELAY_STAGES) nodeStats[s] = { running: 0, completed: 0, errors: 0 }
+  const stageRunningSince: Record<string, number> = {}
 
   // buffer 新在前：从尾部（旧）向头（新）应用，保证最终态正确
   for (let i = buffer.length - 1; i >= 0; i--) {
@@ -95,6 +98,7 @@ export function deriveRelays(buffer: StreamEvent[]): {
           traceId: String(d.trace_id || ''),
           currentStage: stage,
           stages: emptyStages(),
+          stageSince: {},
           startedAt: evt.ts,
           updatedAt: evt.ts,
           lastError: '',
@@ -111,6 +115,7 @@ export function deriveRelays(buffer: StreamEvent[]): {
         relay.stages[stage] = 'running'
         relay.currentStage = stage
         relay.done = false
+        if (!relay.stageSince[stage]) relay.stageSince[stage] = evt.ts
       } else if (d.phase === 'end') {
         const st = String(d.status || 'success') as StageCellStatus
         relay.stages[stage] =
@@ -135,6 +140,7 @@ export function deriveRelays(buffer: StreamEvent[]): {
           traceId: String(d.trace_id || ''),
           currentStage: 'reviewer',
           stages: emptyStages(),
+          stageSince: {},
           startedAt: evt.ts,
           updatedAt: evt.ts,
           lastError: '',
@@ -162,6 +168,7 @@ export function deriveRelays(buffer: StreamEvent[]): {
           traceId: String(d.trace_id || ''),
           currentStage: 'response',
           stages: emptyStages(),
+          stageSince: {},
           startedAt: evt.ts,
           updatedAt: evt.ts,
           lastError: '',
@@ -199,7 +206,13 @@ export function deriveRelays(buffer: StreamEvent[]): {
 
     for (const s of AGENT_RELAY_STAGES) {
       const st = relay.stages[s]
-      if (st === 'running') nodeStats[s].running += 1
+      if (st === 'running') {
+        nodeStats[s].running += 1
+        const since = relay.stageSince[s]
+        if (since && (stageRunningSince[s] === undefined || since < stageRunningSince[s])) {
+          stageRunningSince[s] = since
+        }
+      }
       if (st === 'success') nodeStats[s].completed += 1
       if (st === 'error' || st === 'timeout') nodeStats[s].errors += 1
     }
@@ -207,7 +220,35 @@ export function deriveRelays(buffer: StreamEvent[]): {
 
   active.sort((a, b) => b.updatedAt - a.updatedAt)
   recent.sort((a, b) => b.updatedAt - a.updatedAt)
-  return { active, recent: recent.slice(0, 8), nodeStats }
+  return { active, recent: recent.slice(0, 8), nodeStats, stageRunningSince }
+}
+
+export interface StageDrip {
+  title: string
+  ts: number
+  confidence?: number | null
+}
+
+/** 各阶段最新一条思维步骤(接力条"节点滴流"用)——新→旧扫,首见即最新。
+ *  agent_tick(逐工具/逐块实况)与 agent_thought(阶段末批次)同形状:
+ *  tick 是单步载荷,滴流随之在阶段执行中实时刷新。 */
+export function latestThoughtByStage(buffer: StreamEvent[]): Record<string, StageDrip> {
+  const out: Record<string, StageDrip> = {}
+  for (let i = 0; i < buffer.length; i++) {
+    const evt = buffer[i]
+    if (evt.kind !== 'event' || (evt.type !== 'agent_thought' && evt.type !== 'agent_tick')) continue
+    const steps = Array.isArray(evt.data?.steps) ? evt.data.steps : [evt.data]
+    for (const s of steps) {
+      const stage = String(s?.stage || '')
+      if (!stage || out[stage]) continue
+      out[stage] = {
+        title: String(s?.title || ''),
+        ts: evt.ts,
+        confidence: typeof s?.confidence === 'number' ? s.confidence : null,
+      }
+    }
+  }
+  return out
 }
 
 export function fmtMs(ms: number): string {

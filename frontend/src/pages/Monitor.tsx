@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { List, useDynamicRowHeight } from 'react-window'
 import { motion } from 'framer-motion'
 import { PageFrame } from '../components/common/PageFrame'
@@ -9,10 +10,13 @@ import EventToolbar, { type Filters } from '../components/monitor/EventToolbar'
 import EventRow from '../components/monitor/EventRow'
 import ThoughtChainPanel from '../components/monitor/ThoughtChainPanel'
 import ToolAnomalyBanner from '../components/monitor/ToolAnomalyBanner'
+import BattleScreen from '../components/monitor/BattleScreen'
 import { HealthGauge } from '../components/ui/HealthGauge'
 import { KpiStat } from '../components/ui/KpiStat'
 import { LiveBadge } from '../components/ui/LiveBadge'
 import { api } from '../lib/api'
+import { ROUTES } from '../lib/constants'
+import { useEventParam } from '../lib/entityNav'
 import { deriveRelays } from '../lib/agentPipeline'
 import { pickThoughtEventId } from '../lib/thoughtChain'
 import { useServiceStore } from '../stores/serviceStore'
@@ -98,7 +102,7 @@ const STREAM_EXTRA_LABEL: Record<string, string> = {
 const STATS_MIN_INTERVAL = 2_000 // stats 刷新最短间隔（/api/stats 已 Redis 计数秒回,可近实时刷新）
 let lastStatsAt = 0
 
-export default function Monitor() {
+export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
   const services = useServiceStore((s) => s.services)
   const serviceDetails = useServiceStore((s) => s.details)
   const streamStatus = useEventStreamStore((s) => s.status)
@@ -255,6 +259,12 @@ export default function Monitor() {
     setAwaitingLive(false)
   }, [])
 
+  // 案卷链深链:/logs 或事件案卷跳转而来,自动选中该事件思维链
+  const deepEventId = useEventParam()
+  useEffect(() => {
+    if (deepEventId) selectEvent(deepEventId)
+  }, [deepEventId, selectEvent])
+
   useEffect(() => {
     if (dismissedThought) return
     const liveId = deriveRelays(buffer).active[0]?.eventId || 0
@@ -329,6 +339,48 @@ export default function Monitor() {
     [visible],
   )
 
+  // ── 大屏模式(阶段 4):F 键或按钮进入,BattleScreen 自管 data-mode/全屏,Esc 退出 ──
+  // kiosk(/screen)挂载即入大屏,退出改走首页而不是折回普通监控页。
+  const navigate = useNavigate()
+  const [battle, setBattle] = useState(kiosk)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'f' || e.ctrlKey || e.metaKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      e.preventDefault()
+      setBattle((v) => {
+        if (v) return false
+        return window.innerWidth >= 1280 // 投影适配下限,过小退回纵向页
+      })
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  if (battle) {
+    return (
+      <BattleScreen
+        services={services}
+        serviceDetails={serviceDetails}
+        streamStatus={streamStatus}
+        visible={visible}
+        typeCounts={typeCounts}
+        bufferCount={buffer.length}
+        selectedEventId={selectedEventId}
+        onSelectEvent={selectEvent}
+        onCloseThought={closeThought}
+        idleHint={idleHint}
+        hydrated={hydratedPipelines}
+        hydratedRecent={recentHydration}
+        onDemo={runDemo}
+        demoBusy={demoBusy}
+        stats={stats}
+        onExit={() => (kiosk ? navigate(ROUTES.HOME) : setBattle(false))}
+      />
+    )
+  }
+
   const securityPending = Math.max(0, Number(stats?.security_pending ?? 0) || 0)
 
   return (
@@ -337,10 +389,19 @@ export default function Monitor() {
       hint="服务健康 · 多 Agent 审查接力 · 实时事件流。"
       marginalia="——系统在跳，证明它活着。"
       extra={
-        <LiveBadge
-          live={streamStatus === 'online'}
-          label={STREAM_EXTRA_LABEL[streamStatus] ?? streamStatus}
-        />
+        <div className="flex items-center gap-3">
+          <LiveBadge
+            live={streamStatus === 'online'}
+            label={STREAM_EXTRA_LABEL[streamStatus] ?? streamStatus}
+          />
+          <button
+            onClick={() => window.innerWidth >= 1280 && setBattle(true)}
+            className="nav-btn"
+            title="三列作战大屏(F 键进入,Esc 退出)"
+          >
+            ▦ 大屏模式
+          </button>
+        </div>
       }
     >
 

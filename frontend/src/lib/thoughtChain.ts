@@ -5,7 +5,7 @@ import type { StreamEvent } from './eventStream'
 import { AGENT_RELAY_STAGES } from './agentPipeline.ts'
 
 export const THOUGHT_KINDS = [
-  'signal', 'plan', 'tool_map', 'tool', 'rag', 'claim', 'discard', 'hop',
+  'signal', 'plan', 'tool_map', 'tool', 'chunk', 'rag', 'claim', 'discard', 'hop',
   'verdict', 'gate', 'review', 'cad', 'response',
 ] as const
 
@@ -74,6 +74,7 @@ const STAGE_OF_KIND: Record<string, string> = {
   plan: 'decomposer',
   tool_map: 'tool_builder',
   tool: 'tool_builder',
+  chunk: 'executor',
   rag: 'tool_builder',
   claim: 'executor',
   discard: 'executor',
@@ -117,12 +118,15 @@ export function mergeSteps(groups: ThoughtStep[][]): ThoughtStep[] {
   return [...map.values()]
 }
 
-/** 从 SSE 缓冲抽出某事件的思维步骤（旧→新覆盖） */
+/** 从 SSE 缓冲抽出某事件的思维步骤（旧→新覆盖）。
+ *  agent_thought = 阶段末整批；agent_tick = 阶段内逐工具/逐块实况，
+ *  两者共用 ThoughtStep 形状与 step_id 命名，mergeSteps 按 step_id 去重
+ *  —— tick 先到则 DAG 实时生长，阶段末批次到达后无缝对齐。 */
 export function stepsFromBuffer(buffer: StreamEvent[], eventId: number): ThoughtStep[] {
   const acc: ThoughtStep[] = []
   for (let i = buffer.length - 1; i >= 0; i--) {
     const evt = buffer[i]
-    if (evt.kind !== 'event' || evt.type !== 'agent_thought') continue
+    if (evt.kind !== 'event' || (evt.type !== 'agent_thought' && evt.type !== 'agent_tick')) continue
     const d = evt.data ?? {}
     if (Number(d.event_id) !== eventId) continue
     if (Array.isArray(d.steps)) {

@@ -1,395 +1,185 @@
 {
   "desktop": {
     "/": {
-      "path": "/",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 178,
-        "text": "守\n望"
-      },
-      "gapNavToH1": 80,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/logs": {
-      "path": "/logs",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "日志中心"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/monitor": {
-      "path": "/monitor",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "系统监控"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/operations": {
-      "path": "/operations",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "运营中心"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/response": {
-      "path": "/response",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "响应引擎"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/rag": {
-      "path": "/rag",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "安全知识库"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/self-play": {
-      "path": "/self-play",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "红蓝自博弈"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/security-audit": {
-      "path": "/security-audit",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "安全审计测试台"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/traffic": {
-      "path": "/traffic",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "流量采集"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/operations#cases": {
-      "path": "/operations",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "运营中心"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "sense": {
-      "path": "/logs",
-      "nav": {
-        "top": 0,
-        "bottom": 98,
-        "height": 98
-      },
-      "main": {
-        "top": 98,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 98,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 114,
-        "text": "日志中心"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     }
   },
   "mobile": {
     "/": {
-      "path": "/",
-      "nav": {
-        "top": 0,
-        "bottom": 57,
-        "height": 57
-      },
-      "main": {
-        "top": 57,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 57,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 129,
-        "text": "守\n望"
-      },
-      "gapNavToH1": 72,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/logs": {
-      "path": "/logs",
-      "nav": {
-        "top": 0,
-        "bottom": 57,
-        "height": 57
-      },
-      "main": {
-        "top": 57,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 57,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 73,
-        "text": "日志中心"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "/monitor": {
-      "path": "/monitor",
-      "nav": {
-        "top": 0,
-        "bottom": 57,
-        "height": 57
-      },
-      "main": {
-        "top": 57,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 57,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 73,
-        "text": "系统监控"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     },
     "menu": {
-      "path": "/monitor",
-      "nav": {
-        "top": 0,
-        "bottom": 838,
-        "height": 838
-      },
-      "main": {
-        "top": 838,
-        "paddingTop": "0px"
-      },
-      "first": {
-        "top": 838,
-        "tag": "DIV",
-        "cls": "will-change-transform"
-      },
-      "h1": {
-        "top": 854,
-        "text": "系统监控"
-      },
-      "gapNavToH1": 16,
-      "gapNavToMain": 0,
+      "path": "/login",
+      "nav": null,
+      "main": null,
+      "first": null,
+      "h1": null,
+      "gapNavToH1": null,
+      "gapNavToMain": null,
       "innerTextHas": {
-        "title": true
+        "title": false
       }
     }
   }

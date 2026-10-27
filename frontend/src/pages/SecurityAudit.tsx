@@ -4,6 +4,7 @@ import { PageTransition } from '../components/common/PageTransition'
 import ThoughtChainPanel from '../components/monitor/ThoughtChainPanel'
 import ToolSignaturePanel from '../components/monitor/ToolSignaturePanel'
 import { api } from '../lib/api'
+import { useEventParam } from '../lib/entityNav'
 
 type Tab = 'inject' | 'batch' | 'pipeline' | 'cad' | 'chains' | 'guard'
 
@@ -110,6 +111,14 @@ export default function SecurityAudit() {
   // Pipeline
   const [pipelineEventId, setPipelineEventId] = useState<number | null>(null)
   const [pipelineData, setPipelineData] = useState<any>(null)
+
+  // 案卷链深链:从事件案卷/监控跳来,直落流水线 Tab 并选中该事件
+  const deepEventId = useEventParam()
+  useEffect(() => {
+    if (!deepEventId) return
+    setPipelineEventId(deepEventId)
+    setActiveTab('pipeline')
+  }, [deepEventId])
 
   // CAD
   const [cbStatus, setCbStatus] = useState<any>(null)

@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api } from '../../lib/api'
+import { eventHref } from '../../lib/entityNav'
 import { spring } from '../../lib/constants'
 import { GradientNumber, EmptyState, SeverityChip } from './badges'
 
@@ -137,6 +139,7 @@ const CALLER_LABELS: Record<string, string> = {
 // ── 主组件 ──
 
 export function CostTab() {
+  const navigate = useNavigate()
   const [events, setEvents] = useState<EventCost[]>([])
   const [totalEvents, setTotalEvents] = useState(0)
   const [grand, setGrand] = useState<{ calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; errors: number } | null>(null)
@@ -437,10 +440,20 @@ export function CostTab() {
                   <tr
                     key={e.event_id}
                     onClick={() => openDetail(e)}
-                    className="hover:bg-card transition-colors cursor-pointer"
+                    className="group hover:bg-card transition-colors cursor-pointer"
                   >
                     <td className="px-5 py-2.5 whitespace-nowrap">
                       <span className="font-mono font-semibold text-accent">#{e.event_id}</span>
+                      <button
+                        onClick={(ev) => {
+                          ev.stopPropagation()
+                          navigate(eventHref.logs(e.event_id))
+                        }}
+                        className="ml-2 text-[10px] font-medium text-ink-faint opacity-0 transition-opacity hover:text-accent group-hover:opacity-100"
+                        title="在日志中心打开该事件案卷"
+                      >
+                        回日志 →
+                      </button>
                       <p className="text-[10px] text-ink-faint max-w-[200px] truncate mt-0.5">{e.message}</p>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">

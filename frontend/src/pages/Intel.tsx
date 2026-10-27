@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PageFrame, tabOn, tabOff } from '../components/common/PageFrame'
 import { api } from '../lib/api'
+import { StatBand } from '../components/common/StatBand'
 
 interface Ioc {
   id: number
@@ -25,11 +26,13 @@ export default function Intel() {
   const [iocs, setIocs] = useState<Ioc[]>([])
   const [feeds, setFeeds] = useState<any[]>([])
   const [tab, setTab] = useState<'iocs' | 'feeds'>('iocs')
+  const [loadError, setLoadError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    api.get('/intel/iocs?limit=100').then(setIocs).catch(() => {})
+    api.get('/intel/iocs?limit=100').then(setIocs).then(() => setLoadError('')).catch((e: any) => setLoadError(e?.message || '加载失败'))
     api.get('/intel/feeds').then(setFeeds).catch(() => {})
-  }, [])
+  }, [refreshKey])
 
   return (
     <PageFrame
@@ -37,6 +40,14 @@ export default function Intel() {
       hint="IOC 管理 · 情报源 · 信誉查询。把外部情报变成系统已知。"
       marginalia="——情报的价值在「可用」，不在「很多」。"
     >
+      <StatBand
+        items={[
+          { label: 'IOC 总数', value: iocs.length, hint: `情报源 ${feeds.length} 个` },
+          { label: 'IP 指标', value: iocs.filter((x) => x.ioc_type === 'ip').length },
+          { label: '域名指标', value: iocs.filter((x) => x.ioc_type === 'domain').length },
+          { label: 'critical', value: iocs.filter((x) => x.severity === 'critical').length, tone: 'alert' as const },
+        ]}
+      />
       <nav className="mb-8 flex gap-6 border-b border-line">
         {(['iocs', 'feeds'] as const).map((t) => (
           <button
@@ -100,6 +111,20 @@ export default function Intel() {
                   </td>
                 </tr>
               ))}
+              {loadError && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center">
+                    <p className="text-[13px] text-warn">加载失败:{loadError}</p>
+                    <button
+                      onClick={() => setRefreshKey((k) => k + 1)}
+                      className="mt-2 border border-line px-3 py-1.5 text-[11px] text-ink transition-colors hover:border-accent hover:text-accent"
+                    >
+                      重试
+                    </button>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">后端不可达已与「暂无数据」区分;可点上方「演示补给」一键灌入演示数据。</p>
+                  </td>
+                </tr>
+              )}
               {iocs.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-20 text-center text-[13px] text-ink-faint">

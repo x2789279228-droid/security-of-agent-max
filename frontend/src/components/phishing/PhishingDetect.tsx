@@ -35,7 +35,7 @@ interface HistoryItem {
   created_at: string
 }
 
-/** 钓鱼检测 Tab 图标 — 16×16 stroke SVG，与 Sidebar/TopNav 同风格 heroicons 路径 */
+/** 钓鱼检测 Tab 图标 — 16×16 stroke SVG，与 TopNav 同风格 heroicons 路径 */
 const TAB_ICONS: Record<PhishTab, string> = {
   email: 'M3 8l9 6 9-6m-18 0V6a2 2 0 012-2h14a2 2 0 012 2v2m-18 0v8a2 2 0 002 2h14a2 2 0 002-2V8',
   web: 'M12 21a9 9 0 100-18 9 9 0 000 18zm0 0c2.5-2.5 4-6.5 4-9s-1.5-6.5-4-9m0 18c-2.5-2.5-4-6.5-4-9s1.5-6.5 4-9M3 12h18',

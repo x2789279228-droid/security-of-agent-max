@@ -76,19 +76,89 @@
   /* 数字字宽（等宽数字） */
   --font-num: ui-monospace, "IBM Plex Mono", "SF Mono", "Roboto Mono", monospace;
 
+  /* 供原生 class 使用的线/输入/导航色（battle 模式整体翻转） */
+  --color-line-soft: #d4dce3;
+  --color-line-input: #c5ced6;
+  --color-nav-veil: rgba(241, 244, 246, 0.92);
+  --color-vault-text: #f1e8d6;
+  --color-scrollbar: #b8c4cc;
+  --paper-grain-opacity: 0.55;
+
   color-scheme: light;
+}
+
+/* ===== 作战模式（大屏/剧本）—— 暗色 token 覆盖层 =====
+   原则：组件一律使用 token 类（bg-paper / text-ink / border-line…），
+   此处翻转变量即全站换肤，组件代码零改动。
+   挂载：document.documentElement.dataset.mode = 'battle'；移除即还原。 */
+[data-mode="battle"] {
+  color-scheme: dark;
+
+  /* 纸面 → 深室 */
+  --color-surface: #0e1a26;
+  /* 卡片提亮到 #1a2d3f:与底色差 ≥12/255,投影低对比下仍能分开图底 */
+  --color-card: #1a2d3f;
+  --color-paper: #1a2d3f;
+  --color-line: #24384a;
+  --color-line-soft: #1d2f3f;
+  --color-line-input: #2a3f52;
+  --color-mist: #203349;
+  --color-qing: #203448;
+  --color-dan: #33475a;
+
+  /* 墨 → 纸（文字翻转） */
+  --color-ink: #dfe7e3;
+  --color-ink-soft: #a7b4bd;
+  --color-ink-faint: #78889a;
+  --color-night: #0e1a26;
+
+  /* 暮青提亮（暗底对比） */
+  --color-accent: #6fa3b0;
+  --color-accent-hover: #7fb3c0;
+  --color-link: #8fc0cc;
+  --color-on-accent: #0e1a26;
+
+  /* 状态色暗底校准 */
+  --color-ok: #5da583;
+  --color-warn: #d4a054;
+  --color-alert: #e05a4e;
+  --color-signal: #74a7b5;
+  --color-nong: #d4a054;
+  --color-hui: #74a7b5;
+  --color-seal: #e2604f;
+
+  /* 暮金保持 */
+  --color-dusk: #c9a574;
+  --color-dusk-soft: #d4b98a;
+
+  /* 提亮面 → 暗色对应面 */
+  --color-paper-warm: #1b2e40;
+  --color-mint: #173029;
+  --color-peach: #2a2418;
+  --color-nav-veil: rgba(14, 26, 38, 0.92);
+  --color-scrollbar: #33475a;
+
+  /* 纸纹降噪（颗粒在投影上是脏点） */
+  --paper-grain-opacity: 0.12;
+}
+
+/* 作战模式：顶部冷光 + 底部渐晕，替代「案卷灯下」 */
+[data-mode="battle"] body::after {
+  background:
+    radial-gradient(ellipse 70% 45% at 50% -8%, rgba(111, 163, 176, 0.10), transparent 60%),
+    radial-gradient(ellipse 130% 100% at 50% 125%, rgba(0, 0, 0, 0.55), transparent 55%);
 }
 
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  background: #ecf0ee;
+  background: var(--color-surface);
 }
 
 body {
-  background-color: #ecf0ee;
-  color: #1c2838;
+  background-color: var(--color-surface);
+  color: var(--color-ink);
   font-family: var(--font-sans);
   font-weight: 400;
   overflow-x: clip;
@@ -101,7 +171,7 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: 0;
-  opacity: 0.55;
+  opacity: var(--paper-grain-opacity);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.08  0 0 0 0 0.12  0 0 0 0 0.16  0 0 0 0.22 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
   background-size: 220px 220px;
 }
@@ -129,19 +199,19 @@ body::after {
 
 ::-webkit-scrollbar { width: 8px; height: 8px }
 ::-webkit-scrollbar-track { background: transparent }
-::-webkit-scrollbar-thumb { background: #b8c4cc; border-radius: 2px }
+::-webkit-scrollbar-thumb { background: var(--color-scrollbar); border-radius: 2px }
 ::-webkit-scrollbar-thumb:hover { background: #3a6570 }
 ::-webkit-scrollbar-corner { background: transparent }
 
 .mono-card {
-  background: #f5f7f5;
-  border: 1px solid #cfd6d2;
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
   border-radius: 2px;
 }
 
 .mono-card-ink {
-  background: #e3eae6;
-  border: 1px solid #bcc6c0;
+  background: var(--color-qing);
+  border: 1px solid var(--color-dan);
   border-radius: 2px;
 }
 
@@ -149,45 +219,45 @@ body::after {
   width: 100%;
   background: transparent;
   border: none;
-  border-bottom: 1px solid #d4dce3;
+  border-bottom: 1px solid var(--color-line-soft);
   border-radius: 0;
   padding: 10px 0;
-  color: #1c2838;
+  color: var(--color-ink);
   outline: none;
 }
 .mono-input:focus {
-  border-bottom-color: #3a6570;
+  border-bottom-color: var(--color-accent);
 }
 .mono-input::placeholder {
-  color: #8a97a4;
+  color: var(--color-ink-faint);
 }
 
 .auth-input {
   width: 100%;
   background: transparent;
   border: none;
-  border-bottom: 1px solid #c5ced6;
+  border-bottom: 1px solid var(--color-line-input);
   border-radius: 0;
   padding: 11px 0 10px;
-  color: #1c2838;
+  color: var(--color-ink);
   outline: none;
   transition: border-color 0.15s ease;
 }
 .auth-input:hover {
-  border-bottom-color: #8a97a4;
+  border-bottom-color: var(--color-ink-faint);
 }
 .auth-input:focus {
-  border-bottom-color: #3a6570;
+  border-bottom-color: var(--color-accent);
 }
 .auth-input::placeholder {
-  color: #8a97a4;
+  color: var(--color-ink-faint);
 }
 .auth-input[aria-invalid="true"] {
-  border-bottom-color: #c23a32;
+  border-bottom-color: var(--color-alert);
   background: transparent;
 }
 .auth-input[aria-invalid="true"]:focus {
-  border-bottom-color: #c23a32;
+  border-bottom-color: var(--color-alert);
   box-shadow: none;
 }
 
@@ -195,51 +265,51 @@ body::after {
 .auth-input:-webkit-autofill:hover,
 .auth-input:-webkit-autofill:focus,
 .auth-input:-webkit-autofill:active {
-  -webkit-text-fill-color: #1c2838 !important;
-  caret-color: #1c2838;
-  box-shadow: 0 0 0 1000px #f1f4f6 inset !important;
+  -webkit-text-fill-color: var(--color-ink) !important;
+  caret-color: var(--color-ink);
+  box-shadow: 0 0 0 1000px var(--color-card) inset !important;
   transition: background-color 99999s ease-out;
 }
 
 .glass,
 .glass-strong {
-  background: #f5f7f5;
-  border: 1px solid #cfd6d2;
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
   border-radius: 2px;
   box-shadow: none;
   backdrop-filter: none;
 }
 .glass-strong {
-  background: #f5f7f5;
+  background: var(--color-card);
 }
 .glass-nav {
-  background: rgba(241, 244, 246, 0.92);
-  border-bottom: 1px solid #d4dce3;
+  background: var(--color-nav-veil);
+  border-bottom: 1px solid var(--color-line-soft);
   backdrop-filter: blur(10px);
   box-shadow: none;
 }
 .glass-input {
   background: transparent;
   border: none;
-  border-bottom: 1px solid #c5ced6;
+  border-bottom: 1px solid var(--color-line-input);
   border-radius: 0;
   padding: 8px 0;
 }
 .glass-input:focus {
-  border-bottom-color: #3a6570;
+  border-bottom-color: var(--color-accent);
   box-shadow: none;
   outline: none;
 }
 
 .ink-rule {
   height: 1px;
-  background: #d4dce3;
+  background: var(--color-line-soft);
 }
 
 .rule-ink {
   height: 3px;
   width: 18px;
-  background: #3a6570;
+  background: var(--color-accent);
   border-radius: 0;
 }
 
@@ -258,14 +328,14 @@ body::after {
   font-size: 36px;
   font-weight: 900;
   letter-spacing: -0.04em;
-  color: #1c2838;
+  color: var(--color-ink);
   line-height: 1.15;
 }
 .page-sub {
   margin-top: 8px;
   font-size: 14px;
   font-weight: 400;
-  color: #8a97a4;
+  color: var(--color-ink-faint);
   max-width: 40rem;
 }
 
@@ -309,6 +379,23 @@ body::after {
   animation-play-state: paused;
 }
 
+/* 接力条流动丝带 —— running 节点相邻线段的"输液"动感 */
+@keyframes segment-flow {
+  from { background-position: 0 0; }
+  to { background-position: 24px 0; }
+}
+.segment-flow {
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--color-ok) 0,
+    var(--color-ok) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  opacity: 0.55;
+  animation: segment-flow 0.9s linear infinite;
+}
+
 @keyframes watch-flame {
   0%, 100% { opacity: 0.65; }
   50% { opacity: 1; }
@@ -332,7 +419,7 @@ body::after {
   bottom: 0;
   left: 0;
   width: 1px;
-  background: #3a6570;
+  background: var(--color-accent);
   opacity: 0.4;
   animation: watch-walk 18s linear infinite;
   pointer-events: none;
@@ -344,13 +431,25 @@ body::after {
   .animate-ping,
   .ink-reveal,
   .duty-tape,
+  .segment-flow,
   .watch-flame,
   .watch-scan::after,
   .fade-up,
   .mask-reveal,
-  .stagger-in {
+  .stagger-in,
+  .hero-seal,
+  .attack-map-home-ring {
     animation: none !important;
   }
+}
+
+/* 攻击态势图: 受击方呼吸环 */
+@keyframes attack-home-breathe {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.3; }
+}
+.attack-map-home-ring {
+  animation: attack-home-breathe 2.4s ease-in-out infinite;
 }
 
 /* ===== v2 · 新增微交互 ===== */
@@ -418,6 +517,29 @@ body {
   width: 24px;
   background: var(--color-seal);
   border-radius: 0;
+}
+
+/* 制版角标 —— 关键卷宗面板的左上/右下角标记(文书制度语言,非阴影) */
+.crop-marks::before,
+.crop-marks::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+  opacity: 0.55;
+}
+.crop-marks::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1px solid var(--color-ink-faint);
+  border-left: 1px solid var(--color-ink-faint);
+}
+.crop-marks::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1px solid var(--color-ink-faint);
+  border-right: 1px solid var(--color-ink-faint);
 }
 
 /* 状态切换渐变（ok/warn/alert 之间） */
@@ -640,6 +762,39 @@ body {
   border-radius: var(--radius-control);
 }
 
+/* ===== 大屏距离字号(阶段 6) =====
+   作战大屏按 3-5m 观看距离校准:思维链主舞台整体放大。
+   ThoughtDag 用 getBoundingClientRect + ResizeObserver 测连线,
+   zoom 缩放后布局重排会自动重测,故此处用 zoom 而非 transform。 */
+.wall-zoom {
+  zoom: 1.35;
+}
+
+/* ===== 首屏红印(阶段 7 · 峰值) =====
+   「守望」字标写完后的落印 —— 全站第一屏唯一的实色锚点。
+   节奏:字标级联(0.15/0.32s)起笔,1.35s 落印收笔。 */
+@keyframes hero-seal-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(2.3) rotate(-16deg);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(0.94) rotate(-4.5deg);
+  }
+  76% {
+    transform: scale(1.04) rotate(-7deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(-6deg);
+  }
+}
+.hero-seal {
+  animation: hero-seal-stamp 0.72s cubic-bezier(0.22, 1, 0.36, 1) 1.35s both;
+  transform: rotate(-6deg);
+}
+
 /* ===== v3.1 · 编辑感精修 ===== */
 
 /* 首字下沉（drop cap）：只对中文段落生效 */
@@ -842,9 +997,9 @@ body {
   gap: 14px;
   height: 56px;
   padding: 0 28px;
-  background: #0e1a26;
-  color: #f1e8d6;
-  border: 1px solid #c9a574;
+  background: var(--color-vault);
+  color: var(--color-vault-text);
+  border: 1px solid var(--color-dusk-soft);
   font-family: var(--font-serif);
   font-weight: 900;
   font-size: 16px;
@@ -852,7 +1007,7 @@ body {
   transition: background 240ms ease, color 240ms ease;
 }
 .btn-prime:hover {
-  background: #182838;
+  background: var(--color-vault-soft);
 }
 .btn-prime .prime-mark {
   display: inline-flex;
@@ -899,9 +1054,9 @@ body {
   gap: 8px;
   height: 32px;
   padding: 0 14px;
-  background: #0e1a26;
-  color: #f1e8d6;
-  border: 1px solid #0e1a26;
+  background: var(--color-vault);
+  color: var(--color-vault-text);
+  border: 1px solid var(--color-vault);
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.22em;
@@ -909,14 +1064,24 @@ body {
   transition: background 200ms ease, color 200ms ease;
 }
 .nav-btn:hover {
-  background: #182838;
+  background: var(--color-vault-soft);
 }
 .nav-btn-ghost {
   background: transparent;
-  color: #1c2838;
-  border-color: #1c2838;
+  color: var(--color-ink);
+  border-color: var(--color-ink);
 }
 .nav-btn-ghost:hover {
-  background: #1c2838;
-  color: #f1e8d6;
+  background: var(--color-ink);
+  color: var(--color-surface);
+}
+/* 导航常驻演示 CTA —— 暮金描边，全站唯一的一级动作 */
+.nav-btn-prime {
+  background: var(--color-vault);
+  color: var(--color-dusk-soft);
+  border: 1px solid var(--color-dusk-soft);
+}
+.nav-btn-prime:hover {
+  background: var(--color-vault-soft);
+  color: var(--color-vault-text);
 }

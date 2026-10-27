@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PageFrame } from '../components/common/PageFrame'
 import { api } from '../lib/api'
+import { StatBand } from '../components/common/StatBand'
 
 interface TlsSession {
   id: number
@@ -29,10 +30,12 @@ const riskLabel = (score: number) =>
 
 export default function Encrypted() {
   const [sessions, setSessions] = useState<TlsSession[]>([])
+  const [loadError, setLoadError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    api.get('/ndr/tls?limit=100').then(setSessions).catch(() => {})
-  }, [])
+    api.get('/ndr/tls?limit=100').then(setSessions).then(() => setLoadError('')).catch((e: any) => setLoadError(e?.message || '加载失败'))
+  }, [refreshKey])
 
   return (
     <PageFrame
@@ -40,6 +43,14 @@ export default function Encrypted() {
       hint="TLS 指纹 · 证书分析 · 风险评估。看不见内容，看得见形状。"
       marginalia="——加密保护的也是形状。"
     >
+      <StatBand
+        items={[
+          { label: 'TLS 会话', value: sessions.length },
+          { label: '平均风险分', value: sessions.length ? Number((sessions.reduce((a, s) => a + (s.risk_score || 0), 0) / sessions.length).toFixed(2)) : 0, decimals: 2, tone: 'warn' as const },
+          { label: '高危会话', value: sessions.filter((s) => (s.risk_score || 0) > 0.5).length, tone: 'alert' as const, hint: '风险分 > 0.5' },
+          { label: '自签名证书', value: sessions.filter((s) => s.cert_is_self_signed).length },
+        ]}
+      />
       <div className="border border-line bg-paper">
         {sessions.map((s, i) => (
           <article
@@ -118,6 +129,20 @@ export default function Encrypted() {
             </div>
           </article>
         ))}
+        {loadError && (
+          <div className="mx-6 my-4 border border-warn/40 bg-warn/5 px-5 py-4 text-center">
+            <p className="text-[13px] text-warn">加载失败:{loadError}</p>
+            <button
+              onClick={() => setRefreshKey((k) => k + 1)}
+              className="mt-2 border border-line px-3 py-1.5 text-[11px] text-ink transition-colors hover:border-accent hover:text-accent"
+            >
+              重试
+            </button>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+              后端不可达已与「暂无数据」区分;可点上方「演示补给」一键灌入演示数据。
+            </p>
+          </div>
+        )}
         {sessions.length === 0 && (
           <div className="px-6 py-20 text-center text-[13px] text-ink-faint">
             暂无 TLS 会话数据

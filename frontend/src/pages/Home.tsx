@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BrandCrest } from '../components/brand/BrandCrest'
 import { PageTransition } from '../components/common/PageTransition'
+import { TapeSeam } from '../components/common/TapeSeam'
 import { ShiftConsole } from '../components/home/ShiftConsole'
 import { EventTicker } from '../components/home/EventTicker'
 import { Blueprint } from '../components/home/Blueprint'
@@ -200,7 +201,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* 字标：级联揭示 */}
+              {/* 字标:级联揭示 —— 落款处一方朱砂印,全屏唯一实色锚点 */}
               <h1
                 aria-label="守望"
                 className="mt-8 text-[#f5ecd8] flex items-baseline"
@@ -214,6 +215,18 @@ export default function Home() {
               >
                 <span className="glyph glyph-1 text-[120px] sm:text-[160px] lg:text-[200px]">守</span>
                 <span className="glyph glyph-2 text-[120px] sm:text-[160px] lg:text-[200px] ml-1 sm:ml-2">望</span>
+                {/* 落印:字标写完,一方红印砸在行末(峰值①) */}
+                <span
+                  className="hero-seal relative ml-5 hidden h-[116px] w-[116px] shrink-0 self-center items-center justify-center bg-[#e2604f] sm:flex lg:ml-8 lg:h-[136px] lg:w-[136px]"
+                  style={{ boxShadow: '0 22px 70px -18px rgba(226,96,79,0.55)' }}
+                  aria-hidden
+                >
+                  <span className="absolute inset-[7px] border border-[#f9f1de]/55" />
+                  <span className="flex flex-col items-center font-serif font-black leading-[1.02] tracking-[0.02em] text-[#f9f1de] text-[42px] lg:text-[50px]">
+                    <span>守</span>
+                    <span>望</span>
+                  </span>
+                </span>
               </h1>
 
               {/* 大号斜体拉句 */}
@@ -266,6 +279,22 @@ export default function Home() {
                 perHour={perHour}
                 responseMs={responseMs}
               />
+              {/* 叠压便签(叙事区层叠:纸面便签压在深色控制台上,微旋转) */}
+              <div className="absolute -right-2 top-14 z-10 hidden rotate-[1.1deg] border border-line bg-paper-warm px-4 py-3 shadow-[var(--shadow-2)] sm:block">
+                <span aria-hidden className="absolute -top-1.5 left-1/2 h-3 w-10 -translate-x-1/2 -rotate-2 border border-line bg-mist/90" />
+                <p className="font-mono text-[9px] tracking-[0.26em] uppercase text-ink-faint">值情 · STATUS</p>
+                <p className={`mt-1 font-serif text-[15px] font-black ${attackCount > 0 || pending > 0 ? 'text-alert' : 'text-ok'}`}>
+                  {attackCount > 0 || pending > 0 ? '威胁在门后' : '一切安静'}
+                </p>
+              </div>
+              <button
+                onClick={() => navigate(ROUTES.DEMO)}
+                className="group absolute -left-2 bottom-24 z-10 hidden -rotate-[0.8deg] border border-line bg-paper-warm px-4 py-3 text-left shadow-[var(--shadow-2)] transition-colors hover:border-accent sm:block"
+              >
+                <span aria-hidden className="absolute -top-1.5 left-1/2 h-3 w-10 -translate-x-1/2 rotate-2 border border-line bg-mist/90" />
+                <p className="font-mono text-[9px] tracking-[0.26em] uppercase text-ink-faint group-hover:text-accent">Demo Script</p>
+                <p className="mt-1 font-serif text-[15px] font-black text-ink">▶ 看一段攻击剧本</p>
+              </button>
               <div className="fade-up-soft mt-4 flex items-center justify-between border-t border-[rgba(201,165,116,0.12)] pt-3">
                 <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-[rgba(216,222,224,0.55)]">
                   {BRAND.nameEn} · Night Watch SOC
@@ -358,6 +387,9 @@ export default function Home() {
             </div>
           </SectionRule>
         </div>
+
+        {/* 接缝封条(叠压:骑在能力清单与 §III 深底的接缝上) */}
+        <TapeSeam text="案卷连续归档 · 值守不换班" />
 
         {/* §III 层次 — vault 深底（在 page-shell 外才能全宽） */}
         <section className="tier-vault relative overflow-hidden">
@@ -569,7 +601,7 @@ export default function Home() {
                 <dt className="font-mono tracking-[0.2em] uppercase text-[#c9a574]">Evolve</dt>
                 <dd className="text-[rgba(216,222,224,0.85)]">红蓝自博弈</dd>
                 <dt className="font-mono tracking-[0.2em] uppercase text-[#c9a574]">Stack</dt>
-                <dd className="text-[rgba(216,222,224,0.85)]">React 19 · Tailwind 4 · Three</dd>
+                <dd className="text-[rgba(216,222,224,0.85)]">React 19 · Tailwind 4 · framer-motion</dd>
               </dl>
             </div>
           </div>

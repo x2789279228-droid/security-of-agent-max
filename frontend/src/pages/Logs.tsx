@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageFrame } from '../components/common/PageFrame'
+import { EventDossier } from '../components/logs/EventDossier'
+import { CountUp } from '../motion/primitives'
 import { api } from '../lib/api'
+import { useEventParam, eventHref } from '../lib/entityNav'
 import {
   useEventStreamLifecycle,
   useEventStreamStore,
@@ -17,6 +21,22 @@ const severityMeta: Record<Severity, { label: string; badge: string; dot: string
   medium: { label: '中危', badge: 'border border-hui/40 bg-hui/10 text-hui', dot: 'bg-hui', card: 'border-hui/60 bg-hui/5', num: 'text-hui' },
   low: { label: '低危', badge: 'border border-line bg-mist text-ink-faint', dot: 'bg-dan', card: 'border-dan/70 bg-mist/40', num: 'text-ink-soft' },
   info: { label: '提示', badge: 'text-ink-faint', dot: 'bg-line', card: 'border-line bg-mist/20', num: 'text-ink-faint' },
+}
+
+/* 新到行动效:入场背景色晕(衰减到透明)+ 左缘severity色条 */
+const SEV_TINT: Record<Severity, string> = {
+  critical: 'rgba(176, 58, 48, 0.13)',
+  high: 'rgba(184, 137, 64, 0.13)',
+  medium: 'rgba(74, 122, 136, 0.11)',
+  low: 'rgba(28, 40, 56, 0.05)',
+  info: 'rgba(28, 40, 56, 0.04)',
+}
+const SEV_BORDER: Record<Severity, string> = {
+  critical: '#b03a30',
+  high: '#b88940',
+  medium: '#4a7a88',
+  low: '#bcc6c0',
+  info: '#cfd6d2',
 }
 
 const PAGE_SIZE = 100
@@ -95,6 +115,16 @@ export default function Logs() {
   const [search, setSearch] = useState('')
   const offsetRef = useRef(0)
   const syncingRef = useRef(false)
+  // 新到行:SSE 插入的事件 id → 到达时刻(6s 内保持"新到"标记)
+  const [recentIds, setRecentIds] = useState<Record<number, number>>({})
+
+  // 案卷链:行点击开事件案卷抽屉;?event= 深链自动开卷并高亮
+  const navigate = useNavigate()
+  const deepEventId = useEventParam()
+  const [dossierId, setDossierId] = useState<number | null>(null)
+  useEffect(() => {
+    if (deepEventId) setDossierId(deepEventId)
+  }, [deepEventId])
 
   useEventStreamLifecycle()
   const streamStatus = useEventStreamStore((s) => s.status)
@@ -149,8 +179,35 @@ export default function Logs() {
       && (e.type === 'security_event' || e.type === 'audit_complete' || e.type === 'audit_degraded')
     ))
     if (!relevant.length) return
+    // 新到行标记(5s 内视为"刚到",行播放色晕衰减)
+    const nowTs = Date.now()
+    setRecentIds((prev) => {
+      const next = { ...prev }
+      for (const evt of relevant) {
+        if (evt.type !== 'security_event') continue
+        const id = eventIdOf(evt.data)
+        if (id && next[id] === undefined) next[id] = nowTs
+      }
+      for (const k of Object.keys(next)) {
+        if (nowTs - next[Number(k)] > 6000) delete next[Number(k)]
+      }
+      return next
+    })
     setLogs((prev) => applyStreamEvents(prev, relevant))
   }, [arrivalTick, loading])
+
+  // 审计完成盖章:捕获 analyzed false→true 翻转(SSE 与 2s 轮询两个来源统一在此)
+  const prevAnalyzedRef = useRef<Map<number, boolean>>(new Map())
+  const [stampedIds, setStampedIds] = useState<Record<number, number>>({})
+  useEffect(() => {
+    const now = Date.now()
+    const additions: Record<number, number> = {}
+    for (const l of logs) {
+      if (prevAnalyzedRef.current.get(l.id) === false && l.analyzed) additions[l.id] = now
+    }
+    prevAnalyzedRef.current = new Map(logs.map((l) => [l.id, l.analyzed]))
+    if (Object.keys(additions).length) setStampedIds((s) => ({ ...s, ...additions }))
+  }, [logs])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return logs
@@ -175,6 +232,21 @@ export default function Logs() {
     }
     return { bySeverity, reviewed, degraded, pending: logs.length - reviewed - degraded }
   }, [logs])
+
+  // 近 24 小时接入分布(本地聚合,最右=当前小时)
+  const hourly = useMemo(() => {
+    const buckets = new Array(24).fill(0)
+    const now = Date.now()
+    for (const l of logs) {
+      const t = Date.parse(l.created_at)
+      if (!Number.isFinite(t)) continue
+      const ageH = (now - t) / 3_600_000
+      if (ageH < 0 || ageH >= 24) continue
+      buckets[23 - Math.floor(ageH)]++
+    }
+    return buckets
+  }, [logs])
+  const hourlyMax = Math.max(1, ...hourly)
 
   const syncLiveAudits = useCallback(async () => {
     if (syncingRef.current) return
@@ -263,19 +335,19 @@ export default function Logs() {
                 key={s}
                 onClick={() => setSeverity(active ? '' : s)}
                 aria-pressed={active}
-                className={`group relative text-left ${active ? '' : 'opacity-55 hover:opacity-100'}`}
+                className={`group relative text-left pl-3 pr-2 py-2 transition-colors ${active ? 'bg-vault' : 'opacity-55 hover:opacity-100'}`}
               >
                 <span
                   aria-hidden
-                  className={`absolute left-0 top-0 bottom-0 w-[2px] transition-opacity ${
-                    active ? 'opacity-100 bg-[#0e1a26]' : 'opacity-0 bg-transparent'
+                  className={`absolute left-0 top-0 bottom-0 w-[2px] transition-colors ${
+                    active ? 'bg-dusk-soft' : 'bg-transparent'
                   }`}
                 />
-                <p className="pl-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
+                <p className={`font-mono text-[10px] tracking-[0.22em] uppercase transition-colors ${active ? 'text-dusk-soft' : 'text-ink-faint'}`}>
                   {meta.label}
                 </p>
-                <p className={`mt-2 pl-3 font-serif text-[32px] font-black tabular-nums leading-none ${meta.num}`}>
-                  {stats.bySeverity[s]}
+                <p className={`mt-2 font-serif text-[32px] font-black tabular-nums leading-none transition-colors ${active ? 'text-[#f1e8d6]' : meta.num}`}>
+                  <CountUp value={stats.bySeverity[s]} from="previous" duration={500} />
                 </p>
               </button>
             )
@@ -308,6 +380,26 @@ export default function Logs() {
           </span>
         </div>
 
+        {/* 近 24 小时接入分布(本地聚合) */}
+        <div className="mb-5 border border-line bg-paper px-4 pb-2 pt-3">
+          <div className="flex items-center justify-between">
+            <p className="meta-caps">近 24 小时接入分布</p>
+            <span className="font-mono text-[10px] tabular-nums text-ink-faint">-24h → 现在 · 每柱 1 小时</span>
+          </div>
+          <div className="mt-2 flex h-10 items-end gap-1">
+            {hourly.map((n, i) => (
+              <div key={i} className="relative h-full flex-1 bg-mist/50" title={`${n} 条`}>
+                <motion.div
+                  className="absolute inset-x-0 bottom-0 bg-accent/70"
+                  initial={{ height: 0 }}
+                  animate={{ height: `${(n / hourlyMax) * 100}%` }}
+                  transition={{ duration: 0.45, delay: i * 0.015, ease: [0.22, 1, 0.36, 1] }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* 日志表格 */}
         {loading ? (
           <div className="text-center text-sm text-ink-faint py-20">加载中 …</div>
@@ -335,22 +427,47 @@ export default function Logs() {
                   <AnimatePresence initial={false}>
                     {filtered.map((log) => {
                       const meta = severityMeta[log.severity] || severityMeta.info
+                      const isNew = recentIds[log.id] !== undefined
+                      const deepLinked = deepEventId !== null && log.id === deepEventId
+                      const justStamped = stampedIds[log.id] !== undefined && Date.now() - stampedIds[log.id] < 1600
+                      const auditCls = `text-[11px] font-semibold ${
+                        log.audit_quality === 'llm' || !log.audit_quality
+                          ? 'text-accent'
+                          : log.audit_quality === 'tools' || log.audit_quality === 'rule'
+                            ? 'text-hui'
+                            : 'text-alert'
+                      }`
+                      const auditLabel = log.audit_quality === 'llm' || !log.audit_quality
+                        ? 'LLM'
+                        : log.audit_quality === 'tools' || log.audit_quality === 'rule'
+                          ? '规则'
+                          : '降级'
                       return (
                         <motion.tr
                           key={log.id}
                           data-event-id={log.id}
                           data-analyzed={log.analyzed ? '1' : '0'}
                           layout
-                          initial={{ opacity: 0, y: -6 }}
-                          animate={{ opacity: 1, y: 0 }}
+                          onClick={() => setDossierId(log.id)}
+                          initial={isNew
+                            ? { opacity: 0, y: -10, backgroundColor: SEV_TINT[log.severity] ?? SEV_TINT.info }
+                            : { opacity: 0, y: -6 }}
+                          animate={isNew
+                            ? { opacity: 1, y: 0, backgroundColor: 'rgba(0,0,0,0)' }
+                            : { opacity: 1, y: 0 }}
                           exit={{ opacity: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="hover:bg-mist/25 transition-colors align-top"
+                          transition={isNew ? { duration: 1.5 } : { duration: 0.2 }}
+                          style={{
+                            ...(isNew ? { boxShadow: `inset 3px 0 0 ${SEV_BORDER[log.severity] ?? SEV_BORDER.info}` } : {}),
+                            ...(deepLinked ? { backgroundColor: 'rgba(58, 101, 112, 0.07)', boxShadow: 'inset 3px 0 0 #3a6570' } : {}),
+                          }}
+                          className="group cursor-pointer hover:bg-mist/25 transition-colors align-top"
                         >
                           <td className="px-5 py-3">
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${meta.badge}`}>
                               <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
                               {meta.label}
+                              {isNew && <span className="ml-0.5 animate-pulse text-[9px] tracking-[0.14em]">NEW</span>}
                             </span>
                           </td>
                           <td className="px-5 py-3 font-medium text-ink whitespace-nowrap">{log.event_type}</td>
@@ -364,22 +481,30 @@ export default function Logs() {
                                 ⚠ 异常 {log.anomaly_score?.toFixed(2)}
                               </span>
                             )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                navigate(eventHref.monitor(log.id))
+                              }}
+                              className="mt-1 block text-[11px] font-medium text-accent opacity-0 transition-opacity group-hover:opacity-100"
+                            >
+                              思维链 →
+                            </button>
                           </td>
                           <td className="px-5 py-3 whitespace-nowrap">
                             {log.analyzed ? (
-                              <span className={`text-[11px] font-semibold ${
-                                log.audit_quality === 'llm' || !log.audit_quality
-                                  ? 'text-accent'
-                                  : log.audit_quality === 'tools' || log.audit_quality === 'rule'
-                                    ? 'text-hui'
-                                    : 'text-alert'
-                              }`}>
-                                {log.audit_quality === 'llm' || !log.audit_quality
-                                  ? 'LLM'
-                                  : log.audit_quality === 'tools' || log.audit_quality === 'rule'
-                                    ? '规则'
-                                    : '降级'}
-                              </span>
+                              justStamped ? (
+                                <motion.span
+                                  initial={{ scale: 1.4, opacity: 0.4 }}
+                                  animate={{ scale: 1, opacity: 1 }}
+                                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                                  className={`inline-block ${auditCls}`}
+                                >
+                                  {auditLabel}
+                                </motion.span>
+                              ) : (
+                                <span className={auditCls}>{auditLabel}</span>
+                              )
                             ) : (
                               <span className="text-ink-faint text-[11px] font-semibold">审核中</span>
                             )}
@@ -405,6 +530,9 @@ export default function Logs() {
             )}
           </div>
         )}
+
+        {/* 事件案卷抽屉(案卷链) */}
+        <EventDossier eventId={dossierId} onClose={() => setDossierId(null)} />
     </PageFrame>
   )
 }

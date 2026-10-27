@@ -2,6 +2,13 @@ import type { DependencyHealth } from '../types'
 
 const BASE = '/api'
 
+// kiosk(作战大屏 /screen):401 不再整页跳登录 —— 幕布在任何认证状态下都保持在线,
+// 掉下来的数据区各自显示空态,由大屏回放口径兜底。
+let kioskMode = false
+export function setKioskMode(v: boolean) {
+  kioskMode = v
+}
+
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('sm_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
@@ -21,7 +28,7 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
     const hadToken = !!localStorage.getItem('sm_token')
     localStorage.removeItem('sm_token')
     localStorage.removeItem('sm_user')
-    if (hadToken && !window.location.pathname.startsWith('/login')) {
+    if (hadToken && !kioskMode && !window.location.pathname.startsWith('/login')) {
       window.location.href = '/login'
     }
     throw new Error('认证已过期，请重新登录')
@@ -824,4 +831,32 @@ export const api = {
 
   selfPlayReviewRun: (limit = 20) =>
     fetchJSON<any>(`/self-play/review/run?limit=${limit}`, { method: 'POST' }),
+
+  // ── 评测战绩(docs/benchmark 只读暴露)──
+  benchmarkReports: () =>
+    fetchJSON<BenchmarkReports>('/benchmark/reports'),
+
+  // ── 演示数据供给(demo-seed 标注,可清空)──
+  demoSeed: (scene: 'all' | 'sensing' | 'ops' | 'kpi' = 'all') =>
+    fetchJSON<{ seeded: Record<string, number>; skipped: string[] }>('/demo/seed', {
+      method: 'POST',
+      body: JSON.stringify({ scene }),
+    }),
+  demoSeedClear: () =>
+    fetchJSON<{ deleted: Record<string, number> }>('/demo/seed/clear', { method: 'POST' }),
+  demoSeedStatus: () =>
+    fetchJSON<Record<string, number>>('/demo/seed/status'),
+}
+
+export interface BenchmarkReport {
+  key: string
+  title: string
+  file: string
+  scope_note: string
+  data: Record<string, any>
+}
+
+export interface BenchmarkReports {
+  reports: BenchmarkReport[]
+  source: string
 }

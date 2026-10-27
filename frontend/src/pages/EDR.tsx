@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { PageFrame, tabOn, tabOff } from '../components/common/PageFrame'
 import { api } from '../lib/api'
+import { StatBand } from '../components/common/StatBand'
 
 interface EdrEvent {
   id: number
@@ -33,6 +34,8 @@ const sevColor: Record<string, string> = {
 export default function EDR() {
   const [events, setEvents] = useState<EdrEvent[]>([])
   const [sourceFilter, setSourceFilter] = useState('all')
+  const [loadError, setLoadError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
   const [actionMsg, setActionMsg] = useState('')
 
   const runContainment = async (action: string, params: Record<string, unknown>) => {
@@ -46,8 +49,8 @@ export default function EDR() {
   }
 
   useEffect(() => {
-    api.get('/edr/events?limit=100').then(setEvents).catch(() => {})
-  }, [])
+    api.get('/edr/events?limit=100').then(setEvents).then(() => setLoadError('')).catch((e: any) => setLoadError(e?.message || '加载失败'))
+  }, [refreshKey])
 
   const filtered =
     sourceFilter === 'all'
@@ -73,6 +76,14 @@ export default function EDR() {
         </nav>
       }
     >
+      <StatBand
+        items={[
+          { label: '终端事件', value: events.length },
+          { label: '高危及以上', value: events.filter((e) => e.severity === 'critical' || e.severity === 'high').length, tone: 'alert' as const },
+          { label: 'MITRE 技术种数', value: new Set(events.map((e) => e.mitre_technique).filter(Boolean)).size },
+          { label: '近 24 小时', value: events.filter((e) => Date.now() - Date.parse(e.created_at) < 86400000).length },
+        ]}
+      />
       <div className="border border-line bg-paper">
         {filtered.map((e, i) => (
           <article
@@ -194,6 +205,20 @@ export default function EDR() {
         {actionMsg && (
           <div className="border-t border-line px-6 py-3 font-mono text-[11px] tracking-[0.18em] uppercase text-ink-soft">
             {actionMsg}
+          </div>
+        )}
+        {loadError && (
+          <div className="mx-6 my-4 border border-warn/40 bg-warn/5 px-5 py-4 text-center">
+            <p className="text-[13px] text-warn">加载失败:{loadError}</p>
+            <button
+              onClick={() => setRefreshKey((k) => k + 1)}
+              className="mt-2 border border-line px-3 py-1.5 text-[11px] text-ink transition-colors hover:border-accent hover:text-accent"
+            >
+              重试
+            </button>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+              后端不可达已与「暂无数据」区分;可点上方「演示补给」一键灌入演示数据。
+            </p>
           </div>
         )}
         {filtered.length === 0 && (

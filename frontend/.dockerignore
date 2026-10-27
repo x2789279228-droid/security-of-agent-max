@@ -1,0 +1,14 @@
+# 2026-10-26: 宿主机 frontend/node_modules 是 **Windows 版**(含平台相关二进制,
+# 如 esbuild 的 .exe) —— Dockerfile 的 `COPY . .` 会把它覆盖到镜像里
+# npm ci 装好的 Linux node_modules 之上 ⇒ `npx vite build` 在容器里直接失败。
+# dist 同理: 镜像内由 vite 重新生成, 宿主的产物不应进构建上下文。
+#
+# 注意: **不要排除 .gitignore** —— CI 的构建上下文里它是存在的, 而
+# Tailwind v4 扫描源码时遵守 .gitignore; 排除它会让容器构建的扫描范围
+# 与 CI/本地不一致(工具类集合不同 ⇒ 产物哈希不同)。
+node_modules
+dist
+.git
+*.log
+npm-debug.log*
+.vite

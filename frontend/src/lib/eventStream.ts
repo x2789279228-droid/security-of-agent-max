@@ -33,6 +33,9 @@ export const EVENT_META: Record<string, { label: string; badge: string }> = {
   alert:                     { label: '告警',     badge: 'border border-alert/50 bg-alert/15 text-alert' },
   agent_stage:               { label: 'Agent 阶段', badge: 'border border-hui/45 bg-hui/10 text-hui' },
   agent_thought:             { label: '思维步骤', badge: 'border border-line bg-mist text-ink-faint' },
+  agent_tick:                { label: 'Agent 实况', badge: 'border border-accent/40 bg-accent/5 text-accent' },
+  ledger:                    { label: '零丢失账本', badge: 'border border-ok/40 bg-ok/10 text-ok' },
+  attack_geo:                { label: '攻击态势', badge: 'border border-alert/40 bg-alert/10 text-alert' },
   audit_complete:            { label: '审计完成', badge: 'border border-accent/35 bg-accent/5 text-accent' },
   audit_degraded:            { label: '审计降级', badge: 'border border-warn/45 bg-warn/10 text-warn' },
   response_action:           { label: '响应执行', badge: 'border border-warn/45 bg-warn/10 text-warn' },
@@ -151,7 +154,10 @@ let flushTimer: ReturnType<typeof setTimeout> | undefined
 function flushBatch() {
   flushTimer = undefined
   if (!pendingBatch.length) return
-  const batch = pendingBatch.reverse() // 到达序（旧→新）→ 渲染序（新→旧）
+  // 到达序（旧→新）→ 渲染序（新→旧）。必须先拷贝再反转:
+  // reverse() 原地反转并返回同一引用,直接 truncate pendingBatch 会把 batch 一并清空,
+  // 缓冲将永远为空(实时事件流整体失效,自 5ef2ae1 引入)。
+  const batch = pendingBatch.slice().reverse()
   pendingBatch.length = 0
   const st = useEventStreamStore.getState()
   let buffer = [...batch, ...st.buffer]
@@ -192,6 +198,26 @@ function flushBatch() {
 function enqueue(evt: StreamEvent) {
   pendingBatch.push(evt)
   if (!flushTimer) flushTimer = setTimeout(flushBatch, FLUSH_INTERVAL_MS)
+}
+
+/**
+ * 大屏回放注入(幕布续命) — 后端失联时由 BattleScreen 驱动的合成事件,
+ * 走同一条 ingest 管线让整面墙(事件流/接力条/思维链)继续呼吸。
+ * 与真实事件可区分:seq=0(不可跳案卷)、dedupKey 带 w: 前缀、replay 标记,
+ * 且不触碰业务游标/断线续传/arrivalTick —— 统计口径仍是真实的。
+ */
+export function injectWallReplay(type: string, data: any) {
+  localId += 1
+  enqueue({
+    id: localId,
+    seq: 0,
+    dedupKey: `w:${localId}`,
+    kind: 'event',
+    type,
+    data,
+    ts: Date.now(),
+    replay: true,
+  })
 }
 
 /** 合成标记行（空洞/重启）；避免连续重复堆叠 */

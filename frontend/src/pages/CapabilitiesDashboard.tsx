@@ -157,6 +157,11 @@ export default function CapabilitiesDashboard() {
           暂无能力状态数据（调用 <span className="font-mono">/api/capabilities/status</span>）。
         </p>
       )}
+
+      {/* 演示数据口径披露(P3) */}
+      <p className="mt-6 border-t border-line pt-3 font-mono text-[10px] leading-relaxed tracking-[0.08em] text-ink-faint">
+        口径说明:演示环境部分感知/运营数据可由 /api/demo/seed 灌入,行级标注 demo-seed,可一键清空,与真实数据严格分离。
+      </p>
     </PageFrame>
   )
 }
