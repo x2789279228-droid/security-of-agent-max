@@ -1,0 +1,104 @@
+[
+  {
+    "id": 101,
+    "timestamp": "2026-10-27T02:00:30+00:00",
+    "host": "TEST-VM",
+    "src_ip": "10.0.20.5",
+    "techniques": [
+      "T1059"
+    ],
+    "event_type": "process_create",
+    "severity": "high"
+  },
+  {
+    "id": 102,
+    "timestamp": "2026-10-27T02:05:30+00:00",
+    "host": "TEST-VM",
+    "src_ip": "10.0.20.5",
+    "techniques": [
+      "T1110"
+    ],
+    "event_type": "logon_fail_burst",
+    "severity": "high"
+  },
+  {
+    "id": 103,
+    "timestamp": "2026-10-27T02:10:30+00:00",
+    "host": "TEST-VM",
+    "src_ip": "10.0.20.5",
+    "techniques": [],
+    "event_type": "schtasks_create",
+    "severity": "medium"
+  },
+  {
+    "id": 104,
+    "timestamp": "2026-10-27T02:15:30+00:00",
+    "host": "TEST-VM",
+    "src_ip": "10.0.20.5",
+    "techniques": [
+      "T1071"
+    ],
+    "event_type": "dns_beacon_suspect",
+    "severity": "medium"
+  },
+  {
+    "id": 105,
+    "timestamp": "2026-10-27T02:20:30+00:00",
+    "host": "TEST-VM",
+    "src_ip": "10.0.20.5",
+    "techniques": [],
+    "event_type": "port_scan_internal",
+    "severity": "medium"
+  },
+  {
+    "id": 106,
+    "timestamp": "2026-10-27T02:02:00+00:00",
+    "host": "OTHER-PC",
+    "src_ip": "10.0.20.9",
+    "techniques": [
+      "T1078"
+    ],
+    "event_type": "valid_account_login",
+    "severity": "low"
+  },
+  {
+    "id": 107,
+    "timestamp": "2026-10-27T02:30:00+00:00",
+    "host": "TEST-VM",
+    "src_ip": "10.0.20.5",
+    "techniques": [
+      "T1136"
+    ],
+    "event_type": "account_created",
+    "severity": "medium"
+  },
+  {
+    "id": 108,
+    "timestamp": "2026-10-27T02:31:00+00:00",
+    "host": "TEST-VM",
+    "src_ip": "10.0.20.5",
+    "techniques": [
+      "T1027"
+    ],
+    "event_type": "encoded_utility",
+    "severity": "low"
+  },
+  {
+    "id": 109,
+    "timestamp": "2026-10-27T02:40:00+00:00",
+    "host": "OTHER-PC",
+    "src_ip": "10.0.20.9",
+    "techniques": [],
+    "event_type": "noise",
+    "severity": "info"
+  },
+  {
+    "id": 110,
+    "timestamp": "2026-10-27T02:41:00+00:00",
+    "host": "OTHER-PC",
+    "src_ip": "10.0.20.9",
+    "techniques": [],
+    "event_type": "noise2",
+    "severity": "info"
+  }
+]

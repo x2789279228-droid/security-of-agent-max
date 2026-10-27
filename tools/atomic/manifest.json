@@ -1,0 +1,69 @@
+{
+  "note": "路线1 首批 Atomic 执行清单 —— 按'平台已有检测面'选型, 命令仅在测试虚机执行(SwiftOnSecurity Sysmon 配置下)。expected_visibility 是对账 Sysmon/Windows 日志的依据。",
+  "runs": [
+    {
+      "technique": "T1110.001",
+      "atomic": 3,
+      "executor": "cmd",
+      "command": "net use \\\\127.0.0.1\\IPC$ /user:fakeadmin WrongPass!123 && net use \\\\127.0.0.1\\IPC$ /delete",
+      "expected_visibility": ["Security/4625"],
+      "description": "本机 IPC$ 错误口令尝试 → 失败登录审计事件"
+    },
+    {
+      "technique": "T1059.001",
+      "atomic": 2,
+      "executor": "cmd",
+      "command": "powershell -NoProfile -EncodedCommand RwBlAHQALQBQAHIAbwBjAGUAcwBzAA==",
+      "expected_visibility": ["Sysmon/1"],
+      "description": "PowerShell -EncodedCommand 执行 Get-Process → 进程创建事件"
+    },
+    {
+      "technique": "T1053.005",
+      "atomic": 2,
+      "executor": "cmd",
+      "command": "schtasks /create /tn AtomicT1053 /tr \"cmd /c echo atomic\" /sc once /st 23:45 && schtasks /delete /tn AtomicT1053 /f",
+      "expected_visibility": ["Sysmon/1", "Security/4698"],
+      "description": "计划任务创建+删除 → 进程与任务调度审计"
+    },
+    {
+      "technique": "T1087.001",
+      "atomic": 1,
+      "executor": "cmd",
+      "command": "net user",
+      "expected_visibility": ["Sysmon/1"],
+      "description": "账户枚举 → net.exe 进程事件"
+    },
+    {
+      "technique": "T1046",
+      "atomic": 3,
+      "executor": "powershell",
+      "command": "powershell -NoProfile -c \"445,3389,22 | ForEach-Object { Test-NetConnection -ComputerName 127.0.0.1 -Port $_ -InformationLevel Quiet -WarningAction SilentlyContinue }\"",
+      "expected_visibility": ["Sysmon/3"],
+      "description": "本机多端口探测 → 网络连接事件"
+    },
+    {
+      "technique": "T1071.004",
+      "atomic": 1,
+      "executor": "cmd",
+      "command": "nslookup -type=A atomic-beacon-1.invalid 127.0.0.1 && nslookup -type=A atomic-beacon-2.invalid 127.0.0.1",
+      "expected_visibility": ["Sysmon/22"],
+      "description": "DNS 查询序列 → DNS Query 事件(beacon 周期性素材)"
+    },
+    {
+      "technique": "T1136.001",
+      "atomic": 3,
+      "executor": "cmd",
+      "command": "net user AtomicTest_U Xx9!qWas /add && net user AtomicTest_U /delete",
+      "expected_visibility": ["Security/4720", "Security/4726"],
+      "description": "本地账户新建+删除(需管理员) → 账户管理审计"
+    },
+    {
+      "technique": "T1027",
+      "atomic": 1,
+      "executor": "cmd",
+      "command": "cmd /c echo atomic-test-payload > %TEMP%\\atomic_t1027.txt && certutil -encode %TEMP%\\atomic_t1027.txt %TEMP%\\atomic_t1027.b64 && del %TEMP%\\atomic_t1027.txt %TEMP%\\atomic_t1027.b64",
+      "expected_visibility": ["Sysmon/1", "Sysmon/11"],
+      "description": "certutil 编码(混淆/暂存规避) → 进程与文件创建事件"
+    }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "runs_n": 7,
+  "alerts_n": 10,
+  "techniques_n": 7,
+  "techniques_detected": 6,
+  "coverage": 0.8571,
+  "per_technique": {
+    "T1046": {
+      "runs": 1,
+      "detected": 1,
+      "match_kinds": [
+        "host+window"
+      ]
+    },
+    "T1053": {
+      "runs": 1,
+      "detected": 1,
+      "match_kinds": [
+        "host+window"
+      ]
+    },
+    "T1059": {
+      "runs": 1,
+      "detected": 1,
+      "match_kinds": [
+        "host+window",
+        "technique"
+      ]
+    },
+    "T1071": {
+      "runs": 1,
+      "detected": 1,
+      "match_kinds": [
+        "host+window",
+        "technique"
+      ]
+    },
+    "T1087": {
+      "runs": 1,
+      "detected": 1,
+      "match_kinds": [
+        "host+window"
+      ]
+    },
+    "T1110": {
+      "runs": 1,
+      "detected": 1,
+      "match_kinds": [
+        "host+window",
+        "technique"
+      ]
+    },
+    "T1505": {
+      "runs": 1,
+      "detected": 0,
+      "match_kinds": []
+    }
+  },
+  "per_run": [
+    {
+      "run_id": "run-1-T1059.001",
+      "technique": "T1059.001",
+      "host": "TEST-VM",
+      "detected": true,
+      "matches": [
+        {
+          "alert_id": 101,
+          "match": "technique",
+          "techniques": [
+            "T1059"
+          ]
+        },
+        {
+          "alert_id": 102,
+          "match": "host+window",
+          "techniques": [
+            "T1110"
+          ]
+        },
+        {
+          "alert_id": 103,
+          "match": "host+window",
+          "techniques": []
+        }
+      ]
+    },
+    {
+      "run_id": "run-2-T1110.001",
+      "technique": "T1110.001",
+      "host": "TEST-VM",
+      "detected": true,
+      "matches": [
+        {
+          "alert_id": 102,
+          "match": "technique",
+          "techniques": [
+            "T1110"
+          ]
+        },
+        {
+          "alert_id": 103,
+          "match": "host+window",
+          "techniques": []
+        },
+        {
+          "alert_id": 104,
+          "match": "host+window",
+          "techniques": [
+            "T1071"
+          ]
+        }
+      ]
+    },
+    {
+      "run_id": "run-3-T1053.005",
+      "technique": "T1053.005",
+      "host": "TEST-VM",
+      "detected": true,
+      "matches": [
+        {
+          "alert_id": 103,
+          "match": "host+window",
+          "techniques": []
+        },
+        {
+          "alert_id": 104,
+          "match": "host+window",
+          "techniques": [
+            "T1071"
+          ]
+        },
+        {
+          "alert_id": 105,
+          "match": "host+window",
+          "techniques": []
+        }
+      ]
+    },
+    {
+      "run_id": "run-4-T1071.004",
+      "technique": "T1071.004",
+      "host": "TEST-VM",
+      "detected": true,
+      "matches": [
+        {
+          "alert_id": 104,
+          "match": "technique",
+          "techniques": [
+            "T1071"
+          ]
+        },
+        {
+          "alert_id": 105,
+          "match": "host+window",
+          "techniques": []
+        }
+      ]
+    },
+    {
+      "run_id": "run-5-T1046",
+      "technique": "T1046",
+      "host": "TEST-VM",
+      "detected": true,
+      "matches": [
+        {
+          "alert_id": 105,
+          "match": "host+window",
+          "techniques": []
+        },
+        {
+          "alert_id": 107,
+          "match": "host+window",
+          "techniques": [
+            "T1136"
+          ]
+        },
+        {
+          "alert_id": 108,
+          "match": "host+window",
+          "techniques": [
+            "T1027"
+          ]
+        }
+      ]
+    },
+    {
+      "run_id": "run-6-T1087.001",
+      "technique": "T1087.001",
+      "host": "TEST-VM",
+      "detected": true,
+      "matches": [
+        {
+          "alert_id": 107,
+          "match": "host+window",
+          "techniques": [
+            "T1136"
+          ]
+        },
+        {
+          "alert_id": 108,
+          "match": "host+window",
+          "techniques": [
+            "T1027"
+          ]
+        }
+      ]
+    },
+    {
+      "run_id": "run-7-T1505",
+      "technique": "T1505.003",
+      "host": "TEST-VM",
+      "detected": false,
+      "matches": []
+    }
+  ],
+  "missed": [
+    "run-7-T1505"
+  ]
+}
