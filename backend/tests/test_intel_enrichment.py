@@ -160,20 +160,28 @@ def test_cve_allowed_by_ingest_normalize():
 # ── 3. matcher cve 匹配 ──
 
 def test_matcher_cve_exact_match():
-    ioc_matcher._cache["cve-2021-44228"] = IocHit(
+    """CVE 精确匹配口径。
+
+    ⚠️ 用全新实例而非全局单例: 单例的缓存/刷新时钟被同进程其它测试共享,
+    全量跑时别的测试会 refresh_cache 清掉直接注入的条目(实测全量跑翻车,
+    单跑必绿 —— 隔离后确定性)。
+    """
+    import time as _time
+
+    from threat_intel.ioc_matcher import IocMatcher
+
+    m = IocMatcher()
+    m._cache["cve-2021-44228"] = IocHit(
         ioc_type="cve", ioc_value="cve-2021-44228",
         threat_type="Apache Log4j2 RCE", severity="critical",
         confidence=0.95, source="cisa-kev",
     )
-    try:
-        hits = _run(ioc_matcher.match(cve="CVE-2021-44228"))
-        assert len(hits) == 1
-        assert hits[0].severity == "critical"
-        # 刷新间隔内的重复查询不再回源 —— 直接查缓存口径
-        assert _run(ioc_matcher.match(cve="cve-2021-44228"))
-        assert not _run(ioc_matcher.match(cve="CVE-2099-0000"))
-    finally:
-        ioc_matcher._cache.pop("cve-2021-44228", None)
+    m._last_refresh = _time.time()  # 钉住: 禁止 auto-refresh 回源清缓存
+    hits = _run(m.match(cve="CVE-2021-44228"))
+    assert len(hits) == 1
+    assert hits[0].severity == "critical"
+    assert _run(m.match(cve="cve-2021-44228"))
+    assert not _run(m.match(cve="CVE-2099-0000"))
 
 
 # ── 4/5. 富化入口契约 + KEV 提级 ──
