@@ -60,6 +60,7 @@ MRR=0.9917（回归基线语义）。**四个"宣称缺口"变成"有报告、�
 | 交付物 | 命令 |
 |---|---|
 | 情报接线+富化 | `bash tools/seed-free-intel-feeds.sh`（需网） |
+| ATT&CK 知识库导入 | `POST /api/rag/import/mitre`（admin；源=官方 attack-stix-data bundle，mitre_importer.py 内置） |
 | RAG 词法基线 | `python -m eval_datasets.evaluate_rag --out ../docs/benchmark` |
 | pcap 回放 | `python -m eval_datasets.replay_pcap_suricata --out ../docs/benchmark` |
 | ATT&CK 覆盖 | `python -m eval_datasets.evaluate_attack_coverage --ground-truth <gt> --alerts <export> --out ../docs/benchmark` |
