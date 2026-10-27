@@ -35,6 +35,55 @@ from agents.sub_auditor import sub_auditor, ChunkVerdict
 logger = logging.getLogger(__name__)
 
 
+def _publish_tool_tick(tc: ToolCall, result: ToolResult) -> None:
+    """逐工具完成 → agent_tick 实况事件。失败静默，绝不阻断审计。"""
+    try:
+        from observability.thought_events import build_tool_tick_step, publish_tick
+        step = build_tool_tick_step(
+            tc.tool,
+            success=result.success,
+            duration_ms=result.duration_ms,
+            security_denied=result.security_denied,
+            timed_out=result.timed_out,
+            param_rejected=result.param_rejected,
+        )
+        if step:
+            publish_tick(step)
+    except Exception as e:
+        logger.debug(f"tool tick failed: {e}")
+
+
+def _publish_chunk_tick(
+    chunk: AuditChunk,
+    *,
+    index: int,
+    total: int,
+    verdict: Optional[ChunkVerdict] = None,
+    status: str = "success",
+    summary: str = "",
+    duration_ms: float = 0.0,
+) -> None:
+    """逐块（SubAuditor）完成 → agent_tick 实况事件。失败静默。"""
+    try:
+        from observability.thought_events import build_chunk_tick_step, publish_tick
+        step = build_chunk_tick_step(
+            chunk.chunk_id,
+            index=index,
+            total=total,
+            threat_detected=bool(verdict.threat_detected) if verdict else False,
+            confidence=float(verdict.confidence or 0.0) if verdict else 0.0,
+            severity=(verdict.severity if verdict else "info") or "info",
+            label=chunk.label,
+            summary=summary,
+            status=status,
+            duration_ms=duration_ms,
+        )
+        if step:
+            publish_tick(step)
+    except Exception as e:
+        logger.debug(f"chunk tick failed: {e}")
+
+
 class Executor:
     """
     执行者（分块审核版）
@@ -70,7 +119,12 @@ class Executor:
         # 2. 并行执行 data 工具
         if data_calls:
             logger.info(f"Executor: executing {len(data_calls)} tools in parallel")
-            data_results = await self._execute_parallel(data_calls, session)
+            # 实况 tick 仅 LLM 车道发射：tools_only/rule_close 占审计大头
+            # (~76%)，逐工具 tick 会以每秒百条的量级刷爆 SSE bulk 车道；
+            # 可视化主秀是 LLM 流水线，规则车道保持原有阶段级 start/end。
+            data_results = await self._execute_parallel(
+                data_calls, session, emit_ticks=not skip_llm,
+            )
             all_results.extend(data_results)
 
         # 3. 从工具结果中提取事件数据 + 攻击链 ID
@@ -375,9 +429,14 @@ class Executor:
         return audit_result
 
     async def _execute_parallel(
-        self, tool_calls: list[ToolCall], session: AsyncSession
+        self, tool_calls: list[ToolCall], session: AsyncSession,
+        *, emit_ticks: bool = False,
     ) -> list[ToolResult]:
-        """并行执行工具调用（每个工具独立 session，避免 AsyncSession 并发冲突）"""
+        """并行执行工具调用（每个工具独立 session，避免 AsyncSession 并发冲突）
+
+        emit_ticks: 逐工具完成时发 agent_tick 实况事件（LLM 车道专用，
+        见 execute() 内的闸门注释）。
+        """
         from models import async_session as db_session
 
         async def execute_one(tc: ToolCall) -> ToolResult:
@@ -459,6 +518,8 @@ class Executor:
                     duration_ms=round(duration, 1),
                 )
             self._emit_tool_telemetry(tc, result, log_args)
+            if emit_ticks:
+                _publish_tool_tick(tc, result)
             return result
 
         # return_exceptions=True：任何意外异常都不拖垮整批工具调用，
@@ -486,6 +547,8 @@ class Executor:
                     k: v for k, v in dict(tc.args or {}).items()
                     if k != "session" and not str(k).startswith("_")
                 })
+                if emit_ticks:
+                    _publish_tool_tick(tc, crashed)
                 finalized.append(crashed)
             else:
                 finalized.append(r)
@@ -871,9 +934,29 @@ class Executor:
             return []
 
         kb = knowledge_chunks or []
-        tasks = [
-            sub_auditor.audit(chunk, knowledge_chunks=kb) for chunk in chunks
-        ]
+
+        async def _run_chunk(i: int, chunk: AuditChunk):
+            """单块审核 + 完成即发实况 tick（逐块完成时刻自然错开，
+            前端 DAG 能看到 SubAuditor 节点逐个点亮）。"""
+            t0 = time.time()
+            try:
+                verdict = await sub_auditor.audit(chunk, knowledge_chunks=kb)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                _publish_chunk_tick(
+                    chunk, index=i, total=len(chunks), status="error",
+                    summary=f"审核异常: {type(e).__name__}",
+                    duration_ms=(time.time() - t0) * 1000,
+                )
+                raise
+            _publish_chunk_tick(
+                chunk, index=i, total=len(chunks), verdict=verdict,
+                duration_ms=(time.time() - t0) * 1000,
+            )
+            return verdict
+
+        tasks = [_run_chunk(i, chunk) for i, chunk in enumerate(chunks)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         verdicts: list[ChunkVerdict] = []

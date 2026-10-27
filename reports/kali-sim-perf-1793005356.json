@@ -1,0 +1,62 @@
+{
+  "started_at": "2026-10-26T01:02:35Z",
+  "api": "http://host.docker.internal:8001",
+  "session_id": "kali-simperf-1793005356",
+  "constraints": "no hydra/sqlmap/msf/exploit payloads; TCP connect scan of platform ports only",
+  "resolved_host": "192.168.65.254",
+  "health": {
+    "status": 200,
+    "body": {
+      "status": "ok",
+      "services": {
+        "llm": "MiniMax-M2.7",
+        "embedding": "embo-01",
+        "kafka": "enabled",
+        "kafka_bootstrap": "kafka:9092"
+      }
+    },
+    "latency_ms": 10.0
+  },
+  "nmap": {
+    "cmd": "nmap -sT -Pn -T4 -p 8001,3001,2222,9093 192.168.65.254",
+    "rc": 0,
+    "elapsed_ms": 50.6,
+    "stdout": "Starting Nmap 7.991 ( https://nmap.org ) at 2026-10-26 01:02 +0000\nNmap scan report for host.docker.internal (192.168.65.254)\nHost is up (0.0022s latency).\n\nPORT     STATE  SERVICE\n2222/tcp closed EtherNetIP-1\n3001/tcp open   nessus\n8001/tcp open   vcom-tunnel\n9093/tcp open   copycat\n\nNmap done: 1 IP address (1 host up) scanned in 0.03 seconds\n",
+    "stderr": ""
+  },
+  "ingest": {
+    "batch_status": 200,
+    "batch_latency_ms": 104.9,
+    "ok": 8,
+    "fail": 0,
+    "count": 8,
+    "avg_ms": 104.7,
+    "p95_ms": 104.7,
+    "response": {
+      "session_id": "kali-simperf-1793005356",
+      "status": "batch_ingested",
+      "count": 8,
+      "retrying": 0,
+      "failed": 0,
+      "chunks": 1
+    }
+  },
+  "log_status": {
+    "http": 200,
+    "latency_ms": 138.7,
+    "body": {
+      "session_id": "kali-simperf-1793005356",
+      "total_events": 8,
+      "analyzed": 0,
+      "pending": 8,
+      "by_severity": {
+        "critical": 1,
+        "high": 3,
+        "info": 2,
+        "low": 1,
+        "medium": 1
+      }
+    }
+  },
+  "finished_at": "2026-10-26T01:02:36Z"
+}

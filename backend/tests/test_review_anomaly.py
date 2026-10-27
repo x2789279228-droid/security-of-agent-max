@@ -153,8 +153,13 @@ class TestQ6WeightedScore:
         上游 severity 是**上下文**，不是独立检测证据（整改方案 §七.4）。
         """
         assert abs(sum(DIMENSION_WEIGHTS.values()) - 1.0) < 1e-9
-        assert abs(EVIDENCE_TOTAL - 0.70) < 1e-9
-        assert abs(CONTEXT_TOTAL - 0.30) < 1e-9
+        # 证据/上下文的质量分配是**标定参数**（2026-10-25 severity_shift
+        # 接入时全量重归一：0.70/0.30 → 0.74/0.26）；本条钉住的不变量是
+        # 「全量权重和 = 1.0」（声明一致性）与「角色不混」（基线相对 →
+        # 证据；上游静态先验 → 上下文）。
+        assert abs(EVIDENCE_TOTAL - 0.74) < 1e-9
+        assert abs(CONTEXT_TOTAL - 0.26) < 1e-9
+        assert abs(EVIDENCE_TOTAL + CONTEXT_TOTAL - 1.0) < 1e-9
         assert set(EVIDENCE_DIMENSIONS) & set(CONTEXT_DIMENSIONS) == set()
         assert "severity_prior" in CONTEXT_DIMENSIONS
         assert "statistical_deviation" in EVIDENCE_DIMENSIONS
@@ -240,9 +245,12 @@ class TestQ6WeightedScore:
             "证据充分的老实体分数反而更低 —— 权重口径有问题"
         assert r_old.is_anomaly is True
         assert r_new.is_anomaly is False
-        # 证据维度的实际权重分母恒定
+        # 证据维度的实际权重分母恒定。
+        # effective_weights 是 4 位显示口径（round(v,4)），比较全精度值时
+        # 容差必须容纳显示舍入（abs=1e-4），默认 rel 容差会太紧。
         assert r_old.effective_weights["statistical_deviation"] == \
-            pytest.approx(EVIDENCE_DIMENSIONS["statistical_deviation"] / EVIDENCE_TOTAL)
+            pytest.approx(EVIDENCE_DIMENSIONS["statistical_deviation"] / EVIDENCE_TOTAL,
+                          abs=1e-4)
 
     def test_q6_5_severity_is_context_not_evidence(self):
         """[FIXED] severity 只作为上下文加成，权重 0.15，且不能独立发起告警。

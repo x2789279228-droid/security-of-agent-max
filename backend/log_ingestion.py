@@ -867,7 +867,7 @@ class LogIngestor:
                         )
 
                         # ── Layer 1: Decomposer ──
-                        with pipeline_tracer.span("decomposer", event_id=event_id, session_id=session_id):
+                        with pipeline_tracer.span("decomposer", event_id=event_id, session_id=session_id, metadata={"round": round_num}):
                             decomp_output = await decomposer.decompose(
                                 event=log_data,
                                 session_id=session_id,
@@ -889,7 +889,7 @@ class LogIngestor:
                             break
 
                         # ── Layer 2: Tool Builder ──
-                        with pipeline_tracer.span("tool_builder", event_id=event_id, session_id=session_id):
+                        with pipeline_tracer.span("tool_builder", event_id=event_id, session_id=session_id, metadata={"round": round_num}):
                             tool_calls = tool_builder.build(sub_tasks, session_id)
                         emit_tool_map(
                             sub_tasks, tool_calls,
@@ -897,7 +897,7 @@ class LogIngestor:
                         )
 
                         # ── Layer 3: Executor ──
-                        with pipeline_tracer.span("executor", event_id=event_id, session_id=session_id):
+                        with pipeline_tracer.span("executor", event_id=event_id, session_id=session_id, metadata={"round": round_num}):
                             audit_result = await executor.execute(
                                 tool_calls=tool_calls,
                                 session=None,
@@ -921,7 +921,7 @@ class LogIngestor:
                         )
 
                         # ── Layer 4: Reviewer ──
-                        with pipeline_tracer.span("reviewer", event_id=event_id, session_id=session_id):
+                        with pipeline_tracer.span("reviewer", event_id=event_id, session_id=session_id, metadata={"round": round_num}):
                             verdict = await reviewer.review(
                                 raw_event=log_data,
                                 decomposer_output=decomp_output,
@@ -1259,8 +1259,11 @@ class LogIngestor:
                     "event": _audit_event_name,
                     "confidence": merged.get("confidence", 0),
                     "severity": merged.get("severity", "info"),
-                    "src_ip": log_data.get("src_ip", ""),
-                    "dst_ip": log_data.get("dst_ip", ""),
+                    # 2026-10-27 (B1 live 实测): 兼容驼峰 srcIp/dstIp —— 演示
+                    # 模拟器与外部源常发驼峰; threat_info 缺 src_ip 时回滚
+                    # 记录也随之缺参(封禁链路可用性缺口的又一形态)。
+                    "src_ip": log_data.get("src_ip") or log_data.get("srcIp") or "",
+                    "dst_ip": log_data.get("dst_ip") or log_data.get("dstIp") or "",
                     "message": log_data.get("message", ""),
                     "session_id": session_id,
                     "event_id": event_id,

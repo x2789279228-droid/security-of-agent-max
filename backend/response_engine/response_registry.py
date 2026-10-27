@@ -383,6 +383,69 @@ def _record_auto_unblock_scheduled(action: str) -> None:
         pass
 
 
+async def _record_containment(result: dict) -> None:
+    """处置动作成功后落 containment_records 台账(fail-open)。
+
+    2026-10-25 审计 #4: insert_record 此前零调用方, 该表是只读死表 ——
+    封禁成功与否都 0 行。现在 block_ip 在 mock/live 成功路径入账;
+    dry_run 预览与 idempotent_skip(首次已入账)不入账。
+    """
+    try:
+        if not result.get("success") or result.get("mode") in ("dry_run", "idempotent_skip"):
+            return
+        from datetime import datetime, timedelta, timezone as _tz
+
+        from models import async_session
+
+        from .containment.store import insert_record
+
+        action = str(result.get("action") or "block_ip")
+        target = str(result.get("src_ip") or result.get("target_id") or "")
+        rule_id = str(result.get("rule_id") or result.get("firewall_rule_id") or "")
+        minutes = int(result.get("duration_minutes") or 0)
+        expires_at = (
+            datetime.now(_tz.utc) + timedelta(minutes=minutes) if minutes > 0 else None
+        )
+        async with async_session() as session:
+            await insert_record(
+                session,
+                action_name=action,
+                target_type="ip",
+                target_id=target,
+                host_ip=target,
+                rule_ids=[rule_id] if rule_id else [],
+                backend=str(result.get("mode") or ""),
+                status="applied",
+                payload={
+                    k: result[k]
+                    for k in ("duration_minutes", "rule_name", "family", "event_id",
+                              "eventId", "grounding_score")
+                    if result.get(k) is not None
+                },
+                rollback_token=rule_id,
+                expires_at=expires_at,
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(f"[containment] record failed: {exc}")
+
+
+async def _mark_containment_rolled_back(*, rule_id: str = "", target_id: str = "") -> None:
+    """解封/回滚成功后同步 containment 状态为 rolled_back(fail-open)。"""
+    if not rule_id and not target_id:
+        return
+    try:
+        from models import async_session
+
+        from .containment.store import mark_rolled_back
+
+        async with async_session() as session:
+            await mark_rolled_back(session, rollback_token=rule_id, target_id=target_id)
+            await session.commit()
+    except Exception as exc:
+        logger.warning(f"[containment] mark rolled_back failed: {exc}")
+
+
 async def _auto_rollback(rule_id: str, delay_seconds: int, label: str) -> None:
     """延时后按 rule_id 回滚(隔离 TTL / 封禁 TTL 共用)。"""
     try:
@@ -390,6 +453,8 @@ async def _auto_rollback(rule_id: str, delay_seconds: int, label: str) -> None:
         from .ssh_firewall import ssh_firewall
         rb = await asyncio.to_thread(ssh_firewall.rollback, rule_id)
         logger.info(f"[auto-rollback] {label} rule_id={rule_id}: {rb.get('status')}")
+        if rb.get("status") == "success":
+            await _mark_containment_rolled_back(rule_id=rule_id)
     except Exception as e:
         logger.error(f"[auto-rollback] {label} rule_id={rule_id} failed: {e}")
 
@@ -403,6 +468,8 @@ async def ttl_rollback(rule_id: str, action_name: str, params: dict) -> dict:
     from .ssh_firewall import ssh_firewall
     try:
         rb = await asyncio.to_thread(ssh_firewall.rollback, rule_id)
+        if rb.get("status") == "success":
+            await _mark_containment_rolled_back(rule_id=rule_id)
         return {
             "success": rb.get("status") == "success",
             "rule_id": rule_id,
@@ -641,6 +708,9 @@ async def _block_ip(src_ip: str, reason: str = "", duration_minutes: int = 60, *
             }
         else:
             result["auto_unblock"] = _auto_unblock_info("block_ip", "", 0)
+        if mode == "mock":
+            # mock 成功也入台账(dry_run 预览不入)。2026-10-25 审计 #4。
+            await _record_containment(result)
         return result
 
     # live 结果：SafeExecutor 已在执行成功且 ttl_seconds>0 时注册 Redis TTL。
@@ -672,17 +742,57 @@ async def _block_ip(src_ip: str, reason: str = "", duration_minutes: int = 60, *
     else:
         result["auto_unblock"] = _auto_unblock_info("block_ip", "", 0)
 
+    # mock/live 成功路径落 containment 台账(dry_run/idempotent_skip 已提前 return;
+    # helper 内再过滤一次双保险)。2026-10-25 审计 #4: 此前该表零写入。
+    await _record_containment(result)
+
     return result
 
 
-async def _unblock_ip(src_ip: str, reason: str = "", **kwargs) -> dict:
-    """解封IP — 找该 IP 的 active 封禁记录(FW-RULE), 逐条 ssh_firewall.rollback。"""
+async def _unblock_ip(src_ip: str = "", reason: str = "", **kwargs) -> dict:
+    """解封IP — 找该 IP 的 active 封禁记录(FW-RULE), 逐条 ssh_firewall.rollback。
+
+    2026-10-27 (B1 live 实测补强): 回滚记录的 params 可能缺 src_ip ——
+    策略批次未注入威胁上下文时, rollback_batch 会因缺必填参 TypeError
+    (PERF-2026-10-26「封禁链路的可用性缺口」的残留形态)。此时改走
+    记录里冗余保存的 rule_id 直连 ssh_firewall.rollback (与 TTL 回滚
+    同一路径), src_ip 从 active 规则反查, 用于幂等清理与 containment 对账。
+    """
     exec_mode = _execution_mode()
     if exec_mode != "live":
         return {"action": "unblock_ip", "success": True, "mode": exec_mode,
                 "src_ip": src_ip, "deleted_count": 0,
                 "message": f"[{exec_mode.upper()}] unblock_ip 模拟"}
     from .ssh_firewall import ssh_firewall
+    rule_id_direct = str(kwargs.get("rule_id") or "")
+    if not src_ip and rule_id_direct:
+        try:
+            active = await ssh_firewall.get_active_rules_async()
+        except Exception as e:
+            return {"action": "unblock_ip", "success": False, "mode": "ssh_firewall_paramiko",
+                    "rule_id": rule_id_direct, "error": f"active rules 查询失败: {e}"}
+        for r in active:
+            if r.get("rule_id") != rule_id_direct or r.get("status") not in ("active", "applied"):
+                continue
+            src_ip = r.get("ip") or ""
+            rb = await asyncio.to_thread(ssh_firewall.rollback, rule_id_direct)
+            ok = rb.get("status") == "success"
+            if ok and src_ip:
+                from .safe_executor import safe_executor
+                await safe_executor.clear_idempotency_for_target("block_ip", src_ip)
+                await _mark_containment_rolled_back(target_id=src_ip)
+            return {
+                "action": "unblock_ip",
+                "success": ok,
+                "mode": "ssh_firewall_paramiko",
+                "src_ip": src_ip,
+                "rule_id": rule_id_direct,
+                "deleted_count": int(rb.get("deleted", 1)) if ok else 0,
+                "via": "rule_id",
+            }
+        return {"action": "unblock_ip", "success": False, "mode": "ssh_firewall_paramiko",
+                "rule_id": rule_id_direct, "status": "not_found",
+                "message": f"active 规则中未找到 {rule_id_direct} (可能已被 TTL 回滚)"}
     try:
         active = await ssh_firewall.get_active_rules_async()
         deleted = 0
@@ -698,6 +808,7 @@ async def _unblock_ip(src_ip: str, reason: str = "", **kwargs) -> dict:
             # 手动解封后清除幂等完成标记，允许下一次真实再封禁。
             from .safe_executor import safe_executor
             await safe_executor.clear_idempotency_for_target("block_ip", src_ip)
+            await _mark_containment_rolled_back(target_id=src_ip)
         return {
             "action": "unblock_ip",
             "success": deleted > 0,

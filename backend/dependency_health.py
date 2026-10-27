@@ -120,6 +120,24 @@ def _probe_llm_config() -> dict[str, Any]:
     }
 
 
+async def _probe_kafka() -> str:
+    """Kafka 探针读生产者真实存活, 不再只看配置(2026-10-25 审计:
+    /health 报 enabled 而 producer 已死, 压测口径失真)。"""
+    from config import settings
+    from kafka_producer import HAS_KAFKA, kafka_producer
+
+    if not settings.kafka_enabled:
+        return "disabled (kafka_enabled=False)"
+    if not HAS_KAFKA:
+        raise RuntimeError("aiokafka 未安装, 生产者不可用")
+    if not kafka_producer.is_active:
+        raise RuntimeError(
+            f"生产者未就绪 (restart_attempts={kafka_producer.restart_attempts}): "
+            f"{kafka_producer.last_error[:150]}"
+        )
+    return f"producer active ({settings.kafka_bootstrap})"
+
+
 async def probe_dependencies() -> dict[str, Any]:
     """并发探测全部依赖。返回可直接 JSON 序列化的结构。
 
@@ -129,19 +147,22 @@ async def probe_dependencies() -> dict[str, Any]:
           "postgres": {"status": "ok|warn|error", "latency_ms": 1.2, "detail": "..."},
           "redis":    {...},
           "qdrant":   {...},
+          "kafka":    {...},   # kafka_enabled=False 时为 ok+disabled 说明
           "llm":      {...},
           "_note":    "...llm 为配置态..."
         }
     """
-    results = await asyncio.gather(
+    postgres, redis, qdrant, kafka = await asyncio.gather(
         _timed("postgres", _probe_postgres()),
         _timed("redis", _probe_redis()),
         _timed("qdrant", _probe_qdrant()),
+        _timed("kafka", _probe_kafka()),
     )
     services = {
-        "postgres": results[0],
-        "redis": results[1],
-        "qdrant": results[2],
+        "postgres": postgres,
+        "redis": redis,
+        "qdrant": qdrant,
+        "kafka": kafka,
         "llm": _probe_llm_config(),
     }
 
@@ -154,5 +175,5 @@ async def probe_dependencies() -> dict[str, Any]:
     return {
         "status": overall,
         "services": services,
-        "_note": "llm 为配置态检查（未发起真实请求）；其余为真实连通性探测。",
+        "_note": "llm 为配置态检查（未发起真实请求）；kafka 读生产者存活状态；其余为真实连通性探测。",
     }

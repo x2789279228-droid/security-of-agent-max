@@ -545,6 +545,10 @@ services:
       # (见 .env.example), 守护代提交会带 -s 恢复状态; 首次启动留空即可。
       FLINK_RESTORE_SAVEPOINT: "${FLINK_RESTORE_SAVEPOINT:-}"
       FLINK_ALLOW_NON_RESTORED_STATE: "${FLINK_ALLOW_NON_RESTORED_STATE:-0}"
+      # 2026-10-26: 作业并行度由**客户端**(flink run -p)决定, 不是 JM 的
+      # parallelism.default —— 此前客户端拿不到集群配置, 三个作业都以 -p 1 提交,
+      # 15 个槽位只用了 3 个。此处显式给客户端传并行度, 与 JM 的 3 对齐。
+      FLINK_PARALLELISM: "${FLINK_PARALLELISM:-3}"
     depends_on:
       kafka-1:
         condition: service_healthy
@@ -595,20 +599,29 @@ services:
       # 而 compose environment 值必须是标量; 后端按 JSON 字符串解析
       SHARED_MEMORY_ALLOWED_ORIGINS: '${SHARED_MEMORY_ALLOWED_ORIGINS:-["http://localhost:3001"]}'
       # 响应引擎 SSH 传输配置
+      # 2026-10-26: 此前 compose **没有**把这个变量传给容器 —— .env 里写
+      # SHARED_MEMORY_EXECUTION_MODE=live 不会生效, 后端永远按默认 dry_run 起,
+      # 封禁演示"配了 live 却仍在预览"。显式接线, 默认仍是 dry_run(方向性安全默认)。
+      SHARED_MEMORY_EXECUTION_MODE: ${SHARED_MEMORY_EXECUTION_MODE:-dry_run}
       SHARED_MEMORY_RESPONSE_TRANSPORT_MODE: ${SHARED_MEMORY_RESPONSE_TRANSPORT_MODE:-auto}
       SHARED_MEMORY_RESPONSE_SSH_HOST: ${SHARED_MEMORY_RESPONSE_SSH_HOST:-host.docker.internal}
       SHARED_MEMORY_RESPONSE_SSH_PORT: ${SHARED_MEMORY_RESPONSE_SSH_PORT:-22}
       SHARED_MEMORY_RESPONSE_SSH_USER: ${SHARED_MEMORY_RESPONSE_SSH_USER:-Admin}
       SHARED_MEMORY_RESPONSE_SSH_KEY_FILE: ${SHARED_MEMORY_RESPONSE_SSH_KEY_FILE:-/tmp/ssh/id_rsa}
-      # Firewall VM (v3 SSH 链路性能验证用, 指向 soc-firewall 容器)
+      # Firewall VM (v3 SSH 链路, 指向 soc-firewall 容器, profile=firewall)
       SHARED_MEMORY_FW_SSH_HOST: ${SHARED_MEMORY_FW_SSH_HOST:-soc-firewall}
       SHARED_MEMORY_FW_SSH_PORT: ${SHARED_MEMORY_FW_SSH_PORT:-22}
       SHARED_MEMORY_FW_SSH_USER: ${SHARED_MEMORY_FW_SSH_USER:-root}
       SHARED_MEMORY_FW_SSH_PASSWORD: ${SHARED_MEMORY_FW_SSH_PASSWORD:-}
       SHARED_MEMORY_FW_USE_SUDO: ${SHARED_MEMORY_FW_USE_SUDO:-false}
+      # 靶场容器无预置 known_hosts —— 显式开启才允许 AutoAddPolicy(ssh_firewall fail-closed 默认)
+      SHARED_MEMORY_FW_SSH_ALLOW_UNKNOWN_HOST: ${SHARED_MEMORY_FW_SSH_ALLOW_UNKNOWN_HOST:-false}
       # Kafka 消息总线
       SHARED_MEMORY_KAFKA_ENABLED: ${SHARED_MEMORY_KAFKA_ENABLED:-true}
-      SHARED_MEMORY_KAFKA_BOOTSTRAP: ${KAFKA_BOOTSTRAP_SERVERS:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
+      # 尊重 .env 的 SHARED_MEMORY_KAFKA_BOOTSTRAP(lite 栈配 kafka:9092)。
+      # 旧写法 ${KAFKA_BOOTSTRAP_SERVERS:-...} 会遮蔽同名变量: lite 部署下
+      # producer 首启连不上 kafka-1/2/3 → 监督循环外永久失效(2026-10-25 审计 #1)。
+      SHARED_MEMORY_KAFKA_BOOTSTRAP: ${SHARED_MEMORY_KAFKA_BOOTSTRAP:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
       # ── Kafka 客户端安全 (kafka_security.py; 默认 PLAINTEXT 演示兼容) ──
       SHARED_MEMORY_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
       SHARED_MEMORY_KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}
@@ -807,6 +820,8 @@ services:
       SHARED_MEMORY_FW_SSH_USER: ${SHARED_MEMORY_FW_SSH_USER:-root}
       SHARED_MEMORY_FW_SSH_PASSWORD: ${SHARED_MEMORY_FW_SSH_PASSWORD:-}
       SHARED_MEMORY_FW_USE_SUDO: ${SHARED_MEMORY_FW_USE_SUDO:-false}
+      # 与 backend 同步接线(worker 的 trigger_response activity 也会真下 iptables)
+      SHARED_MEMORY_EXECUTION_MODE: ${SHARED_MEMORY_EXECUTION_MODE:-dry_run}
       SHARED_MEMORY_RESPONSE_TRANSPORT_MODE: ${SHARED_MEMORY_RESPONSE_TRANSPORT_MODE:-auto}
       SHARED_MEMORY_RESPONSE_SSH_HOST: ${SHARED_MEMORY_RESPONSE_SSH_HOST:-host.docker.internal}
       SHARED_MEMORY_RESPONSE_SSH_PORT: ${SHARED_MEMORY_RESPONSE_SSH_PORT:-22}
@@ -1068,6 +1083,22 @@ services:
       MYSQL_ROOT_PASSWORD: ${MISP_ROOT_PASSWORD:?MISP_ROOT_PASSWORD must be set in .env}
     volumes:
       - misp_db_data:/var/lib/mysql
+
+  # ── soc-firewall: block_ip/SSH 封禁链路的真实靶标 (2026-10-25 审计 #4) ──
+  # 此前 FW_SSH_HOST 默认指向这个 service, 但 compose 里从没定义过 → 封禁无目标。
+  # 演示: docker compose --profile firewall up -d --build soc-firewall
+  # 安全: 仅内网, 不映射宿主端口; root 密码认证仅限靶场。
+  soc-firewall:
+    build:
+      context: ./docker/soc-firewall
+    image: soc-firewall:latest
+    container_name: soc-firewall
+    restart: unless-stopped
+    profiles: ["firewall"]
+    cap_add:
+      - NET_ADMIN
+    environment:
+      FIREWALL_ROOT_PASSWORD: ${SHARED_MEMORY_FW_SSH_PASSWORD:-***REMOVED-LEAKED-SECRET***}
 
 volumes:
   pgdata:

@@ -173,17 +173,22 @@
 
 | 类别 | 维度 | 权重 | 说明 |
 |---|---|---|---|
-| 证据 | `statistical_deviation` | 0.35 | `src_ip` 当前小时 vs 其他小时均值，泊松近似 σ |
-| 证据 | `rarity` | 0.20 | 事件类型在全局分布中的反比 |
-| 证据 | `target_concentration` | 0.15 | 近一小时流量高度集中到同一 `dst_ip` |
-| 上下文 | `temporal` | 0.15 | 非活跃时段（按**事件时间 + 配置时区**判定，与服务器时钟无关） |
-| 上下文 | `severity_prior` | 0.15 | 上游 `severity`（critical=1.0 / high=0.6 / medium=0.3 / low=0 / info=-0.05） |
+| 证据 | `statistical_deviation` | 0.28 | `src_ip` 当前小时 vs 其他小时均值，泊松近似 σ |
+| 证据 | `rarity` | 0.16 | 事件类型在全局分布中的反比 |
+| 证据 | `target_concentration` | 0.08 | 近一小时流量高度集中到同一 `dst_ip` |
+| 证据 | `severity_shift` | 0.22 | 成熟基线实体窗口内零 high/critical 史、突然发出一条（基线相对偏移，2026-10-25 接入；与 severity_prior 的区别见 anomaly_detector.py 权重注释） |
+| 上下文 | `temporal` | 0.13 | 非活跃时段（按**事件时间 + 配置时区**判定，与服务器时钟无关） |
+| 上下文 | `severity_prior` | 0.13 | 上游 `severity`（critical=1.0 / high=0.6 / medium=0.3 / low=0 / info=-0.05） |
+
+> 权重演进：0.35/0.20/0.15 + 0.15/0.15（2026-10-25 前，和恒 1.0）→
+> severity_shift 接入时**全量重归一**为上表（和仍恒 1.0，声明一致性不变量，
+> 见 tests/test_review_anomaly.py q6_2）。
 
 打分公式（**不是**权重和为 1 的线性加权）：
 
 ```
-EVIDENCE_TOTAL = 0.70   # 恒定，不随可用维度变化
-CONTEXT_TOTAL  = 0.30
+EVIDENCE_TOTAL = 0.74   # 恒定，不随可用维度变化
+CONTEXT_TOTAL  = 0.26
 
 有证据维度时：
   evidence_score = Σ(w_i × v_i) / EVIDENCE_TOTAL
@@ -486,6 +491,14 @@ CONTEXT_TOTAL  = 0.30
 - `iptables` 规则管理：`block_ip` / `unblock_ip` / `list_rules` / `rollback_all`
 - 仅在 `settings.fw_ssh_host` 非空时启用（`app.py:180-189`）
 
+2026-10-26 更新：compose 已补 `soc-firewall` service（`profile=firewall`，
+alpine + iptables + sshd + NET_ADMIN，仅内网），`block_ip` 封禁链路有真实靶标；
+mock/live 成功路径会落 `containment_records` 台账（此前 `insert_record` 零调用方，
+该表是死表），回滚/解封成功翻 `rolled_back`。live 模式前提：
+`SHARED_MEMORY_EXECUTION_MODE=live` + 起容器 +
+`SHARED_MEMORY_FW_SSH_ALLOW_UNKNOWN_HOST=true`（靶场无预置 known_hosts）。
+默认 `execution_mode=dry_run` 只产出预览、不发 SSH。
+
 ### 4.6 审批队列
 
 `response_engine/human_approval.py:76-160`：
@@ -738,10 +751,15 @@ CONTEXT_TOTAL  = 0.30
      ├── X-API-Key 校验失败 → 403 (routers/logs.py:99-100)
      │
      ├── kafka_enabled=True AND producer active:
-     │     produce_raw_batch(topic=ingest_process) → "queued"
+     │     produce_raw_batch(topic=ingest_process) → 202 "queued"
      │     (不调 Python ingest)
      │
-     └── 否则:
+     ├── kafka_enabled=True AND producer NOT active:
+     │     → 503 "not_durable" (2026-10-26 审计 #1: 禁止静默回退直写,
+     │       否则压测把 HTTP→PG 当成 Kafka 流水线口径; 生产者由
+     │       监督循环指数退避重试, 恢复后自动回到 202 分支)
+     │
+     └── kafka_enabled=False (兼容模式):
            log_ingestor.ingest()
              │
              ├── anomaly_detector.analyze 失败 → AnomalyReport(score=0, ...)

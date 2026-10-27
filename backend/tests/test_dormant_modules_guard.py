@@ -115,6 +115,11 @@ for _p, _r in [
     ("migrations/env.py", "alembic 迁移环境脚本, 由 alembic 命令加载"),
     ("migrations/versions/20261023_0001_baseline.py",
      "baseline 迁移脚本, 由 alembic upgrade 加载"),
+    # 2026-10-27: ip2region 官方绑定 (vendored, Apache-2.0, 见 ip2region/LICENSE)
+    # —— 由 geo_ip._get_searcher() 在函数体内动态导入, 静态扫描视为零导入;
+    #    第三方检索器, 不纳入本仓库的覆盖度量。
+    ("ip2region/searcher.py",
+     "ip2region 官方 xdb 检索器 (vendored 第三方), 由 geo_ip 动态导入"),
 ]:
     _add(_p, "entrypoint", _r)
 

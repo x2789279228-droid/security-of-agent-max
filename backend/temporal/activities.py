@@ -113,7 +113,7 @@ async def audit_round(inp: dict) -> dict:
         }
 
     # decompose 不需要 DB session; execute 需要 → 内部开 session
-    with pipeline_tracer.span("decomposer", event_id=event_id, session_id=session_id):
+    with pipeline_tracer.span("decomposer", event_id=event_id, session_id=session_id, metadata={"round": round_num}):
         decomp_output = await decomposer.decompose(
             event=log_data,
             session_id=session_id,
@@ -135,14 +135,14 @@ async def audit_round(inp: dict) -> dict:
                 "audit_full": None, "verdict_full": None, "evidence": [],
                 "thought_steps": thought_steps}
 
-    with pipeline_tracer.span("tool_builder", event_id=event_id, session_id=session_id):
+    with pipeline_tracer.span("tool_builder", event_id=event_id, session_id=session_id, metadata={"round": round_num}):
         tool_calls = tool_builder.build(sub_tasks, session_id)
     thought_steps.extend(emit_tool_map(
         sub_tasks, tool_calls, event_id=event_id, session_id=session_id, round_num=round_num,
     ))
 
     # Executor 内部自开短租 session; Reviewer 纯 LLM,不得空持连接。
-    with pipeline_tracer.span("executor", event_id=event_id, session_id=session_id):
+    with pipeline_tracer.span("executor", event_id=event_id, session_id=session_id, metadata={"round": round_num}):
         audit_result = await executor.execute(
             tool_calls=tool_calls,
             session=None,
@@ -161,7 +161,7 @@ async def audit_round(inp: dict) -> dict:
         f"{str(tr.data)[:200] if tr.data else tr.error}"
         for tr in audit_result.tool_results
     )
-    with pipeline_tracer.span("reviewer", event_id=event_id, session_id=session_id):
+    with pipeline_tracer.span("reviewer", event_id=event_id, session_id=session_id, metadata={"round": round_num}):
         verdict = await reviewer.review(
             raw_event=log_data,
             decomposer_output=decomp_output,

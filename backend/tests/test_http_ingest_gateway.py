@@ -1,5 +1,6 @@
 """P2 HTTP 网关: producer 活跃 → 202 queued 且不借 OLTP session;
-producer 关闭 → 同步 ingest, HTTP 200, dummy 结果合并。
+kafka_enabled=True 但 producer 未就绪 → 503 not_durable 拒收(禁止静默降级);
+kafka_enabled=False(http 模式) → 同步 ingest, HTTP 200, dummy 结果合并。
 """
 import pytest
 from fastapi import FastAPI
@@ -39,7 +40,7 @@ def test_ingest_202_queued_and_no_session(monkeypatch, client):
         captured.append({"session_id": session_id, "api_key": api_key, "events": list(events)})
         return len(events)
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     # producer 活跃时 get_session 绝不能被调用
     monkeypatch.setattr(models, "get_session", _no_get_session)
@@ -68,7 +69,7 @@ def test_ingest_202_preserves_client_event_id(monkeypatch, client):
         captured.append(list(events))
         return len(events)
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     monkeypatch.setattr(models, "get_session", _no_get_session)
 
@@ -98,7 +99,7 @@ def test_batch_202_forwards_api_key(monkeypatch, client):
 
     monkeypatch.setattr(source_registry, "authenticate",
                         lambda k: _Src() if k == "abc" else None)
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     monkeypatch.setattr(models, "get_session", _no_get_session)
 
@@ -126,7 +127,7 @@ def test_batch_403_for_invalid_api_key(monkeypatch, client):
         raise AssertionError("无效 key 不得写入 Kafka")
 
     monkeypatch.setattr(source_registry, "authenticate", lambda k: None)
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", forbidden_enqueue)
     monkeypatch.setattr(models, "get_session", _no_get_session)
 
@@ -145,7 +146,7 @@ def test_batch_202_without_api_key_header(monkeypatch, client):
         captured.append({"api_key": api_key, "n": len(events)})
         return len(events)
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     monkeypatch.setattr(models, "get_session", _no_get_session)
 
@@ -159,7 +160,7 @@ def test_batch_207_when_kafka_partially_acks(monkeypatch, client):
     async def fake_enqueue(session_id, api_key, events):
         return 2
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     monkeypatch.setattr(models, "get_session", _no_get_session)
 
@@ -179,7 +180,7 @@ def test_ingest_503_when_kafka_does_not_ack(monkeypatch, client):
     async def fake_enqueue(session_id, api_key, events):
         return 0
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     monkeypatch.setattr(models, "get_session", _no_get_session)
 
@@ -198,7 +199,7 @@ def test_ingest_503_while_draining(monkeypatch, client):
     async def fake_enqueue(session_id, api_key, events):
         raise AssertionError("draining 时不得再写入 Kafka")
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     monkeypatch.setattr(models, "get_session", _no_get_session)
     drain.begin()
@@ -224,7 +225,7 @@ def test_ingest_falls_back_to_sync_200(monkeypatch, client):
         ingest = staticmethod(dummy_ingest)
         ingest_batch = staticmethod(dummy_ingest_batch)
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: False)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "http")
     monkeypatch.setattr(models, "get_session", _fake_session)
     monkeypatch.setattr(logs_router, "log_ingestor", _Stub)
 
@@ -247,7 +248,7 @@ def test_batch_falls_back_to_sync_200(monkeypatch, client):
         ingest = staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("no single ingest")))
         ingest_batch = staticmethod(dummy_ingest_batch)
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: False)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "http")
     monkeypatch.setattr(models, "get_session", _fake_session)
     monkeypatch.setattr(logs_router, "log_ingestor", _Stub)
 
@@ -260,3 +261,51 @@ def test_batch_falls_back_to_sync_200(monkeypatch, client):
     assert body["status"] == "review_queued"
     assert body["count"] == 2
     assert body["session_id"] == "sb2"
+
+
+def test_ingest_503_when_kafka_enabled_but_producer_dead(monkeypatch, client):
+    """kafka_enabled=True 但生产者未就绪必须 503 拒收 —— 静默回退直写会让
+    压测把 HTTP→PG 当成 Kafka 流水线口径(2026-10-25 审计)。"""
+    from source_registry import source_registry
+
+    async def forbidden_enqueue(session_id, api_key, events):
+        raise AssertionError("producer 未就绪时不得入队")
+
+    class _Stub:
+        ingest = staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("不得直写 PG")))
+        ingest_batch = staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("不得直写 PG")))
+
+    monkeypatch.setattr(source_registry, "authenticate", lambda k: None)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka_unavailable")
+    monkeypatch.setattr(logs_router, "_enqueue_ingest", forbidden_enqueue)
+    monkeypatch.setattr(logs_router, "log_ingestor", _Stub)
+
+    resp = client.post("/api/logs/ingest", json={
+        "message": {"event": "BRUTE_FORCE", "severity": "high"},
+        "session_id": "s-degraded",
+    })
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "not_durable"
+    assert body["reason"] == "kafka_unavailable"
+
+
+def test_batch_503_when_kafka_enabled_but_producer_dead(monkeypatch, client):
+    from source_registry import source_registry
+
+    class _Stub:
+        ingest = staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("不得直写 PG")))
+        ingest_batch = staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("不得直写 PG")))
+
+    monkeypatch.setattr(source_registry, "authenticate", lambda k: None)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka_unavailable")
+    monkeypatch.setattr(logs_router, "log_ingestor", _Stub)
+
+    resp = client.post(
+        "/api/logs/ingest/batch",
+        json={"logs": [{"event": "A"}, {"event": "B"}], "session_id": "sb-degraded"},
+    )
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "not_durable"
+    assert body["reason"] == "kafka_unavailable"

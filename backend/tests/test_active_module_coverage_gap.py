@@ -120,6 +120,12 @@ REGISTERED: dict[str, str] = {
         "统计计数 —— 零覆盖",
     "user_store":
         "用户存储 —— 零覆盖",
+    # 2026-10-27: ip2region 官方绑定 (vendored 第三方, Apache-2.0) —
+    # 由 geo_ip 动态导入的离线 IP 地理库, 第三方检索器不纳入测试覆盖度量
+    "ip2region":
+        "ip2region 绑定包入口 (vendored 第三方) —— 零覆盖",
+    "ip2region.searcher":
+        "ip2region xdb 检索器 (vendored 第三方) —— 零覆盖",
 }
 
 #: 安全关键的那几条（不能被悄悄从登记表里删掉）

@@ -102,20 +102,28 @@ categories:
       - SQL_INJECTION
       - XSS_ATTACK
       - COMMAND_INJECTION
+      - PATH_TRAVERSAL
     aliases:
       - SQL注入
       - 跨站脚本
       - 命令注入
+      - 路径遍历
+      - 目录遍历
     keywords:
       - sql注入
       - 命令注入
       - 跨站
       - xss
       - injection
+      - traversal
+      - 路径遍历
+      - 目录遍历
     alias_leaves:
       SQL注入: SQL_INJECTION
       跨站脚本: XSS_ATTACK
       命令注入: COMMAND_INJECTION
+      路径遍历: PATH_TRAVERSAL
+      目录遍历: PATH_TRAVERSAL
 
   LATERAL:
     leaves:

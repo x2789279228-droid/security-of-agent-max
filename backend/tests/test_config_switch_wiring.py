@@ -161,7 +161,7 @@ def _shipped_keys() -> frozenset[str]:
 # ═══════════════════════════════════════════
 
 def test_settings_field_count_is_unchanged():
-    """前提①：config.py 仍是 345 个字段。
+    """前提①：config.py 字段数普查。
 
     2026-10-21 新增 5 个安全字段：execution 默认 dry_run 相关的主机密钥
     校验（fw/response 各 2 个）与 allow_self_registration（1 个）。
@@ -171,11 +171,16 @@ def test_settings_field_count_is_unchanged():
     2026-10-23 Kafka 安全化 +6：kafka_security_protocol / sasl_mechanism /
     sasl_username / sasl_password / ssl_ca_file / ssl_check_hostname。
     2026-10-24 生产加固 +1：suricata_eve_topic(EVE topic 可配置)。
+    2026-10-26 审计#1 +2：kafka_producer_restart_initial_s/max_s
+    （生产者监督重启, 与消费者重试能力对齐）。
+    2026-10-27 大屏实况面板 +7：ledger_interval_s / attack_geo_interval_s /
+    attack_geo_window / attack_geo_max_points / home_lat / home_lon / home_label
+    （读点: ledger_broadcast.py / attack_geo_broadcast.py, 活读已核实）。
     字段数再变说明 config.py 被大改，本文件里所有清单都需要重新核实。
     """
     fields = _settings_fields()
-    assert len(fields) == 345, (
-        f"Settings 字段数从 345 变成 {len(fields)} —— "
+    assert len(fields) == 354, (
+        f"Settings 字段数从 354 变成 {len(fields)} —— "
         "请重新跑全量普查并更新整改报告 §7.1.11"
     )
 
@@ -210,12 +215,18 @@ def test_env_example_parses_and_ships_the_keys_we_care_about():
     shipped = _shipped_keys()
     # 2026-10-23: +3 = SOURCE_API_KEYS(数据源认证, 源码内置演示密钥已删除) /
     #   AUTO_MIGRATE(启动自动 alembic 迁移) / LOG_FORMAT(结构化日志)
-    assert len(shipped) == 153, f"出货键数从 153 变成 {len(shipped)}，出货口径需重估"
+    # 2026-10-26 审计#4: +1 = FW_SSH_ALLOW_UNKNOWN_HOST(靶场 known_hosts fail-closed 显式开关)
+    # 2026-10-27: +7 = 大屏实况面板 (config.py 同日新增 settings 字段:
+    #   LEDGER_INTERVAL_S / ATTACK_GEO_INTERVAL_S / ATTACK_GEO_WINDOW /
+    #   ATTACK_GEO_MAX_POINTS / HOME_LAT / HOME_LON / HOME_LABEL)
+    assert len(shipped) == 161, f"出货键数从 161 变成 {len(shipped)}，出货口径需重估"
     for key in ("SHARED_MEMORY_SELF_PLAY_DECOY_RATIO",
                 "SHARED_MEMORY_SELF_PLAY_DEFAULT_ROUNDS",
                 "SHARED_MEMORY_TAXII_PASSWORD",
                 "SHARED_MEMORY_MISP_API_KEY",
-                "SHARED_MEMORY_MITM_ENABLED"):
+                "SHARED_MEMORY_MITM_ENABLED",
+                "SHARED_MEMORY_LEDGER_INTERVAL",
+                "SHARED_MEMORY_HOME_LABEL"):
         assert key in shipped, f"{key} 不再出货 —— 请更新整改报告 §7.1.11"
 
 
@@ -471,8 +482,11 @@ def test_env_example_guard_extraction_still_finds_the_known_keys():
     上面的元规则会安静地变成「什么都没检查」—— 那正是它要防的失效形态。
     """
     guards = _env_example_guard_keys()
-    assert len(guards) == 13, (
-        f"被 .env.example 守卫的键从 13 个变成 {len(guards)} 个 —— "
+    # 2026-10-27: +2 = SHARED_MEMORY_LEDGER_INTERVAL / SHARED_MEMORY_HOME_LABEL
+    # (大屏实况面板出货键, 执行面验证: config.py Settings 字段 +
+    #  ledger_broadcast/attack_geo_broadcast 活读点, 见出货口径测试的注释)
+    assert len(guards) == 15, (
+        f"被 .env.example 守卫的键从 15 个变成 {len(guards)} 个 —— "
         "请重新核实 §7.1.13 的分母，并确认新增/移除的键是否有执行面验证。"
         "若是被提取口径滤掉的（例：函数体里没有 `.env.example` 字面量、"
         "只有 docstring 提到），那是回归到 v2 的假阴性口径了"

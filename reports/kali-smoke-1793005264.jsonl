@@ -1,0 +1,22 @@
+{"_meta": true, "started_at": "2026-10-26T01:01:04Z", "session": "kali-smoke-1793005264", "total": 100, "rate": 5.0, "api": "http://host.docker.internal:8001"}
+{"batch_seq": 1, "batch_size": 5, "threats": ["BRUTE_FORCE", "DDoS_TRAFFIC", "DDoS_TRAFFIC", "C2_BEACON", "DDoS_TRAFFIC"], "http": 200, "latency_ms": 123.2, "ts": "2026-10-26T01:01:05Z"}
+{"batch_seq": 2, "batch_size": 5, "threats": ["BRUTE_FORCE", "BRUTE_FORCE", "DATA_EXFIL", "BRUTE_FORCE", "DDoS_TRAFFIC"], "http": 200, "latency_ms": 95.3, "ts": "2026-10-26T01:01:06Z"}
+{"batch_seq": 3, "batch_size": 5, "threats": ["DDoS_TRAFFIC", "BRUTE_FORCE", "BRUTE_FORCE", "BRUTE_FORCE", "DATA_EXFIL"], "http": 200, "latency_ms": 68.7, "ts": "2026-10-26T01:01:07Z"}
+{"batch_seq": 4, "batch_size": 5, "threats": ["BRUTE_FORCE", "BRUTE_FORCE", "PORT_SCAN", "BRUTE_FORCE", "BRUTE_FORCE"], "http": 200, "latency_ms": 113.3, "ts": "2026-10-26T01:01:08Z"}
+{"batch_seq": 5, "batch_size": 5, "threats": ["PORT_SCAN", "BRUTE_FORCE", "BRUTE_FORCE", "BRUTE_FORCE", "DDoS_TRAFFIC"], "http": 200, "latency_ms": 63.0, "ts": "2026-10-26T01:01:09Z"}
+{"batch_seq": 6, "batch_size": 5, "threats": ["MALWARE_DETECT", "BRUTE_FORCE", "DATA_EXFIL", "MALWARE_DETECT", "PORT_SCAN"], "http": 200, "latency_ms": 73.9, "ts": "2026-10-26T01:01:10Z"}
+{"batch_seq": 7, "batch_size": 5, "threats": ["BRUTE_FORCE", "BRUTE_FORCE", "BRUTE_FORCE", "DDoS_TRAFFIC", "MALWARE_DETECT"], "http": 200, "latency_ms": 65.1, "ts": "2026-10-26T01:01:11Z"}
+{"batch_seq": 8, "batch_size": 5, "threats": ["PORT_SCAN", "LATERAL_MOVE", "DDoS_TRAFFIC", "C2_BEACON", "BRUTE_FORCE"], "http": 200, "latency_ms": 73.1, "ts": "2026-10-26T01:01:12Z"}
+{"batch_seq": 9, "batch_size": 5, "threats": ["BRUTE_FORCE", "PORT_SCAN", "BRUTE_FORCE", "BRUTE_FORCE", "BRUTE_FORCE"], "http": 200, "latency_ms": 65.8, "ts": "2026-10-26T01:01:13Z"}
+{"batch_seq": 10, "batch_size": 5, "threats": ["BRUTE_FORCE", "LATERAL_MOVE", "USER_LOGIN", "PORT_SCAN", "BRUTE_FORCE"], "http": 200, "latency_ms": 58.5, "ts": "2026-10-26T01:01:14Z"}
+{"batch_seq": 11, "batch_size": 5, "threats": ["DATA_EXFIL", "BRUTE_FORCE", "PORT_SCAN", "LATERAL_MOVE", "BRUTE_FORCE"], "http": 200, "latency_ms": 84.6, "ts": "2026-10-26T01:01:15Z"}
+{"batch_seq": 12, "batch_size": 5, "threats": ["USER_LOGIN", "DATA_EXFIL", "BRUTE_FORCE", "BRUTE_FORCE", "USER_LOGIN"], "http": 200, "latency_ms": 112.5, "ts": "2026-10-26T01:01:16Z"}
+{"batch_seq": 13, "batch_size": 5, "threats": ["BRUTE_FORCE", "DDoS_TRAFFIC", "BRUTE_FORCE", "BRUTE_FORCE", "BRUTE_FORCE"], "http": 200, "latency_ms": 97.7, "ts": "2026-10-26T01:01:17Z"}
+{"batch_seq": 14, "batch_size": 5, "threats": ["PORT_SCAN", "DATA_EXFIL", "DDoS_TRAFFIC", "DATA_EXFIL", "BRUTE_FORCE"], "http": 200, "latency_ms": 122.5, "ts": "2026-10-26T01:01:18Z"}
+{"batch_seq": 15, "batch_size": 5, "threats": ["DDoS_TRAFFIC", "BRUTE_FORCE", "PORT_SCAN", "BRUTE_FORCE", "LATERAL_MOVE"], "http": 200, "latency_ms": 113.2, "ts": "2026-10-26T01:01:19Z"}
+{"batch_seq": 16, "batch_size": 5, "threats": ["MALWARE_DETECT", "DDoS_TRAFFIC", "BRUTE_FORCE", "DDoS_TRAFFIC", "C2_BEACON"], "http": 200, "latency_ms": 89.4, "ts": "2026-10-26T01:01:20Z"}
+{"batch_seq": 17, "batch_size": 5, "threats": ["BRUTE_FORCE", "MALWARE_DETECT", "DDoS_TRAFFIC", "BRUTE_FORCE", "BRUTE_FORCE"], "http": 200, "latency_ms": 110.4, "ts": "2026-10-26T01:01:21Z"}
+{"batch_seq": 18, "batch_size": 5, "threats": ["BRUTE_FORCE", "MALWARE_DETECT", "DDoS_TRAFFIC", "BRUTE_FORCE", "C2_BEACON"], "http": 200, "latency_ms": 94.6, "ts": "2026-10-26T01:01:22Z"}
+{"batch_seq": 19, "batch_size": 5, "threats": ["DATA_EXFIL", "DATA_EXFIL", "DDoS_TRAFFIC", "BRUTE_FORCE", "DDoS_TRAFFIC"], "http": 200, "latency_ms": 61.1, "ts": "2026-10-26T01:01:23Z"}
+{"batch_seq": 20, "batch_size": 5, "threats": ["BRUTE_FORCE", "DATA_EXFIL", "DDoS_TRAFFIC", "BRUTE_FORCE", "BRUTE_FORCE"], "http": 200, "latency_ms": 75.0, "ts": "2026-10-26T01:01:24Z"}
+{"_summary": true, "session": "kali-smoke-1793005264", "total_target": 100, "sent_ok": 100, "sent_fail": 0, "elapsed_sec": 20.0, "actual_rate_per_sec": 4.991, "batch_count": 20, "latency_p50_ms": 89.4, "latency_p95_ms": 122.5, "latency_p99_ms": 122.5, "finished_at": "2026-10-26T01:01:24Z"}

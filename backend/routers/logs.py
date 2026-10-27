@@ -55,9 +55,32 @@ import re as _re
 
 
 # ---------- Kafka decoupling gateway helpers ----------
-def _ingest_producer_active() -> bool:
+def _ingest_mode() -> str:
+    """接入路径三态: kafka(producer 就绪) / kafka_unavailable(启用但未就绪) / http(兼容直写)。
+
+    kafka_unavailable 时必须 503 拒收而不是静默回退直写 —— 否则压测/上游
+    会把 HTTP→PG 直连当成 Kafka 流水线口径(2026-10-25 审计确认的失真)。
+    """
+    if not getattr(settings, "kafka_enabled", False):
+        return "http"
     from kafka_producer import kafka_producer as _kp
-    return bool(getattr(settings, "kafka_enabled", False) and _kp.is_active)
+    return "kafka" if _kp.is_active else "kafka_unavailable"
+
+
+def _ingest_producer_active() -> bool:
+    return _ingest_mode() == "kafka"
+
+
+def _kafka_unavailable_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "not_durable",
+            "reason": "kafka_unavailable",
+            "detail": "Kafka 模式已启用但生产者未就绪，拒收以保证投递承诺；稍后重试或切回直写模式",
+        },
+        headers={"Retry-After": "5"},
+    )
 
 def _peek_type(d: dict) -> str:
     return str(d.get("event") or d.get("type") or d.get("eventType") or "UNKNOWN")
@@ -202,7 +225,11 @@ async def ingest_log(
             content={"status": "draining", "detail": "服务正在关闭，不再接受新任务"},
         )
     _reject_if_body_too_large(request)
-    denied = await _admit(direct=not _ingest_producer_active())
+    mode = _ingest_mode()
+    if mode == "kafka_unavailable":
+        _ingest_metric("rejected", reason="kafka_unavailable")
+        return _kafka_unavailable_response()
+    denied = await _admit(direct=(mode != "kafka"))
     if denied is not None:
         _ingest_metric("rejected", reason="overloaded")
         return denied
@@ -213,7 +240,7 @@ async def ingest_log(
     if isinstance(log_data.get("message"), str):
         log_data["message"] = _sanitize_value(log_data["message"])
     log_data = ensure_identity(log_data, producer="backend.http_ingest")
-    if _ingest_producer_active():
+    if mode == "kafka":
         produced = await _enqueue_ingest(session_id, api_key, [log_data])
         if produced != 1:
             _ingest_metric("rejected", reason="not_durable")
@@ -265,7 +292,11 @@ async def ingest_log_batch(
         )
     _reject_if_body_too_large(request)
     _reject_if_batch_forbidden(len(req.logs))
-    denied = await _admit(direct=not _ingest_producer_active())
+    mode = _ingest_mode()
+    if mode == "kafka_unavailable":
+        _ingest_metric("rejected", reason="kafka_unavailable", n=max(1, len(req.logs)))
+        return _kafka_unavailable_response()
+    denied = await _admit(direct=(mode != "kafka"))
     if denied is not None:
         _ingest_metric("rejected", reason="overloaded", n=max(1, len(req.logs)))
         return denied
@@ -276,7 +307,7 @@ async def ingest_log_batch(
         if isinstance(d.get("message"), str):
             d["message"] = _sanitize_value(d["message"])
     parsed = _stamp_ingest_events(parsed)
-    if _ingest_producer_active():
+    if mode == "kafka":
         produced = await _enqueue_ingest(session_id, api_key, parsed)
         event_ids = [get_event_id(d) for d in parsed]
         if produced <= 0:

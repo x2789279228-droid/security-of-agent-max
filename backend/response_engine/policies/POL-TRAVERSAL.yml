@@ -1,0 +1,21 @@
+id: POL-TRAVERSAL
+name: 路径遍历自动阻断
+enabled: true
+description: 路径遍历(../ 与编码变体)：封禁IP30分钟 + 告警。
+  2026-10-25 消融 L5 发现 path_traversal 无 taxonomy 叶子与专属策略,
+  3/8 确认检出落入 UNCERTAIN 兜底(5 分钟短封) —— 本策略补齐该缺口。
+match:
+  threat_type: PATH_TRAVERSAL
+  min_confidence: 0.5
+  min_severity: medium
+actions:
+- name: block_ip
+  params:
+    duration_minutes: 30
+- name: send_alert
+  params:
+    severity: high
+auto_execute: true
+require_approval: false
+priority: 70
+cooldown_minutes: 15

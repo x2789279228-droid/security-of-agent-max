@@ -228,14 +228,33 @@ class FieldCipher:
         return decision.message
 
     def seal_payload(self, payload: dict) -> Optional[str]:
-        """把整份原始负载封成一个密文。没有可用密钥时返回 None，调用方不得改存明文。"""
+        """把整份原始负载封成一个密文。没有可用密钥时返回 None。
+        调用方(dlq_store)在「密钥未配置」态允许明文降级(PLAIN: 前缀),
+        密钥损坏态维持 fail-closed。"""
         if self._state != "enabled" or self._fernet is None or not isinstance(payload, dict):
             return None
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         return ENC_PREFIX + self._fernet.encrypt(raw).decode("utf-8")
 
     def open_sealed(self, ciphertext: str) -> dict:
-        """打开 DLQ 里的整包密文。失败时抛错，不返回原字符串。"""
+        """打开 DLQ 里的整包密文。失败时抛错，不返回原字符串。
+        明文降级记录(dlk_store 的 PLAIN: 前缀)只在无密钥部署可打开 ——
+        启用加密后明文记录拒绝打开，防止明文在有密钥环境流动。"""
+        if ciphertext.startswith("PLAIN:"):
+            if self._state == "enabled":
+                raise FieldCipherRejected(
+                    "plaintext_bypass",
+                    "sealed payload is plaintext while encryption is enabled",
+                )
+            if self._state == "broken":
+                raise FieldCipherRejected("cipher_unavailable", "encryption key is unusable")
+            try:
+                obj = json.loads(ciphertext[len("PLAIN:"):])
+            except Exception:
+                raise FieldCipherRejected("ciphertext_malformed", "sealed payload is not json")
+            if not isinstance(obj, dict):
+                raise FieldCipherRejected("anomalous_field", "sealed payload is not an object")
+            return obj
         plain = self._decrypt_field(ciphertext)
         try:
             obj = json.loads(plain)

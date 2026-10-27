@@ -736,10 +736,18 @@ class Scheduler:
 
         if not audit_pq.available:
             return 0
+        # PERF-2026-10-26：PQ 深度必须有 Gauge —— 此前只有进出 Counter
+        # （压测实测 2,242 进 / 7 出，严重不对称且不可解释）。
+        try:
+            from metrics import AUDIT_PQ_DEPTH
+            AUDIT_PQ_DEPTH.set(await audit_pq.depth())
+        except Exception:
+            pass
         # D-C: 批量/间隔走 settings(入站 ~12 ev/s 时旧的 5/s 会净堆积)
         batch = int(getattr(_cfg, "audit_pq_drain_batch", 20) or 20)
         skip_blocked = bool(getattr(_cfg, "audit_pq_skip_blocked_agent", True))
         n = 0
+        blocked_round = False
         for _ in range(batch):
             stats = await inflight_stats()
             limit = int(stats.get("limit") or 0)
@@ -748,6 +756,10 @@ class Scheduler:
             if agent_full and skip_blocked:
                 # D-D: Agent 槽满 → 跳过队头 P0 agent, 抽可运行的 P1/llm_single
                 job = await audit_pq.pop_first_runnable(agent_full=True)
+                if not job:
+                    # 队头全是 agent 任务且槽满 —— 本轮一个都出不去。
+                    # 这是"溢出池只进不出"的直接信号，必须可观测。
+                    blocked_round = True
             else:
                 job = await audit_pq.pop_highest()
             if not job:
@@ -865,6 +877,14 @@ class Scheduler:
         # 偶尔清理幽灵成员
         if n == 0:
             await audit_pq.purge_stale()
+        if blocked_round:
+            # 队头全是 agent 任务且 Temporal 槽满 —— 本轮一个都出不去。
+            # 这是"溢出池只进不出"的直接信号，必须可观测（PERF-2026-10-26）。
+            try:
+                from metrics import AUDIT_PQ_DRAIN_BLOCKED
+                AUDIT_PQ_DRAIN_BLOCKED.inc()
+            except Exception:
+                pass
         return n
 
     async def _reenqueue_pq(self, job: dict) -> None:

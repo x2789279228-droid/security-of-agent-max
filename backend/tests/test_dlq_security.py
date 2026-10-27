@@ -372,14 +372,129 @@ def test_undecodable_replay_is_blocked_and_confirm_is_required():
                     admin,
                 )
             assert missing.value.status_code == 400
-            with pytest.raises(HTTPException) as blocked:
-                await replay_dlq(
+            async with async_session() as session:
+                with pytest.raises(HTTPException) as blocked:
+                    await replay_dlq(
+                        saved.record_id,
+                        ReplayRequest(confirm=True),
+                        _Req(),
+                        session,
+                        admin,
+                    )
+            assert blocked.value.status_code == 409
+
+    _run(_case())
+
+
+# ── 无密钥部署的明文降级(2026-10-25 审计 #3) ──────────────────────
+
+
+def test_plaintext_fallback_when_cipher_disabled():
+    """无密钥时 DLQ 必须能落库(PLAIN: 前缀明文), 否则 offset 永久卡死。"""
+    async def _case():
+        await _create_tables()
+        _clear_key()
+        from dlq_store import PLAIN_DLQ_PREFIX, dry_run, persist_dlq_failure
+        from models import DlqRecord, async_session
+
+        saved = await persist_dlq_failure(
+            topic="security-events-enriched",
+            payload={"eventId": "evt-plain", "eventType": "BRUTE_FORCE", "severity": "high",
+                     "message": "boom", "timestamp": 1700000000000, "srcIp": "203.0.113.7"},
+            error="['parentEventId']: None is not of type 'string'",
+            partition=0,
+            offset=42,
+            error_code="schema_invalid",
+        )
+        assert saved.persisted is True, saved.reason
+
+        async with async_session() as session:
+            row = await session.get(DlqRecord, saved.record_id)
+            assert row.payload_ciphertext.startswith(PLAIN_DLQ_PREFIX)
+            stored = row.payload_ciphertext[len(PLAIN_DLQ_PREFIX):]
+        assert json.loads(stored)["eventId"] == "evt-plain"
+
+        # 明文记录在无密钥态可审计/可重放
+        preview = await dry_run(saved.record_id)
+        assert preview["ok"] is True
+        assert "srcIp" in preview["field_names"]
+
+        sent = []
+
+        class Prod:
+            async def send_and_wait(self, topic, key=None, value=None, headers=None):
+                sent.append(value)
+                return {"offset": 7}
+
+        from kafka_consumer import kafka_consumer_manager
+        previous = kafka_consumer_manager._dlq_producer
+        kafka_consumer_manager._dlq_producer = Prod()
+        try:
+            from routers.dlq import ReplayRequest, replay_dlq
+            from models import async_session as sess
+
+            admin = UserInfo(username="ada", role="admin")
+
+            class _Req:
+                class _Client:
+                    host = "127.0.0.1"
+                client = _Client()
+                headers = {"user-agent": "pytest"}
+
+            async with sess() as session:
+                replayed = await replay_dlq(
                     saved.record_id,
                     ReplayRequest(confirm=True),
                     _Req(),
                     session,
                     admin,
                 )
-            assert blocked.value.status_code == 409
+            assert replayed["status"] == "replayed", replayed
+            assert sent and sent[0]["eventId"] == "evt-plain"
+        finally:
+            kafka_consumer_manager._dlq_producer = previous
+
+    _run(_case())
+
+
+def test_open_sealed_plaintext_rejected_when_encryption_enabled():
+    """启用加密后明文 DLQ 记录必须拒开(明文不得在有密钥环境流动)。"""
+    from dlq_store import PLAIN_DLQ_PREFIX
+
+    _clear_key()
+    assert field_cipher.open_sealed(PLAIN_DLQ_PREFIX + '{"eventId":"e"}') == {"eventId": "e"}
+
+    _use_key()
+    with pytest.raises(FieldCipherRejected) as raised:
+        field_cipher.open_sealed(PLAIN_DLQ_PREFIX + '{"eventId":"e"}')
+    assert raised.value.code == "plaintext_bypass"
+
+    os.environ["SHARED_MEMORY_FIELD_ENCRYPTION_KEY"] = "not-a-fernet-key"
+    field_cipher.reload()
+    with pytest.raises(FieldCipherRejected) as broken:
+        field_cipher.open_sealed(PLAIN_DLQ_PREFIX + '{"eventId":"e"}')
+    assert broken.value.code == "cipher_unavailable"
+    _clear_key()
+
+
+def test_broken_key_still_fails_closed_for_dlq_persist():
+    """密钥损坏(非 disabled)时维持 fail-closed —— 明文降级只豁免「未配置密钥」。"""
+    async def _case():
+        await _create_tables()
+        os.environ["SHARED_MEMORY_FIELD_ENCRYPTION_KEY"] = "not-a-fernet-key"
+        field_cipher.reload()
+        assert field_cipher.state == "broken"
+        from dlq_store import persist_dlq_failure
+
+        saved = await persist_dlq_failure(
+            topic="security-events-enriched",
+            payload={"eventId": "evt-broken", "srcIp": "203.0.113.7"},
+            error="schema",
+            partition=1,
+            offset=9,
+            error_code="schema_invalid",
+        )
+        assert saved.persisted is False
+        assert saved.reason == "cipher_unavailable"
 
     _run(_case())

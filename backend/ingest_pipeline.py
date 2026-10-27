@@ -365,7 +365,15 @@ async def detect(log_data: dict) -> DetectResult:
         nonlocal sigma_result, errors
         try:
             from sigma_detector import sigma_detector  # 懒 import: pySigma 构建失败也隔离
-            result = sigma_detector.detect_for_event(log_data)
+            # PERF-2026-10-26（Wave 1-2）：detect_for_event 是 40ms 级的
+            # **同步 CPU 段**（150 规则逐条 SQL + 每事件私有 SQLite），
+            # 裸调用会把 12 个 audit worker、9 个消费循环与 FastAPI 共享的
+            # 唯一事件循环整个卡死 —— 压测的 HTTP p50 2s 与消费 14~22 eps
+            # 上限的直接来源（见 PERF 报告勘误 1）。引擎本身线程安全
+            # （每事件私有 :memory: 连接 + 快照租约锁），丢线程池即可。
+            # 注意 to_thread 只解除事件循环饿死（GIL 下不加 CPU 并行）；
+            # 吞吐提升靠预筛/批量/多进程（Wave 1-3/1-4/1-5）。
+            result = await asyncio.to_thread(sigma_detector.detect_for_event, log_data)
         except Exception as e:
             logger.warning(f"[Pipeline] sigma detection failed: {e}")
             errors.append(DetectorError(

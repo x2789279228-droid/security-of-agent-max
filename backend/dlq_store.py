@@ -2,7 +2,11 @@
 
 写入顺序：先把失败状态提交到数据库，再等 Kafka DLQ 的 acks=all。
 任何一步失败，调用方都不得提交原消息的 offset。
-原始负载只以整包密文保存。查询结果不包含这列。
+有密钥时原始负载只以整包密文保存。查询结果不包含这列。
+无密钥部署(SHARED_MEMORY_FIELD_ENCRYPTION_KEY 为空)允许**明文降级**:
+负载以 ``PLAIN:`` 前缀的 JSON 存入同一列 —— 否则 seal 恒失败 → DLQ 写不进
+→ offset 永久保留 → 一条毒丸就能卡死整个分区(2026-10-25 审计 #3, dlq_records 0 行)。
+密钥损坏(broken)或启用加密后读明文记录仍 fail-closed。
 """
 from __future__ import annotations
 
@@ -25,6 +29,8 @@ from field_cipher import FieldCipherRejected, field_cipher
 logger = logging.getLogger(__name__)
 
 DLQ_ENVELOPE_VERSION = "dlq.v1"
+#: 无密钥部署的明文降级记录前缀。open_sealed 据此走明文分支。
+PLAIN_DLQ_PREFIX = "PLAIN:"
 MAX_DLQ_BYTES = 512 * 1024
 #: 原始字节最多保留多少。超出部分只记长度，不入库。
 MAX_DLQ_RAW_PREFIX = 64 * 1024
@@ -311,7 +317,17 @@ async def persist_dlq_failure(
         return PersistResult(False, reason="payload_too_large")
     sealed = field_cipher.seal_payload(body)
     if not sealed:
-        return PersistResult(False, reason="cipher_unavailable")
+        if field_cipher.state == "disabled":
+            # 无密钥部署: 整包密文不可能, 明文降级落库(PLAIN: 前缀)。
+            # 否则 seal 恒失败 → persisted=False → offset 永久保留,
+            # 一条毒丸卡死整个分区。密钥损坏仍 fail-closed。
+            sealed = PLAIN_DLQ_PREFIX + canonical.decode("utf-8")
+            logger.warning(
+                "[DLQ] cipher disabled — persisting PLAINTEXT payload "
+                "(topic index only; set SHARED_MEMORY_FIELD_ENCRYPTION_KEY to seal)"
+            )
+        else:
+            return PersistResult(False, reason="cipher_unavailable")
 
     part = -1 if partition is None else int(partition)
     off = -1 if offset is None else int(offset)

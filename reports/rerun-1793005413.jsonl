@@ -1,0 +1,4 @@
+{"_meta": true, "started_at": "2026-10-26T01:03:33Z", "session": "rerun-hazard-1793005413", "total": 20, "rate": 10.0, "api": "http://host.docker.internal:8001"}
+{"batch_seq": 1, "batch_size": 10, "threats": ["BRUTE_FORCE", "BRUTE_FORCE", "DDoS_TRAFFIC", "LATERAL_MOVE", "C2_BEACON"], "http": 200, "latency_ms": 83.1, "ts": "2026-10-26T01:03:34Z"}
+{"batch_seq": 2, "batch_size": 10, "threats": ["BRUTE_FORCE", "USER_LOGIN", "DATA_EXFIL", "BRUTE_FORCE", "BRUTE_FORCE"], "http": 200, "latency_ms": 83.1, "ts": "2026-10-26T01:03:35Z"}
+{"_summary": true, "session": "rerun-hazard-1793005413", "total_target": 20, "sent_ok": 20, "sent_fail": 0, "elapsed_sec": 2.0, "actual_rate_per_sec": 9.961, "batch_count": 2, "latency_p50_ms": 83.1, "latency_p95_ms": 83.1, "latency_p99_ms": 83.1, "finished_at": "2026-10-26T01:03:35Z"}

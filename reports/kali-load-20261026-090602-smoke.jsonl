@@ -1,0 +1,12 @@
+{"_meta": true, "started_at": "2026-10-26T01:06:03Z", "session": "kali-load-20261026-090602-smoke", "total": 60, "rate": 6.0, "api": "http://host.docker.internal:8001"}
+{"batch_seq": 1, "batch_size": 6, "threats": ["BRUTE_FORCE", "BRUTE_FORCE", "LATERAL_MOVE", "MALWARE_DETECT", "BRUTE_FORCE"], "http": 200, "latency_ms": 143.0, "ts": "2026-10-26T01:06:04Z"}
+{"batch_seq": 2, "batch_size": 6, "threats": ["BRUTE_FORCE", "BRUTE_FORCE", "BRUTE_FORCE", "BRUTE_FORCE", "BRUTE_FORCE"], "http": 200, "latency_ms": 103.9, "ts": "2026-10-26T01:06:05Z"}
+{"batch_seq": 3, "batch_size": 6, "threats": ["MALWARE_DETECT", "DDoS_TRAFFIC", "DATA_EXFIL", "DDoS_TRAFFIC", "USER_LOGIN"], "http": 200, "latency_ms": 133.7, "ts": "2026-10-26T01:06:06Z"}
+{"batch_seq": 4, "batch_size": 6, "threats": ["PORT_SCAN", "PORT_SCAN", "BRUTE_FORCE", "DDoS_TRAFFIC", "BRUTE_FORCE"], "http": 200, "latency_ms": 118.2, "ts": "2026-10-26T01:06:07Z"}
+{"batch_seq": 5, "batch_size": 6, "threats": ["BRUTE_FORCE", "BRUTE_FORCE", "MALWARE_DETECT", "BRUTE_FORCE", "PORT_SCAN"], "http": 200, "latency_ms": 83.8, "ts": "2026-10-26T01:06:08Z"}
+{"batch_seq": 6, "batch_size": 6, "threats": ["DDoS_TRAFFIC", "C2_BEACON", "C2_BEACON", "BRUTE_FORCE", "DDoS_TRAFFIC"], "http": 200, "latency_ms": 114.1, "ts": "2026-10-26T01:06:09Z"}
+{"batch_seq": 7, "batch_size": 6, "threats": ["BRUTE_FORCE", "C2_BEACON", "C2_BEACON", "BRUTE_FORCE", "BRUTE_FORCE"], "http": 200, "latency_ms": 96.0, "ts": "2026-10-26T01:06:10Z"}
+{"batch_seq": 8, "batch_size": 6, "threats": ["DDoS_TRAFFIC", "DDoS_TRAFFIC", "LATERAL_MOVE", "MALWARE_DETECT", "BRUTE_FORCE"], "http": 200, "latency_ms": 88.0, "ts": "2026-10-26T01:06:11Z"}
+{"batch_seq": 9, "batch_size": 6, "threats": ["PORT_SCAN", "BRUTE_FORCE", "LATERAL_MOVE", "PORT_SCAN", "DDoS_TRAFFIC"], "http": 200, "latency_ms": 109.4, "ts": "2026-10-26T01:06:12Z"}
+{"batch_seq": 10, "batch_size": 6, "threats": ["BRUTE_FORCE", "USER_LOGIN", "BRUTE_FORCE", "BRUTE_FORCE", "PORT_SCAN"], "http": 200, "latency_ms": 96.2, "ts": "2026-10-26T01:06:13Z"}
+{"_summary": true, "session": "kali-load-20261026-090602-smoke", "total_target": 60, "sent_ok": 60, "sent_fail": 0, "elapsed_sec": 10.0, "actual_rate_per_sec": 5.987, "batch_count": 10, "latency_p50_ms": 109.4, "latency_p95_ms": 133.7, "latency_p99_ms": 133.7, "finished_at": "2026-10-26T01:06:13Z"}

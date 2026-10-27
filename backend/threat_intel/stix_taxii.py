@@ -187,7 +187,6 @@ class TaxiiClient:
 
     async def _import_csv(self, config: dict) -> list[dict]:
         """CSV 文件导入 (每行一个 IOC)"""
-        import csv
         from pathlib import Path
 
         file_path = config.get("url", "")

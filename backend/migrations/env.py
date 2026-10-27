@@ -7,6 +7,7 @@
   asyncio.to_thread 调用（事件循环内不能嵌套 asyncio.run）。
 """
 import asyncio
+import logging as _logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -18,7 +19,25 @@ if config.config_file_name is not None:
     # disable_existing_loggers 必须 False: 默认 True 会把进程里**所有已存在**
     # logger 置为 disabled —— pytest 全量跑时 test_migrations 一执行,
     # threat_intel.reputation 等业务 logger 从此静默, caplog 全部失明。
+    #
+    # 2026-10-26: fileConfig 还会**换掉 root logger**(alembic.ini 的 console
+    # handler, 且 root 级别压到 WARN)。嵌入式运行(uvicorn 进程内
+    # alembic upgrade head)时这会把宿主 app.py 装好的结构化日志整段顶掉 ——
+    # 迁移之后所有 INFO 级日志(如 "Kafka producer started")全部静默,
+    # 只剩 WARNING 以上。宿主自己已经装过 handler 时, 迁移后把 root 还给宿主;
+    # 独立 CLI 运行(宿主无 handler)时保留 alembic.ini 的默认配置。
+    _root = _logging.getLogger()
+    _saved_handlers = list(_root.handlers)
+    _saved_level = _root.level
     fileConfig(config.config_file_name, disable_existing_loggers=False)
+    if _saved_handlers:
+        # fileConfig 把 root.handlers 清空后装上 alembic 自己的 console handler,
+        # 旧 handler 对象仍可用(StreamHandler.close 不关流), 直接装回去即可。
+        for _h in list(_root.handlers):
+            _root.removeHandler(_h)
+        for _h in _saved_handlers:
+            _root.addHandler(_h)
+        _root.setLevel(_saved_level)
 
 from models import Base  # noqa: E402  (sys.path 已由 alembic.ini prepend)
 

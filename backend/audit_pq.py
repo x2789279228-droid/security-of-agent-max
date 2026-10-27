@@ -6,6 +6,27 @@ score = priority * 1e12 + (max_ts - enqueued_at_ms)  → 高优优先,同优早�
 
 成员 JSON: {event_id, session_id, anomaly_score, anomaly_reasons, max_rounds,
             triage, log_data_ref?} — log_data 内联(事件体通常不大)。
+
+## 通道语义（PERF-2026-10-26 压测后澄清, 勿混淆）
+
+系统有**两条**审计等待通道，职责不同：
+
+* **内存优先级队列**（audit_worker.AuditWorkerPool）——**主通道**。
+  绝大多数审计（含规则收口 tools_only 与 llm_single）在这里由
+  N 个 worker 直接消化；`soc_audit_queue_depth` 描述它。
+* **本 PQ（Redis ZSET）**——**溢出池**，只收 Temporal agent 槽满时
+  被 shed 的 P0/P1 LLM 车道任务（log_ingestion 的 start_audit_workflow
+  返回 "shed" 时入队）。出队只有一条路：scheduler 的慢速 drain 循环
+  （audit_pq_drain_interval_s / audit_pq_drain_batch），且 agent 槽满时
+  只能抽非 agent 任务，队头全 agent 时整轮阻塞。
+
+⇒ 因此 `soc_audit_pq_enqueue_total` 与 `dequeue_total` **天然不对称**
+（压测实测 2,242 进 / 7 出）：入队跟着 Temporal 背压走，出队跟着
+drain 节奏走。判断审计积压要看 `soc_audit_queue_depth`（主通道）+
+`soc_audit_pq_depth`（溢出池，2026-10-26 补齐）+ drain 阻塞计数
+`soc_audit_pq_drain_blocked_total` 三件套，**任何单一信号都不能
+当全局背压判据**。闭合恒等式：enqueue ≈ dequeue + Δdepth + 死信/过期
+（payload 过期重入队会计两次 enqueue，属已知口径噪声）。
 """
 from __future__ import annotations
 

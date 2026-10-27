@@ -214,6 +214,10 @@ UNWATCHED: dict[str, str] = {
     "soc_audit_lane_admit_total": "审计车道准入数，无面板",
     "soc_audit_pq_dequeue_total": "审计优先队列出队数，无面板",
     "soc_audit_pq_enqueue_total": "审计优先队列入队数，无面板",
+    # PERF-2026-10-26：溢出池深度与 drain 阻塞计数 —— 压测结论"审计 PQ 口径
+    # 不可信"的修复面，Wave 2 背压对准时接入闸门信号，届时移出本表
+    "soc_audit_pq_depth": "审计 PQ(溢出池)深度，背压对准前置信号，Wave 2 接闸门",
+    "soc_audit_pq_drain_blocked_total": "PQ drain 整轮阻塞计数(溢出池只进不出信号)，Wave 2 接闸门",
     "soc_audit_queue_depth": "审计队列深度，无面板",
     "soc_audit_shed_total": "审计负载丢弃数，无面板",
     "soc_audit_temporal_start_timeout_total": "Temporal 启动超时数，无面板",

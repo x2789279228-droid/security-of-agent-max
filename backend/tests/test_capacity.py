@@ -365,7 +365,7 @@ def test_http_overloads_then_accepts_again(monkeypatch, client):
     monkeypatch.setattr(capacity, "audit_queue_ratio", lambda: state["ratio"])
     monkeypatch.setattr(settings, "audit_queue_high_watermark", 0.8)
     monkeypatch.setattr(settings, "audit_queue_low_watermark", 0.5)
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(logs_router, "_enqueue_ingest", fake_enqueue)
     monkeypatch.setattr(models, "get_session", lambda: (_ for _ in ()).throw(AssertionError("no session")))
 
@@ -386,7 +386,7 @@ def test_http_overloads_then_accepts_again(monkeypatch, client):
 def test_http_batch_reject_absolute_and_body(monkeypatch, client):
     from config import settings
 
-    monkeypatch.setattr(logs_router, "_ingest_producer_active", lambda: True)
+    monkeypatch.setattr(logs_router, "_ingest_mode", lambda: "kafka")
     monkeypatch.setattr(settings, "http_ingest_max_batch", 2)
     monkeypatch.setattr(settings, "http_ingest_absolute_max", 4)
     monkeypatch.setattr(settings, "http_ingest_batch_policy", "reject")

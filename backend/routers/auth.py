@@ -250,11 +250,20 @@ async def health():
     # 依赖可达性见 /health/dependencies（需鉴权）。
     if _is_prod:
         return {"status": "ok"}
+    # kafka 字段读生产者存活而非配置: 配置启用但 producer 未连上时必须显示
+    # degraded, 否则压测/运维会把 HTTP→PG 直连误当 Kafka 流水线(2026-10-25 审计)。
+    from kafka_producer import kafka_producer
+    snap = kafka_producer.health_snapshot()
+    if not snap["enabled"]:
+        kafka_state = "disabled"
+    else:
+        kafka_state = "enabled" if snap["active"] else "degraded"
     return {"status": "ok", "services": {
         "llm": settings.llm_model,
         "embedding": settings.embedding_model,
-        "kafka": "enabled" if settings.kafka_enabled else "disabled",
+        "kafka": kafka_state,
         "kafka_bootstrap": settings.kafka_bootstrap if settings.kafka_enabled else "",
+        "kafka_restart_attempts": snap.get("restart_attempts", 0) if snap["enabled"] else 0,
     }}
 
 

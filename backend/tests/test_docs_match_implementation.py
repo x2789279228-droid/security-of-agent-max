@@ -127,10 +127,15 @@ def test_documented_dimension_weights_match_code(doc_text):
         f"  实现: {actual}\n"
         "改代码时必须同步改文档，改文档时必须同步改代码。")
 
-    # 证据 / 上下文分类也要对上 —— 分类决定「能不能独立发起告警」
+    # 证据 / 上下文分类也要对上 —— 分类决定「能不能独立发起告警」。
+    # severity_shift（2026-10-25）是基线相对偏移 → 证据；
+    # severity_prior（上游静态先验）留在上下文 —— 角色不混是本断言的核心。
     assert set(EVIDENCE_DIMENSIONS) == {
-        "statistical_deviation", "rarity", "target_concentration"}, \
+        "statistical_deviation", "rarity", "target_concentration",
+        "severity_shift"}, \
         "证据维度集合变了，文档表格需同步"
+    assert set(CONTEXT_DIMENSIONS) == {"temporal", "severity_prior"}, \
+        "上下文维度集合变了，文档表格需同步"
 
 
 def test_documented_evidence_total_matches_code(doc_text):

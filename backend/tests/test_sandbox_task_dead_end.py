@@ -232,18 +232,30 @@ def test_sandbox_task_results_get_persisted_back():
 
 
 def test_sandbox_task_is_created_exactly_once_and_never_updated():
-    """反向检查：`SandboxTask(...)` 在生产代码里只出现一次，且那一处不带分析字段。
+    """反向检查：真实沙箱任务的 `SandboxTask(...)` 构造只有规范点一处，且不带分析字段。
 
     与上面那条互为对照 —— 正面断言「存在更新路径」，这里从
     「唯一的构造点长什么样」反向确认。两条不能互相替代。
+
+    2026-10-27 形状核实（守卫设计的"构造点迁移后重新核实"路径）：
+    新增 routers/demo_seed.py 的**演示种子**构造点 —— 它天生写入
+    behavior_summary/mitre_techniques 等假分析字段（种子行带 MARKER 标记、
+    状态恒 completed），属于演示道具而非真实提交路径, 不在「字段恒空」
+    死路分析的范围内; 真实路径的规范构造点仍是 routers/edr_intel.py。
     """
+    DEMO_SEEDER = "routers/demo_seed.py"
     sites = [m for m in _sandbox_task_mentions()
              if re.search(r"SandboxTask\s*\(", m[2]) and "class " not in m[2]]
-    assert len(sites) == 1, (
-        f"生产代码里有 {len(sites)} 处 SandboxTask(...) 构造（预期 1）："
-        f"{[s[0] + ':' + str(s[1]) for s in sites]}"
+    real = [s for s in sites if s[0] != DEMO_SEEDER]
+    demo = [s for s in sites if s[0] == DEMO_SEEDER]
+    assert len(real) == 1, (
+        f"生产代码里有 {len(real)} 处真实 SandboxTask(...) 构造（预期 1）："
+        f"{[s[0] + ':' + str(s[1]) for s in real]}"
     )
-    rel, line_no, _ = sites[0]
+    assert len(demo) <= 1, (
+        f"演示种子 SandboxTask 构造点变多 ({len(demo)}) —— 请核实 demo_seed 的形状"
+    )
+    rel, line_no, _ = real[0]
     assert rel == "routers/edr_intel.py", (
         f"构造点换到了 {rel} —— 本缺口的形状可能变了，请重新核实"
     )

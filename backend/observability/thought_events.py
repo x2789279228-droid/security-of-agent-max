@@ -31,7 +31,7 @@ VALID_STAGES = frozenset({
     "reviewer", "cad_verify", "response",
 })
 VALID_KINDS = frozenset({
-    "signal", "plan", "tool_map", "tool", "rag", "claim", "discard", "hop",
+    "signal", "plan", "tool_map", "tool", "chunk", "rag", "claim", "discard", "hop",
     "verdict", "gate", "review", "cad", "response",
 })
 VALID_STATUS = frozenset({
@@ -43,6 +43,7 @@ KIND_LABELS = {
     "plan": "审核计划",
     "tool_map": "工具映射",
     "tool": "工具调用",
+    "chunk": "审核块",
     "rag": "知识片段",
     "claim": "威胁断言",
     "discard": "丢弃断言",
@@ -285,6 +286,110 @@ def publish_thought_batch(steps: Iterable[dict], *, stage: str = "") -> list[dic
     except Exception as e:
         logger.debug(f"[thought_events] publish failed: {e}")
     return compacted
+
+
+def publish_tick(step: dict, extra: Optional[dict] = None) -> None:
+    """阶段内细粒度 tick（逐工具/逐块完成）→ SSE agent_tick。
+
+    与 publish_thought_batch 的关键差别：agent_thought 在 bulk 车道按
+    event_id 合并（同键只留最新），tick 是过程信号、逐条送达 ——
+    event_bus.coalesce_key 对未知类型返回 None，天然不合并。
+
+    step 复用 ThoughtStep 形状与 _sid 命名：前端按 step_id 去重，
+    阶段末的 agent_thought 批次到达时与已到达的 tick 无缝合并
+    （mergeSteps 后到覆盖先到，内容一致）。失败静默，绝不阻断审计。
+    """
+    try:
+        compacted = compact_step(step)
+        if not compacted:
+            return
+        payload = {**compacted, **(extra or {})}
+        from event_bus import event_bus
+        event_bus.publish("agent_tick", payload)
+    except Exception as e:
+        logger.debug(f"[thought_events] publish_tick failed: {e}")
+
+
+def build_tool_tick_step(
+    tool_name: str,
+    *,
+    success: bool = True,
+    duration_ms: float = 0.0,
+    security_denied: bool = False,
+    timed_out: bool = False,
+    param_rejected: bool = False,
+    **ids_kw: Any,
+) -> Optional[dict]:
+    """executor 逐工具完成 tick 的 ThoughtStep（step_id 与 emit_tool_result
+    落库批次完全一致 —— e{eid}-r{round}-executor-tool-{slug}）。"""
+    ids = _ctx_ids(**ids_kw)
+    if not ids["event_id"]:
+        return None
+    status = "blocked" if security_denied else (
+        "error" if (not success or timed_out or param_rejected) else "success"
+    )
+    summary = f"{tool_name} {'ok' if success else 'failed'} {duration_ms:.0f}ms"
+    if security_denied:
+        summary = f"{tool_name} 被安全闸拒绝"
+    elif timed_out:
+        summary = f"{tool_name} 超时 {duration_ms:.0f}ms"
+    elif param_rejected:
+        summary = f"{tool_name} 参数越界被拒"
+    return {
+        **ids,
+        "step_id": _sid(ids, "executor", "tool", (tool_name or "tool").replace(".", "-")[:40]),
+        "stage": "executor",
+        "kind": "tool",
+        "title": tool_name,
+        "summary": summary,
+        "status": status,
+        "tool_name": tool_name,
+        "tool_ok": success,
+        "metrics": {"duration_ms": round(duration_ms or 0, 1)},
+    }
+
+
+def build_chunk_tick_step(
+    chunk_id: str,
+    *,
+    index: int = 0,
+    total: int = 0,
+    threat_detected: bool = False,
+    confidence: float = 0.0,
+    severity: str = "info",
+    label: str = "",
+    summary: str = "",
+    status: str = "success",
+    duration_ms: float = 0.0,
+    **ids_kw: Any,
+) -> Optional[dict]:
+    """executor 逐块（SubAuditor）完成 tick 的 ThoughtStep。
+    step_id: e{eid}-r{round}-executor-chunk-{chunk_id}。"""
+    ids = _ctx_ids(**ids_kw)
+    if not ids["event_id"]:
+        return None
+    if not summary:
+        summary = (
+            f"威胁={'是' if threat_detected else '否'} · 置信 {float(confidence or 0):.2f}"
+            f" · {duration_ms:.0f}ms" if status != "error" else "审核异常，保守兜底"
+        )
+    return {
+        **ids,
+        "step_id": _sid(ids, "executor", "chunk", str(chunk_id or index)),
+        "stage": "executor",
+        "kind": "chunk",
+        "title": label or f"审核块 {chunk_id}",
+        "summary": summary,
+        "status": status,
+        "confidence": confidence,
+        "chunk_id": str(chunk_id or index),
+        "metrics": {
+            "severity": severity or "",
+            "chunk_index": index,
+            "chunk_total": total,
+            "duration_ms": round(duration_ms or 0, 1),
+        },
+    }
 
 
 def snapshot(event_id: int) -> list[dict]:

@@ -257,15 +257,24 @@ class Test02DlqFailureRetainsOffset:
 
         _run(_case())
 
-    def test_cipher_disabled_also_fails_closed(self):
-        """未配置加密密钥时 DLQ 同样拒绝确认 —— 宁可不提交也不能落明文。"""
+    def test_cipher_disabled_persists_plaintext_and_confirms(self):
+        """无密钥(disabled)时 DLQ 允许明文降级落库并确认 offset。
+
+        2026-10-26 审计 #3 前的语义是「宁可不提交也不落明文」——后果是
+        seal 恒失败 → persisted=False → offset 永久保留 → 一条毒丸卡死
+        整个分区(dlq_records 0 行, 消费者每 30s 重读同批消息)。
+        现语义: disabled 态明文落库(PLAIN: 前缀); 密钥损坏(broken)仍
+        fail-closed(见 test_broken_cipher_key_still_blocks_commit, 如有)。
+        """
         async def _case():
             await _create_tables()
             mgr = self._manager()
             _clear_cipher_key()
+            sent = []
 
             class Prod:
                 async def send_and_wait(self, topic, key=None, value=None, headers=None):
+                    sent.append(value)
                     return {"offset": 1}
 
             mgr._dlq_producer = Prod()
@@ -273,7 +282,8 @@ class Test02DlqFailureRetainsOffset:
                 "security-alerts", {"eventId": "e-nocipher", "message": "secret"},
                 "permanent", 1, partition=0, offset=80,
             )
-            assert ok is False, "无密钥时不得把明文负载写进 DLQ 后再确认"
+            assert ok is True, "disabled 态必须明文降级落库, 否则 offset 永久卡死"
+            assert sent, "DLQ Kafka 副本也必须发出(envelope 含 PLAIN: 负载)"
 
         _run(_case())
 

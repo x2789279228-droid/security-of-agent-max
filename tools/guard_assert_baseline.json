@@ -1,30 +1,38 @@
 {
- "backend/tests/integration/test_full_pipeline_integration.py": {
-  "asserts": 3,
-  "sha256": "4f52bff6c781ad0f66d2c21aba574e5458f7c7daa9688e58d9bf8ab58eef0a24"
+ "backend/tests/test_agent_live_ticks.py": {
+  "asserts": 25,
+  "sha256": "0123e8bc672f540a84ee8790d433235f96ce8eb90ff1006daf244b407d3c5a4d"
  },
- "backend/tests/test_evasion_retention.py": {
-  "asserts": 5,
-  "sha256": "3d1872f1ccc65713d432248a4e7cd3af1b91890148af2b328ad77a528b35b7e5"
+ "backend/tests/test_anomaly_partial_evidence.py": {
+  "asserts": 12,
+  "sha256": "1cf1e1ca97a1ad6cbb44a8daa3059f4914043e4053e7ebcf085b6ec26f72f212"
  },
- "backend/tests/test_intel_csv_http_feeds.py": {
+ "backend/tests/test_containment_ledger.py": {
   "asserts": 13,
-  "sha256": "b8098513960f687293e946e8646614354a9588335d2374c270eb2749a575eda3"
+  "sha256": "8bd0821c8c3962c5f629e8dd58d2827790a2198f3be0412a9e672225f96c2f4e"
  },
- "backend/tests/test_rbac_write_endpoints_guard.py": {
+ "backend/tests/test_demo_seed.py": {
+  "asserts": 38,
+  "sha256": "ee7c69b5078ec40cfa1816e3c13673dbfab7ac2d353340c000bf99d1de14a8f6"
+ },
+ "backend/tests/test_geo_attack_map.py": {
+  "asserts": 25,
+  "sha256": "a9838f796eb70dee2abbc6dfd1fd0981af06fb439a0ba2108aad775cf95de684"
+ },
+ "backend/tests/test_normalization.py": {
+  "asserts": 40,
+  "sha256": "182a64892f9bb190513efa09d9fd08532d2684762ba51202d5395a730f9f56f5"
+ },
+ "backend/tests/test_rollback_effective_params.py": {
+  "asserts": 13,
+  "sha256": "e6c16386a7b1afd056dcf8628391f9565a2f62ff36f44b79ec338483d6f2ab4e"
+ },
+ "flink-jobs/src/test/java/com/soc/model/SecurityEventSerializationTest.java": {
   "asserts": 0,
   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
  },
- "backend/tests/test_replay_public_eval.py": {
-  "asserts": 6,
-  "sha256": "dbeb7f81ec3852f9b8eb2c58d90b81865a1fdee63edbd8b551458cf512165ef6"
- },
- "backend/tests/test_sigma_bulk_sigmahq.py": {
-  "asserts": 9,
-  "sha256": "3d7a350b5d7dc6972ff696c190dc94c9221b8cb1e372cc6e2ca259d5e61e66b5"
- },
- "backend/tests/test_sigma_sig012_raw_ssh.py": {
-  "asserts": 11,
-  "sha256": "b07e84d22de4bf4a3d1c9b86781e9d48771b57c55fa7aa2c72be7ac5974e8bb9"
+ "flink-jobs/src/test/java/com/soc/util/UrlCanonicalizerTest.java": {
+  "asserts": 0,
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
  }
 }

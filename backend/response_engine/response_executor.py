@@ -123,6 +123,22 @@ def redact_action_params(params: dict) -> dict:
     return out
 
 
+def _extract_rule_id(result: "ActionResult") -> str:
+    """从动作结果里提取防火墙规则 id（block_ip 的 `FW-RULE-*`）。
+
+    存进回滚记录是**冗余保险**：常规回滚走 `_unblock_ip(src_ip)` 反查
+    活跃规则即可；rule_id 直接对应 `ssh_firewall.rollback(rule_id)`，
+    供排障与未来的定向删除使用。拿不到就空串（dry_run/mock 等模式
+    字段名不一，不做猜测式解析）。
+    """
+    inner = result.result if isinstance(result.result, dict) else {}
+    for key in ("firewall_rule_id", "rule_id"):
+        v = inner.get(key)
+        if isinstance(v, str) and v:
+            return v
+    return ""
+
+
 def redact_text_for_log(text: str) -> str:
     """错误文本里可能带完整 URL（含 token/key），落日志前统一脱敏。"""
     if not text:
@@ -160,6 +176,10 @@ class BatchActionResult:
     total: int = 0
     succeeded: int = 0
     failed: int = 0
+    #: 不可逆动作（reversible=False）在回滚时的计数 —— 它们没有回滚函数，
+    #: 历史上被计成 failed（PERF-2026-10-26：rollback_batch 对含 send_alert
+    #: 的批次恒 failed=2），语义上它们是「无需回滚」而不是「回滚失败」。
+    skipped: int = 0
     results: list[ActionResult] = field(default_factory=list)
     batch_rollback_token: str = ""
     start_time: float = 0.0
@@ -329,7 +349,14 @@ class ResponseExecutor:
                         "action": r.action_name,
                         "success": r.success,
                         "rollback_token": r.rollback_token,
-                        "params": actions[i].get("params", {}),
+                        # 回滚记录必须存**执行时有效 params**（含注入后的
+                        # src_ip/host_ip 等），而不是调用方原始 params ——
+                        # 2026-10-26 前存原始值，策略批次没写 src_ip 时
+                        # rollback_batch 逆向调 `_unblock_ip()` 缺必填参
+                        # TypeError，iptables 规则永远删不掉（回滚断链）。
+                        "params": self._effective_params(
+                            r.action_name, actions[i].get("params", {}), threat_info),
+                        "rule_id": _extract_rule_id(r),
                     })
         else:
             # 串行执行（按优先级）
@@ -344,7 +371,10 @@ class ResponseExecutor:
                     "action": result.action_name,
                     "success": result.success,
                     "rollback_token": result.rollback_token,
-                    "params": action.get("params", {}),
+                    # 同上：存执行时有效 params（PERF-2026-10-26 回滚断链修复）
+                    "params": self._effective_params(
+                        result.action_name, action.get("params", {}), threat_info),
+                    "rule_id": _extract_rule_id(result),
                 })
 
         batch_result.end_time = time.time()
@@ -360,55 +390,65 @@ class ResponseExecutor:
 
         return batch_result
 
+    @staticmethod
+    def _effective_params(action_name: str, raw_params: dict,
+                          threat_info: Optional[dict] = None) -> dict:
+        """计算动作的**执行时有效参数**（威胁上下文注入后的完整副本）。
+
+        注入逻辑只有这一份（`_execute_one` 与回滚记录共用）——
+        2026-10-26 前注入只发生在 `_execute_one` 的本地副本上，
+        回滚记录存的是原始 params，策略批次未显式写 src_ip 时
+        批量回滚因缺必填参而整体失败（PERF-2026-10-26 回滚断链）。
+        """
+        params = dict(raw_params or {})
+        if not threat_info:
+            return params
+
+        # 根据动作类型注入合适的IP参数（仅注入该动作接受的参数）
+        if action_name in ("block_ip", "rate_limit", "unblock_ip", "remove_rate_limit"):
+            if "src_ip" not in params and threat_info.get("src_ip"):
+                params["src_ip"] = threat_info["src_ip"]
+        elif action_name in ("isolate_host", "restore_host"):
+            if "host_ip" not in params and threat_info.get("src_ip"):
+                params["host_ip"] = threat_info["src_ip"]
+        elif action_name == "kill_session":
+            if "session_id" not in params and threat_info.get("session_id"):
+                params["session_id"] = threat_info["session_id"]
+        elif action_name in ("kill_process", "quarantine_file", "clean_persistence", "forensic_snapshot"):
+            if "host_ip" not in params:
+                params["host_ip"] = threat_info.get("host_ip") or threat_info.get("src_ip") or ""
+            if action_name == "kill_process":
+                if "pid" not in params and threat_info.get("process_id"):
+                    params["pid"] = threat_info["process_id"]
+                if "sha256" not in params and threat_info.get("image_hash"):
+                    params["sha256"] = threat_info["image_hash"]
+            if action_name == "quarantine_file" and "path" not in params and threat_info.get("file_path"):
+                params["path"] = threat_info["file_path"]
+        elif action_name == "disable_account":
+            if "account" not in params and threat_info.get("user_name"):
+                params["account"] = threat_info["user_name"]
+        elif action_name == "dns_sinkhole":
+            if "domain" not in params and threat_info.get("domain"):
+                params["domain"] = threat_info["domain"]
+        elif action_name == "recall_email":
+            if "internet_message_id" not in params and (
+                threat_info.get("internet_message_id") or threat_info.get("message_id")
+            ):
+                params["internet_message_id"] = (
+                    threat_info.get("internet_message_id") or threat_info.get("message_id")
+                )
+
+        if "reason" not in params:
+            params["reason"] = (
+                f"威胁类型={threat_info.get('threat_type','?')} "
+                f"置信度={threat_info.get('confidence',0):.2f}"
+            )
+        return params
+
     async def _execute_one(self, action: dict, threat_info: Optional[dict] = None) -> ActionResult:
         """执行单个动作"""
         name = action.get("name", "")
-        params = dict(action.get("params", {}))
-
-        # 注入威胁上下文参数（仅注入该动作接受的参数）
-        if threat_info:
-            action_def = response_registry.get_action(name)
-            list((action_def.params_schema if action_def else {}).keys()) if action_def else []
-
-            # 根据动作类型注入合适的IP参数
-            if name in ("block_ip", "rate_limit", "unblock_ip", "remove_rate_limit"):
-                if "src_ip" not in params and threat_info.get("src_ip"):
-                    params["src_ip"] = threat_info["src_ip"]
-            elif name in ("isolate_host", "restore_host"):
-                if "host_ip" not in params and threat_info.get("src_ip"):
-                    params["host_ip"] = threat_info["src_ip"]
-            elif name == "kill_session":
-                if "session_id" not in params and threat_info.get("session_id"):
-                    params["session_id"] = threat_info["session_id"]
-            elif name in ("kill_process", "quarantine_file", "clean_persistence", "forensic_snapshot"):
-                if "host_ip" not in params:
-                    params["host_ip"] = threat_info.get("host_ip") or threat_info.get("src_ip") or ""
-                if name == "kill_process":
-                    if "pid" not in params and threat_info.get("process_id"):
-                        params["pid"] = threat_info["process_id"]
-                    if "sha256" not in params and threat_info.get("image_hash"):
-                        params["sha256"] = threat_info["image_hash"]
-                if name == "quarantine_file" and "path" not in params and threat_info.get("file_path"):
-                    params["path"] = threat_info["file_path"]
-            elif name == "disable_account":
-                if "account" not in params and threat_info.get("user_name"):
-                    params["account"] = threat_info["user_name"]
-            elif name == "dns_sinkhole":
-                if "domain" not in params and threat_info.get("domain"):
-                    params["domain"] = threat_info["domain"]
-            elif name == "recall_email":
-                if "internet_message_id" not in params and (
-                    threat_info.get("internet_message_id") or threat_info.get("message_id")
-                ):
-                    params["internet_message_id"] = (
-                        threat_info.get("internet_message_id") or threat_info.get("message_id")
-                    )
-
-            if "reason" not in params:
-                params["reason"] = (
-                    f"威胁类型={threat_info.get('threat_type','?')} "
-                    f"置信度={threat_info.get('confidence',0):.2f}"
-                )
+        params = self._effective_params(name, action.get("params", {}), threat_info)
 
         t_start = time.time()
         try:
@@ -482,10 +522,32 @@ class ResponseExecutor:
         results = []
         succeeded = 0
         failed = 0
+        skipped = 0
 
         for record in reversed(records):
             action_name = record["action"]
-            params = record["params"]
+            params = dict(record.get("params") or {})
+            # B1 live 实测补强 (2026-10-27): 回滚记录冗余保存的 rule_id 传给
+            # 回滚函数 —— 策略批次未注入威胁上下文时 params 缺 src_ip,
+            # block_ip 族回滚可凭 rule_id 直连 ssh_firewall (与 TTL 回滚同路)。
+            if record.get("rule_id") and "rule_id" not in params:
+                params["rule_id"] = record["rule_id"]
+
+            # 不可逆动作（reversible=False，如 send_alert）没有回滚函数——
+            # 它们是「无需回滚」而不是「回滚失败」。2026-10-26 前它们被
+            # 计成 failed，导致含 send_alert 的批次 rollback 恒报 failed>0，
+            # 且 mark_rolled 永不执行（幂等标记依赖 failed==0）。
+            action_def = response_registry.get_action(action_name)
+            if action_def is not None and not action_def.reversible:
+                skipped += 1
+                results.append(ActionResult(
+                    action_name=f"rollback_{action_name}",
+                    success=True,
+                    idempotent=True,
+                    result={"skipped": True,
+                            "message": "action is not reversible; nothing to roll back"},
+                ))
+                continue
 
             try:
                 result = await response_registry.rollback(action_name, **params)
@@ -517,10 +579,14 @@ class ResponseExecutor:
                     error=str(e),
                 ))
 
-        logger.info(f"Rollback complete: {succeeded}/{len(records)} rollbacks OK")
+        logger.info(
+            f"Rollback complete: {succeeded}/{len(records)} rollbacks OK, "
+            f"{skipped} skipped (non-reversible)"
+        )
 
         # 已执行的回滚批次打上幂等标记（not_found/幂等成功也标记 —
-        # 它们已按成功计数；真实错误不标记，允许调用方重试）
+        # 它们已按成功计数；skipped 同理不算失败；真实错误不标记，
+        # 允许调用方重试）
         if failed == 0:
             await rollback_store.mark_rolled(batch_token)
 
@@ -528,6 +594,7 @@ class ResponseExecutor:
             total=len(records),
             succeeded=succeeded,
             failed=failed,
+            skipped=skipped,
             results=results,
             batch_rollback_token=batch_token,
         )

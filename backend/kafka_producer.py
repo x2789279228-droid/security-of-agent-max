@@ -48,33 +48,95 @@ except ImportError:
 
 
 class KafkaProducerWrapper:
-    """异步 Kafka 生产者封装（带 trace_id 传播）"""
+    """异步 Kafka 生产者封装（带 trace_id 传播）
+
+    生命周期与消费者对齐: 首启失败(broker 未就绪等)不永久失效,
+    由监督循环指数退避重试 —— 否则 ingest 的 Kafka 分支会被静默
+    跳过, 流量降级到 HTTP→PG 直连而 health 仍报 enabled。
+    """
 
     def __init__(self):
         self._producer: Optional[object] = None
         self._started = False
+        self._supervisor: Optional[asyncio.Task] = None
+        self._stopping = False
+        self._restart_initial_s = 1.0
+        self._restart_max_s = 30.0
+        # 健康快照: health 端点据此区分「配置启用但未连上」
+        self.restart_attempts = 0
+        self.last_error: str = ""
+
+    async def _create_and_start(self) -> None:
+        from kafka_security import aiokafka_security_kwargs
+        if self._producer is not None:
+            # 上次 start 失败的实例可能处于半开状态, 重建比复用干净
+            try:
+                await self._producer.stop()
+            except Exception:
+                pass
+        self._producer = AIOKafkaProducer(
+            bootstrap_servers=settings.kafka_bootstrap,
+            value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
+            key_serializer=lambda k: k.encode("utf-8") if k else None,
+            acks="all",
+            # broker 已落盘但响应超时的重试不得产生重复消息。
+            enable_idempotence=True,
+            **aiokafka_security_kwargs(),
+        )
+        await self._producer.start()
 
     async def start(self):
         if not HAS_KAFKA or not settings.kafka_enabled:
             logger.info("Kafka producer: disabled (kafka_enabled=False or aiokafka missing)")
             return
+        self._restart_initial_s = float(
+            getattr(settings, "kafka_producer_restart_initial_s", 1.0) or 1.0
+        )
+        self._restart_max_s = float(
+            getattr(settings, "kafka_producer_restart_max_s", 30.0) or 30.0
+        )
+        self._stopping = False
         try:
-            from kafka_security import aiokafka_security_kwargs
-            self._producer = AIOKafkaProducer(
-                bootstrap_servers=settings.kafka_bootstrap,
-                value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
-                key_serializer=lambda k: k.encode("utf-8") if k else None,
-                acks="all",
-                # broker 已落盘但响应超时的重试不得产生重复消息。
-                enable_idempotence=True,
-                **aiokafka_security_kwargs(),
-            )
-            await self._producer.start()
+            await self._create_and_start()
             self._started = True
             logger.info(f"Kafka producer started: {settings.kafka_bootstrap}")
+            return
         except Exception as e:
-            logger.error(f"Kafka producer failed to start: {e}")
             self._started = False
+            self.last_error = str(e)
+            logger.error(f"Kafka producer failed to start: {e}")
+        # 首启失败不阻塞 lifespan —— 后台监督循环重试到连上为止
+        if self._supervisor is None or self._supervisor.done():
+            self._supervisor = asyncio.create_task(self._supervise())
+
+    async def _supervise(self):
+        """未连上 broker 期间指数退避重建 producer; 连上后自然退出。"""
+        delay = max(0.0, self._restart_initial_s)
+        max_delay = max(delay, self._restart_max_s)
+        while not self._stopping and not self._started:
+            logger.warning(
+                "Kafka producer retry in %.1fs (attempts=%d bootstrap=%s)",
+                delay, self.restart_attempts, settings.kafka_bootstrap,
+            )
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+            if self._stopping or self._started:
+                return
+            try:
+                await self._create_and_start()
+                self._started = True
+                logger.info(
+                    "Kafka producer started after %d retries: %s",
+                    self.restart_attempts, settings.kafka_bootstrap,
+                )
+                return
+            except Exception as e:
+                self.restart_attempts += 1
+                self.last_error = str(e)
+                logger.error("Kafka producer retry failed: %s", e)
+                delay = min(delay * 2.0 if delay > 0 else 0.01, max_delay)
 
     async def flush(self):
         """把已完成的发送缓冲刷到 broker。未启动时什么都不做。"""
@@ -82,6 +144,10 @@ class KafkaProducerWrapper:
             await self._producer.flush()
 
     async def stop(self):
+        self._stopping = True
+        if self._supervisor is not None:
+            self._supervisor.cancel()
+            self._supervisor = None
         if self._producer and self._started:
             try:
                 await self._producer.flush()
@@ -368,6 +434,17 @@ class KafkaProducerWrapper:
     @property
     def is_active(self) -> bool:
         return self._started
+
+    def health_snapshot(self) -> dict:
+        """health 端点用: 配置启用但未连上时必须能看出来。"""
+        if not settings.kafka_enabled or not HAS_KAFKA:
+            return {"enabled": False, "active": False}
+        return {
+            "enabled": True,
+            "active": self._started,
+            "restart_attempts": self.restart_attempts,
+            "last_error": self.last_error,
+        }
 
 
 kafka_producer = KafkaProducerWrapper()

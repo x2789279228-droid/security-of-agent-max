@@ -148,9 +148,22 @@ INTERNAL_IPS = [
     "192.168.1.10", "192.168.1.50", "192.168.1.100",
     "192.168.1.150", "192.168.1.200", "10.0.0.5",
 ]
+# 外网攻击源池 — 每个地址都经 backend/geo_ip.py (ip2region 离线库) 实测
+# 解析到不同省市/国家, 供大屏攻击态势图呈现多来源弧线 (2026-10-27 验证)。
 EXTERNAL_IPS = [
-    "45.33.32.156", "103.235.46.22", "119.23.107.2",
-    "203.0.113.1", "23.129.64.33", "185.220.101.1",
+    # 中国大陆: 浙江/江苏/北京/广东/上海/四川/山东/湖北/湖南/重庆
+    "223.5.5.5", "114.114.114.114", "180.76.76.76", "182.254.116.116",
+    "202.96.209.5", "61.139.2.69", "218.201.96.10", "116.211.160.11",
+    "124.232.150.10", "113.207.101.10",
+    # 港/台
+    "103.235.46.22", "61.216.10.1",
+    # 境外: 美/澳/俄/丹麦/德/日/新加坡/蒙古/马来西亚/泰国
+    "45.33.32.156", "23.129.64.33", "185.220.101.1",
+    "8.8.8.8", "1.1.1.1", "77.88.8.8", "91.239.100.100",
+    "133.11.12.13", "111.221.10.10", "202.131.230.1",
+    "103.253.110.1", "203.146.140.1",
+    # 保留: 原始演示地址 (TEST-NET, 不入地图但保留兼容)
+    "203.0.113.1",
 ]
 
 
@@ -298,10 +311,11 @@ async def run_chain_kafka(bootstrap: str, api_key: str, source_id: str):
     print("  Flink CEP 将自动检测攻击链模式...")
 
 
-async def run_continuous(api: str, interval: float, count: int, session_id: str):
+async def run_continuous(api: str, interval: float, count: int, session_id: str,
+                         token: str = ""):
     """持续模式: 按间隔生成事件流"""
     print(f"[持续模式] API={api} 间隔={interval}s 条数={'无限' if count == 0 else count}")
-    print(f"[持续模式] Session: {session_id}")
+    print(f"[持续模式] Session: {session_id} JWT: {'yes' if token else 'no(X-API-Key 单独会被 401)'}")
     print("-" * 60)
 
     sent = 0
@@ -309,9 +323,13 @@ async def run_continuous(api: str, interval: float, count: int, session_id: str)
         while count == 0 or sent < count:
             evt = generate_continuous()
             try:
+                headers = {"X-API-Key": DEFAULT_API_KEY}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
                 resp = await client.post(
                     f"{api}/api/logs/ingest",
                     json={"message": evt, "session_id": session_id},
+                    headers=headers,
                 )
                 data = resp.json()
                 sent += 1
@@ -458,6 +476,8 @@ def main():
                         help="事件总数(0=无限)")
     parser.add_argument("--session", default="",
                         help="Session ID / Source ID(默认自动生成)")
+    parser.add_argument("--token", default="",
+                        help="JWT Bearer token (HTTP 模式必需: X-API-Key 单独会被 401)")
     parser.add_argument("--sasl-user", default="",
                         help="Kafka SASL/SCRAM 用户名(外部 9093 推送必填)")
     parser.add_argument("--sasl-password", default="",
@@ -490,7 +510,8 @@ def main():
 
     # HTTP 直连模式（兼容旧版）
     if args.mode == "continuous":
-        asyncio.run(run_continuous(args.api, args.interval, args.count, session_id))
+        asyncio.run(run_continuous(args.api, args.interval, args.count, session_id,
+                                   token=args.token))
     elif args.mode == "burst":
         asyncio.run(run_burst(args.api, args.count or 50, session_id))
     elif args.mode == "chain":

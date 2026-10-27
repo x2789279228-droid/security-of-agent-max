@@ -1,0 +1,4 @@
+{"_meta": true, "started_at": "2026-10-26T01:04:35Z", "session": "prefixfix-1793005475", "total": 20, "rate": 10.0, "api": "http://host.docker.internal:8001"}
+{"batch_seq": 1, "batch_size": 10, "threats": ["MALWARE_DETECT", "LATERAL_MOVE", "BRUTE_FORCE", "USER_LOGIN", "BRUTE_FORCE"], "http": 200, "latency_ms": 137.9, "ts": "2026-10-26T01:04:36Z"}
+{"batch_seq": 2, "batch_size": 10, "threats": ["C2_BEACON", "BRUTE_FORCE", "MALWARE_DETECT", "PORT_SCAN", "C2_BEACON"], "http": 200, "latency_ms": 121.7, "ts": "2026-10-26T01:04:37Z"}
+{"_summary": true, "session": "prefixfix-1793005475", "total_target": 20, "sent_ok": 20, "sent_fail": 0, "elapsed_sec": 2.1, "actual_rate_per_sec": 9.613, "batch_count": 2, "latency_p50_ms": 137.9, "latency_p95_ms": 121.7, "latency_p99_ms": 121.7, "finished_at": "2026-10-26T01:04:37Z"}

@@ -93,6 +93,14 @@ LLM_INFLIGHT = Gauge("soc_llm_inflight", "当前占用的全局 LLM 槽")
 LLM_WAITERS = Gauge("soc_llm_waiters", "等待全局 LLM 槽的协程数")
 AUDIT_INFLIGHT = Gauge("soc_audit_inflight", "正在执行的审计 worker 数")
 AUDIT_QUEUE_DEPTH = Gauge("soc_audit_queue_depth", "内存审计队列深度")
+# PERF-2026-10-26：PQ 不是主审计队列而是 Temporal 满载时的 P0/P1 溢出池，
+# 其深度此前没有任何 Gauge —— 压测只能看到 enqueue/dequeue 两个严重不对称的
+# Counter（2,242 vs 7）却看不到池子本身有多深。补齐深度与 drain 阻塞计数。
+AUDIT_PQ_DEPTH = Gauge("soc_audit_pq_depth", "审计 PQ（Temporal 满载溢出池）深度")
+AUDIT_PQ_DRAIN_BLOCKED = Counter(
+    "soc_audit_pq_drain_blocked_total",
+    "PQ drain 因 Temporal agent 槽满而整轮无法出队的次数（溢出池只进不出的直接信号）",
+)
 AUDIT_WORKERS = Gauge("soc_audit_worker_busy", "配置的审计 worker 数")
 DB_POOL_CHECKEDOUT = Gauge("soc_db_pool_checkedout", "DB 池已借出连接", ["pool"])
 EVENTBUS_SUBSCRIBERS = Gauge("soc_eventbus_subscribers", "SSE 订阅者数")

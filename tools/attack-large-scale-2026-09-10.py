@@ -140,10 +140,12 @@ def http_post(path: str, body: dict, timeout: float = 30.0) -> tuple[int, dict |
         return -1, {"error": str(e)[:200]}, elapsed
 
 
-def build_event(seq: int, threat: str, src: str, dst: str) -> dict:
+def build_event(seq: int, threat: str, src: str, dst: str, id_prefix: str = "large-scale-20260910") -> dict:
     profile = THREAT_PROFILES[threat]
     return {
-        "event_id": f"large-scale-20260910-{seq:05d}",
+        # event_id 必须每次运行都换前缀: security_events.event_id 上有唯一索引,
+        # 重复前缀会被幂等去重 —— 请求全部 202/200 且 fail=0, 但一条都没入库。
+        "event_id": f"{id_prefix}-{seq:05d}",
         "event": threat,
         "type": threat,
         "threat_type": threat,
@@ -189,6 +191,12 @@ def main() -> int:
     parser.add_argument("--out", type=str, default=OUT)
     parser.add_argument("--single", action="store_true", help="use single-event endpoint instead of batch")
     parser.add_argument("--warmup", type=int, default=0, help="warmup events (no count in main run)")
+    parser.add_argument(
+        "--id-prefix",
+        type=str,
+        default="large-scale-20260910",
+        help="event_id 前缀 —— 每次运行必须换, 否则被 event_id 唯一索引幂等去重",
+    )
     args = parser.parse_args()
 
     api = args.api.rstrip("/")
@@ -204,7 +212,7 @@ def main() -> int:
         for i in range(args.warmup):
             threat = "BRUTE_FORCE"
             src, dst = pick_src_dst(threat)
-            ev = build_event(-i - 1, threat, src, dst)
+            ev = build_event(-i - 1, threat, src, dst, args.id_prefix)
             http_post("/api/logs/ingest", {"session_id": args.session + "-warmup", "message": ev})
             time.sleep(0.3)
         print(f"[WARMUP] done")
@@ -224,7 +232,7 @@ def main() -> int:
             for i in range(args.total):
                 threat = pick_threat()
                 src, dst = pick_src_dst(threat)
-                ev = build_event(i, threat, src, dst)
+                ev = build_event(i, threat, src, dst, args.id_prefix)
                 t_send = time.perf_counter()
                 st, resp, ms = http_post("/api/logs/ingest", {"session_id": args.session, "message": ev})
                 if st in (200, 201, 202):
@@ -249,7 +257,7 @@ def main() -> int:
             for i in range(args.total):
                 threat = pick_threat()
                 src, dst = pick_src_dst(threat)
-                ev = build_event(i, threat, src, dst)
+                ev = build_event(i, threat, src, dst, args.id_prefix)
                 batch.append(ev)
                 t_send = time.perf_counter()
                 if len(batch) >= max(1, int(args.rate)) or i == args.total - 1:
