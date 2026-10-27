@@ -525,6 +525,19 @@ async def detect(log_data: dict) -> DetectResult:
             inc_detector_error(err.detector)
     except Exception:
         pass
+
+    # 情报富化(2026-10-27 路线 3): 检测完成后、落库前的旁路增强。
+    # 开关 settings.intel_enrich_enabled 默认关闭 —— 关闭时本步零开销零变化;
+    # 开启时 IP/域名/哈希/CVE(KEV) 命中写进 log_data.raw_data.threat_intel,
+    # 随 store_batch 落库可查。fail-open + 超时保护, 不引入新的丢数据点。
+    try:
+        from threat_intel.intel_enricher import enrich_event_if_enabled
+        log_data = await enrich_event_if_enabled(log_data)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.debug("[Pipeline] intel enrich dispatch failed", exc_info=True)
+
     return DetectResult(
         log_data=log_data, anomaly=anomaly_report, sigma=sigma_result,
         detect_ms=detect_ms, errors=errors, analysis=analysis,

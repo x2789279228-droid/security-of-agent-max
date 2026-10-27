@@ -56,6 +56,20 @@ register_feed "openphish-free" \
   "https://openphish.com/feed.txt" "csv_http" \
   '{"format":"plain","fixed_type":"url","fixed_threat":"phishing","severity":"high"}' 120
 
+# ── 源 3: abuse.ch URLhaus — 恶意 URL 分发源 (CSV, 免费, 无 key) ──
+# csv_recent 列: id,dateadded,url,url_status,threat,tags,urlhaus_link
+# '#' 开头为 abuse.ch 头注释块, 方言里统一跳过
+register_feed "urlhaus-free" \
+  "https://urlhaus.abuse.ch/downloads/csv_recent/" "csv_http" \
+  '{"format":"csv","value_column":"url","threat_column":"threat","fixed_type":"url","fixed_threat":"malware_distribution","severity":"high","comment_prefix":"#"}' 60
+
+# ── 源 4: CISA KEV — 已知被利用漏洞目录 (JSON, 免费, 无 key) ──
+# 每条都是已在野利用的 CVE: 富化命中自动提级(intel_enricher KEV 特权逻辑)
+# 体量 ~1.2k 条且低频更新, 6 小时轮询足够
+register_feed "cisa-kev" \
+  "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" "kev_json" \
+  '{"severity":"critical"}' 360
+
 if [ "${POLL}" != "1" ]; then say "POLL=0, 跳过拉取"; exit 0; fi
 
 # ── 立即拉取 + 证据输出 ──

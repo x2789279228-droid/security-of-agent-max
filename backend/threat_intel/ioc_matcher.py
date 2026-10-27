@@ -127,6 +127,7 @@ class IocMatcher:
         domain: str = "",
         file_hash: str = "",
         url: str = "",
+        cve: str = "",
         session=None,
     ) -> list[IocHit]:
         """
@@ -178,6 +179,12 @@ class IocMatcher:
         # URL 匹配
         if url:
             hit = self._cache.get(url.lower())
+            if hit:
+                hits.append(hit)
+
+        # CVE 精确匹配(CISA KEV): 值统一小写落库(大小写不敏感)
+        if cve:
+            hit = self._cache.get(cve.strip().lower())
             if hit:
                 hits.append(hit)
 

@@ -20,7 +20,9 @@ from models import ThreatIoc
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_TYPES = {"ip", "domain", "url", "file_hash", "email", "cidr"}
+# cve: CISA KEV(已知被利用漏洞目录)以 CVE 编号为 IOC 形态 —— 事件携带
+# cve 字段时精确比对, 命中即触发提级(见 intel_enricher 的 KEV 特权逻辑)。
+_ALLOWED_TYPES = {"ip", "domain", "url", "file_hash", "email", "cidr", "cve"}
 _ALLOWED_SEVERITY = {"info", "low", "medium", "high", "critical"}
 _DEFAULT_TTL_DAYS = 30
 

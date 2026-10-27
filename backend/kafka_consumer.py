@@ -1965,6 +1965,16 @@ class KafkaConsumerManager:
             "_trace_id": ident.trace_id or trace_id,
         }
 
+        # 情报富化(2026-10-27 路线 3): 落库前旁路富化 IP/CVE(KEV) 命中。
+        # fail-open + 超时保护, 开关关闭时零行为变化; 落库进 raw_data 可查。
+        try:
+            from threat_intel.intel_enricher import enrich_event_if_enabled
+            log_data = await enrich_event_if_enabled(log_data)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("[Kafka-Enriched] intel enrich dispatch failed", exc_info=True)
+
         async with db_session() as session:
             stored = await event_store.store(
                 session, log_data, session_id,

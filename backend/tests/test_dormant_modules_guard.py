@@ -144,8 +144,10 @@ DORMANT_CAPABILITIES = [
      "LLM 行为解读：前置 behavior_analyzer 已休眠，它自然更不会被调用"),
     # 2026-10-21: stix_taxii 已由 /api/intel/feeds/{id}/poll 调用，
     # 并从 dormant 清单移除；ioc_ingest 负责落库。
-    ("threat_intel/intel_enricher.py", "情报富化：依赖已休眠的 stix_taxii"),
-    ("threat_intel/llm_context.py", "LLM 情报上下文：依赖已休眠的 intel_enricher"),
+    # 2026-10-27: intel_enricher 已接线(ingest_pipeline.detect 与
+    # kafka_consumer._handle_enriched 经 enrich_event_if_enabled 调用)，
+    # 同样从 dormant 清单移除 —— 接线即转红的守卫机制反向验证接线完成。
+    ("threat_intel/llm_context.py", "LLM 情报上下文：intel_enricher 已接线但本模块暂无生产调用方"),
     ("session_reconstruct/timeline.py", "会话时间线重建"),
     ("session_reconstruct/http_linker.py", "HTTP 会话串联"),
     ("session_reconstruct/tcp_reassembler.py", "TCP 流重组"),

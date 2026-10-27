@@ -62,6 +62,8 @@ class TaxiiClient:
             iocs = await self._import_csv(feed_config)
         elif feed_type == "csv_http":
             iocs = await self._import_csv_http(feed_config)
+        elif feed_type == "kev_json":
+            iocs = await self._import_kev_json(feed_config)
         elif feed_type == "stix_bundle":
             iocs = await self._import_stix_bundle(feed_config)
         else:
@@ -313,6 +315,71 @@ class TaxiiClient:
             logger.warning("feed 拉取失败 url=%s: %s", url[:100], e)
             return []
         return self._parse_csv_text(text, config)
+
+    async def _import_kev_json(self, config: dict) -> list[dict]:
+        """CISA KEV(已知被利用漏洞目录)JSON 拉取与解析。
+
+        KEV 是免费情报里信号密度最高的源: 每条都是**已被在野利用**的 CVE,
+        命中即应提级(见 intel_enricher 的 KEV 特权逻辑), 而不是普通弱信号。
+        结构(2026-10 官方 schema):
+            {"title": ..., "catalogVersion": ..., "count": N,
+             "vulnerabilities": [{"cveID": "CVE-2021-44228",
+                                  "vendorProject": "Apache",
+                                  "product": "Log4j2",
+                                  "vulnerabilityName": "...",
+                                  "dateAdded": "2021-12-10",
+                                  "dueDate": "...",
+                                  "knownRansomwareCampaignUse": "Known"| "Unknown",
+                                  "cwes": ["CWE-502", ...], ...}]}
+        """
+        url = str(config.get("url", "")).strip()
+        if not url.lower().startswith(("http://", "https://")):
+            logger.warning("kev_json 源 url 非法: %s", url[:100])
+            return []
+        try:
+            text = await self._fetch_text(url, api_key=str(config.get("api_key", "")))
+        except Exception as e:
+            logger.warning("KEV 拉取失败 url=%s: %s", url[:100], e)
+            return []
+        return self._parse_kev_json(text, config)
+
+    def _parse_kev_json(self, text: str, config: dict) -> list[dict]:
+        """KEV JSON → cve 类型 IOC 列表(解析与传输解耦, 供测试)。"""
+        source = str(config.get("name", "cisa-kev"))
+        cfg = config.get("config") or {}
+        severity = str(cfg.get("severity", "critical"))
+        try:
+            catalog = json.loads(text)
+        except json.JSONDecodeError as e:
+            logger.error("KEV JSON 解析失败: %s", e)
+            return []
+        vulns = catalog.get("vulnerabilities")
+        if not isinstance(vulns, list):
+            logger.warning("KEV JSON 缺 vulnerabilities 数组, 拒绝解析")
+            return []
+
+        iocs: list[dict] = []
+        for v in vulns:
+            cve_id = str((v or {}).get("cveID") or "").strip()
+            # 宽进严出: 形状不对的条目跳过而不是让整批失败
+            if not cve_id.lower().startswith("cve-"):
+                continue
+            iocs.append({
+                "ioc_type": "cve",
+                "ioc_value": cve_id,
+                "threat_type": str(v.get("vulnerabilityName") or ""),
+                "severity": severity,
+                "confidence": 0.95,
+                "source": source,
+                "context": {
+                    "vendor": str(v.get("vendorProject") or ""),
+                    "product": str(v.get("product") or ""),
+                    "dateAdded": str(v.get("dateAdded") or ""),
+                    "dueDate": str(v.get("dueDate") or ""),
+                    "ransomware_use": str(v.get("knownRansomwareCampaignUse") or ""),
+                },
+            })
+        return iocs
 
     async def _import_stix_bundle(self, config: dict) -> list[dict]:
         """STIX Bundle JSON 文件导入"""

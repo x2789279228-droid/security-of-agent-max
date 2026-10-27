@@ -447,6 +447,10 @@ class Settings(BaseSettings):
     taxii_user: str = ""
     taxii_password: str = ""
     ioc_match_threshold: float = 0.8         # IOC 匹配置信度阈值
+    # 情报富化(2026-10-27): 与 intel_enabled(拉取)解耦 —— 富化只读 IOC 缓存,
+    # 默认关闭保证接入主链路行为与富化上线前完全一致(fail-open, 只计数不阻塞)。
+    intel_enrich_enabled: bool = False
+    intel_enrich_timeout_ms: int = 800       # 单事件富化超时, 超时放行原事件
 
     # ── 沙箱检测 ──
     sandbox_enabled: bool = False            # 启用沙箱联动

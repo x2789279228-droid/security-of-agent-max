@@ -44,6 +44,12 @@ CAPTURE_PACKETS = Counter("soc_capture_packets_total", "NDR 抓包计数")
 EDR_EVENTS = Counter("soc_edr_events_total", "EDR 事件计数(按源)", ["source"])
 INTEL_IOC = Counter("soc_intel_ioc_total", "威胁情报 IOC 拉取计数(按源)", ["source"])
 IOC_MATCHES = Counter("soc_ioc_matches_total", "IOC 匹配命中计数")
+INTEL_ENRICH_EVENTS = Counter(
+    "soc_intel_enrich_events_total", "情报富化执行计数(按结果)", ["result"]
+)
+INTEL_ENRICH_KEV = Counter(
+    "soc_intel_enrich_kev_total", "CISA KEV 命中提级计数"
+)
 SANDBOX_SUBMISSIONS = Counter("soc_sandbox_submissions_total", "沙箱提交计数(按类型)", ["kind"])
 PHISHING_DETECTIONS = Counter("soc_phishing_detections_total", "反钓鱼检测计数(按类别)", ["category"])
 LLM_TOKENS = Counter("soc_llm_tokens_total", "LLM token 消耗(按组件)", ["component"])
@@ -387,6 +393,25 @@ def inc_intel_ioc(source: str = "misp", n: int = 1) -> None:
     """
     try:
         INTEL_IOC.labels(source=source or "misp").inc(n)
+    except Exception:
+        pass
+
+
+def inc_intel_enrich(result: str, n: int = 1) -> None:
+    """情报富化执行计数。result ∈ {enriched, no_hit, skipped, failed, timeout}。
+
+    failed/timeout 必须与 enriched 分开计数 —— 富化是 fail-open 旁路,
+    持续失败只有进了指标才会被发现(评审教训: 静默降级 = 未降级)。
+    """
+    try:
+        INTEL_ENRICH_EVENTS.labels(result=result or "skipped").inc(n)
+    except Exception:
+        pass
+
+
+def inc_intel_enrich_kev(n: int = 1) -> None:
+    try:
+        INTEL_ENRICH_KEV.inc(n)
     except Exception:
         pass
 
