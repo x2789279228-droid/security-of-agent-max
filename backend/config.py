@@ -290,6 +290,10 @@ class Settings(BaseSettings):
     kafka_max_poll_interval_ms: int = 600000
     kafka_consumer_restart_initial_s: float = 1.0
     kafka_consumer_restart_max_s: float = 30.0
+    # 生产者与消费者重试能力对齐: 首启失败(broker 未就绪等)后由监督循环
+    # 指数退避重试, 不再一次性永久失效(否则 ingest 静默降级 HTTP→PG)。
+    kafka_producer_restart_initial_s: float = 1.0
+    kafka_producer_restart_max_s: float = 30.0
     kafka_audit_store_concurrency: int = 12
     kafka_fetch_pause_s: float = 0.5
     # 消费侧重试：区分临时故障与永久错误。旧实现是 0.5s+1.0s=1.5s 总等待。
@@ -528,6 +532,16 @@ class Settings(BaseSettings):
     # ── 演示流量（默认关；仅仿真事件打 _demo，不写生产 Sigma）──
     demo_traffic_enabled: bool = False
     demo_traffic_interval_s: int = 300
+
+    # ── 大屏实况面板 (A1/A2/A3: agent 实况 / 攻击地图 / 零丢失账本) ──
+    # 广播走 SSE (ledger / attack_geo 频道), bulk 车道按 key 合并只留最新帧。
+    ledger_interval_s: float = 3.0               # 零丢失账本广播间隔(秒)
+    attack_geo_interval_s: float = 5.0           # 攻击态势广播间隔(秒)
+    attack_geo_window: int = 400                 # 态势回看的事件窗口(条, id 倒序)
+    attack_geo_max_points: int = 24              # 态势图攻击点上限
+    home_lat: float = 27.95                      # 受击方纬度 (默认湖南科技大学)
+    home_lon: float = 112.93                     # 受击方经度
+    home_label: str = "湖南科技大学"              # 受击方名称(态势图中心标签)
 
     # ── LLM 成本控制 (P0.T 引入; 2026-10-23 第二阶段默认对齐) ──
     # 默认给真实上限: 5M tokens/天(演示/中小流量远用不完; 超限走分级降级,

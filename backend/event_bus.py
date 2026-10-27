@@ -109,6 +109,12 @@ def coalesce_key(event_type: str, data: dict | None, lane: str) -> tuple | None:
         return ("agent_stage", payload.get("event_id"), payload.get("stage"), payload.get("phase"))
     if event_type == "agent_thought":
         return ("agent_thought", payload.get("event_id"))
+    if event_type == "ledger":
+        # 账本快照: 只留最新一帧, 慢消费者积压时不放大过期账目
+        return ("ledger",)
+    if event_type == "attack_geo":
+        # 攻击态势快照: 同上, 只留最新一帧
+        return ("attack_geo",)
     if event_type == "pipeline_health":
         return (
             "pipeline_health",

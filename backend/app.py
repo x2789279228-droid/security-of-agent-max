@@ -384,6 +384,22 @@ async def lifespan(app: FastAPI):
     await scheduler.start(async_session)
     logger.info("Scheduler started")
 
+    # 零丢失账本广播 (SSE ledger 频道, 大屏账本面板数据源)
+    try:
+        from ledger_broadcast import start as start_ledger_broadcast
+        start_ledger_broadcast()
+        logger.info("Ledger broadcast started")
+    except Exception as e:
+        logger.warning(f"Ledger broadcast start failed: {e}")
+
+    # 攻击态势广播 (SSE attack_geo 频道, 大屏攻击地图数据源)
+    try:
+        from attack_geo_broadcast import start as start_attack_geo_broadcast
+        start_attack_geo_broadcast()
+        logger.info("Attack geo broadcast started")
+    except Exception as e:
+        logger.warning(f"Attack geo broadcast start failed: {e}")
+
     # 可观测性
     # OpenTelemetry 标准 trace (→ otel-collector → Tempo)
     # 放在 lifespan 而非模块 import 期: 见文件下方"OpenTelemetry 说明"。
@@ -679,6 +695,8 @@ from routers.ndr import router as ndr_router
 from routers.edr_intel import router as edr_intel_router
 from routers.ops import router as ops_router
 from routers.capabilities import router as capabilities_router
+from routers.benchmark import router as benchmark_router
+from routers.demo_seed import router as demo_seed_router
 from routers.self_play import router as self_play_router
 from routers.causal import router as causal_router
 
@@ -695,12 +713,14 @@ app.include_router(rag_router)
 app.include_router(phishing_router)
 app.include_router(ndr_router)
 app.include_router(capabilities_router)
+app.include_router(benchmark_router)
+app.include_router(demo_seed_router)
 app.include_router(edr_intel_router)
 app.include_router(ops_router)
 app.include_router(self_play_router)
 app.include_router(causal_router)
 
-logger.info(f"Mounted 15 routers — {len(app.routes)} routes total")
+logger.info(f"Mounted 17 routers — {len(app.routes)} routes total")
 
 # ── OpenTelemetry 说明（初始化已移入 lifespan，见下）──
 # 2026-10-03: 原先在本模块 import 期无条件 setup_otel()。OTel 的全局 TracerProvider
