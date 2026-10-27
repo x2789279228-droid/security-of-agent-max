@@ -1,0 +1,133 @@
+{
+  "meta": {
+    "date": "2026-10-26",
+    "platform": "本机 docker compose -p soc (lite 单 broker)",
+    "attacker": "独立容器 kali-pentest (kalilinux/kali-rolling), 只对 soc 施压",
+    "tool": "tools/attack-large-scale-2026-09-10.py (批次模式, JWT Bearer)",
+    "rules": "150 条(影子 125)",
+    "sample": "合成攻击事件(8 类威胁轮转), 非公开数据集",
+    "note": "本文件为压测期间实测值的机器可读汇总(手工汇编自 Prometheus/consumer-groups/PG 查询), 非脚本生成"
+  },
+  "ledger": {
+    "_unit_note": "两个口径不要混: events_* 是【事件条数】(soc_ingest_received_total{source=http}), http_requests_by_status 是【HTTP 请求数】(P1/P2/P3 为 144 个批次请求, P4 为 3000 个单条请求)",
+    "events_received_total": 24485,
+    "events_accepted_202": 24447,
+    "events_rejected_429": 2407,
+    "events_rejected_422": 146,
+    "http_requests_total": 3193,
+    "http_requests_by_status": {"200": 8, "202": 629, "422": 146, "429": 2410},
+    "new_rows_in_pg": 18447,
+    "idempotent_deduplicated": 6000,
+    "dlq_records": 0,
+    "rejected_topic_msgs": 0,
+    "loss_rate": 0.0,
+    "reconciliation": "24447 事件入队 = 18447 新增落库 + 6000 幂等去重, 差额 0"
+  },
+  "profiles": {
+    "P1_steady_100eps": {
+      "cmd": "--total 6000 --rate 100 --session lt-p1 --id-prefix p1-",
+      "sent_ok": 6000, "sent_fail": 0, "batch_count": 60, "elapsed_sec": 174.1,
+      "actual_rate_eps": 34.468,
+      "latency_ms": {"p50": 1993.7, "p95": 2330.7, "p99": 2431.5},
+      "rows_in_pg": 6000, "lost": 0
+    },
+    "P2_burst_10x": {
+      "cmd": "--total 12000 --rate 500 --session lt-p2 --id-prefix p2-",
+      "sent_ok": 12000, "sent_fail": 0, "batch_count": 24, "elapsed_sec": 91.7,
+      "actual_rate_eps": 130.829,
+      "latency_ms": {"p50": 2699.9, "p95": 3027.1, "p99": 3034.8},
+      "rows_in_pg": 12000, "lost": 0, "http_429": 0, "http_503": 0
+    },
+    "P3_replay_storm": {
+      "cmd": "--total 6000 --rate 100 --session lt-p3 --id-prefix p1- (复用 P1 前缀)",
+      "sent_ok": 6000, "sent_fail": 0, "batch_count": 60, "elapsed_sec": 191.6,
+      "actual_rate_eps": 31.312,
+      "latency_ms": {"p50": 2259.2, "p95": 2675.5, "p99": 2774.9},
+      "rows_in_pg": 0, "note": "同 eventId 重放, 被幂等账本吸收; lt-p1 仍为 6000 行"
+    },
+    "P4_bad_data_flood": {
+      "cmd": "内联 3000 请求(非 JSON / 缺必填 / 类型错 / 双重编码 各 1/4)",
+      "elapsed_sec": 294.4,
+      "status": {"429": 2407, "422": 146, "202": 447},
+      "latency_ms": {"p50": 6.8, "p95": 699.1, "p99": 1752.3},
+      "rows_in_pg": 447, "service_stayed_up": true
+    }
+  },
+  "saturation": {
+    "ingest_peak_eps": 130.829,
+    "consume_eps_load_phase": 22.1,
+    "consume_eps_drain_phase": 13.97,
+    "detection_ms_per_event_sigma": 42.46,
+    "detection_ms_per_event_anomaly": 0.64,
+    "detection_calls": 17299,
+    "single_process_ceiling_eps": 23.5,
+    "verdict": "瓶颈在 Python 单进程检测+审计, 不在接入侧(Kafka/Flink 有余量)"
+  },
+  "detection_outcomes": {
+    "sigma": {"detected": 5963, "partial": 7797, "not_detected": 3507},
+    "anomaly": {"inconclusive": 17267, "ratio_inconclusive": 1.0,
+                "note": "真实流量下异常检测 100% 不产出结论"}
+  },
+  "audit_lanes": {
+    "tools_only_P2": 13137,
+    "llm_single_P1": 1388,
+    "llm_agent_P0": 2347,
+    "complete_llm": 365,
+    "complete_cache": 1016,
+    "complete_tools": 5,
+    "claimed_total": 16855,
+    "pq_enqueue_P0": 2242,
+    "pq_dequeue_P0": 7,
+    "note": "约 76% 审计走规则收口通道; PQ 进出不对称, 不能用 PQ 深度当背压信号"
+  },
+  "fault_injection": {
+    "P5a_taskmanager_kill": {
+      "jobs": "3 作业 RESTARTING -> RUNNING",
+      "checkpoints_completed": "23~24/作业, failed 0",
+      "slots": "15 总, 9 占用(恢复后)",
+      "duplicate_alerts": 0
+    },
+    "P5b_pg_down_30s": {
+      "http_202": "5/5", "http_latency_ms": "10~24",
+      "consume": "停摆, 在途 44 条 offset 保留", "loss": 0
+    },
+    "P5c_redis_down_30s": {
+      "http_202": "5/5", "http_latency_ms": "10~44",
+      "claim": "fail-open, 不阻断接入"
+    }
+  },
+  "backlog_drain": {
+    "lag_peak": 12216,
+    "drain_eps": 13.97,
+    "eta_to_zero_sec": 536,
+    "doc_criterion_sec": 60,
+    "note": "验收线未达成(本轮按用户要求忽略验收标准), 排空速率本身可信"
+  },
+  "resources": {
+    "backend_cpu_pct_under_load": "97~100 (上限 2 cpus)",
+    "backend_mem_mib": {"under_load": "232~240", "after": 511, "limit": 2048},
+    "flink_slots": {"total": 15, "used": 9},
+    "note": "内存驻留未回落, 单点快照不足以判定泄漏, 需 8h 尺度单独跑"
+  },
+  "topic_totals_after_run": {
+    "security-events-ingest": 24469,
+    "security-logs-raw": 8,
+    "security-logs-validated": 18,
+    "security-sigma-hit": 5190,
+    "security-events-enriched": 74,
+    "security-alerts": 0,
+    "security-logs-duplicate": 0,
+    "note": "HTTP 接入路径不过 Flink 主流水线(LogValidationJob 在该路径基本空转), 吞吐结论按 Python 消费路径给"
+  },
+  "blockers_fixed_before_run": [
+    "alembic fileConfig 顶掉宿主 root logger → 迁移后 INFO 日志全灭",
+    ".env 缺 KAFKA_BOOTSTRAP_SERVERS → Flink/schema-registry 指向不存在的 kafka-1",
+    "flink-jobs/*.sh 是 CRLF → job-submitter exit 126 崩溃循环, 作业一个都没提交",
+    "Flink checkpoint 配置只在客户端缺失 → 事务永不提交, read_committed 消费者一条都读不到",
+    "checkpoint 状态卷属主 root → 作业直接 FAILED",
+    "compose 未接线 SHARED_MEMORY_EXECUTION_MODE → .env 配 live 不生效",
+    "客户端作业并行度只有 1 → 15 槽只用 3 槽",
+    "43 条存量困在旧作业遗留的未决事务 → 只能重置 offset 放行(该批数据实际已丢)"
+  ],
+  "known_gap_found": "rollback_batch 认不了 FW-RULE- 级令牌 → 封禁后 iptables 规则不被删除, 只能等 TTL 到期自动解除"
+}

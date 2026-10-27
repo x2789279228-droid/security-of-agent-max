@@ -20,14 +20,23 @@
   "L3_anomaly": {
     "dataset": "anomaly_cases(行为面)",
     "anomaly": {
-      "tp": 0,
+      "tp": 3,
       "fp": 0,
       "fn": 0,
-      "precision": null,
-      "recall": null,
-      "f1": null
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
     },
-    "tn": 0
+    "tn": 2,
+    "inconclusive_excluded": 3,
+    "inconclusive_ids": [
+      "ANO-I-01",
+      "ANO-I-02",
+      "ANO-I-03"
+    ],
+    "known_gap_excluded": 0,
+    "known_gap_ids": [],
+    "note": "inconclusive(结构不可判)与 known_gap(已登记标定缺口)均排除出二分类计数"
   },
   "L4_correlation": {
     "dataset": "correlation_cases(链级)",
@@ -45,10 +54,10 @@
     "dataset": "L1 确认检出 × taxonomy × 真实策略引擎",
     "decisions": {
       "auto_execute": 2,
-      "needs_approval": 3,
+      "needs_approval": 6,
       "uncertain": 0,
       "no_action": 0,
-      "uncovered_type": 3
+      "uncovered_type": 0
     },
     "examples": {
       "auto_execute": [
@@ -56,19 +65,18 @@
         "SIG-P-10:端口扫描限速"
       ],
       "needs_approval": [
+        "SIG-P-01",
+        "SIG-P-02",
         "SIG-P-03",
+        "SIG-P-06",
         "SIG-P-07",
         "SIG-P-08"
       ],
       "uncertain": [],
       "no_action": [],
-      "uncovered_type": [
-        "SIG-P-01:path_traversal",
-        "SIG-P-02:path_traversal",
-        "SIG-P-06:path_traversal"
-      ]
+      "uncovered_type": []
     },
-    "match_ms_avg": 29.95
+    "match_ms_avg": 9.6
   },
   "scope_note": "LLM 审计层不入本表: 无 API key 时审计管线退化为规则收口, 无区分度;LLM 的贡献由 grounding 评测(evaluate_grounding)单独量化。各层使用其自然工作面的数据集, 跨层不做单一轴硬拼。"
 }

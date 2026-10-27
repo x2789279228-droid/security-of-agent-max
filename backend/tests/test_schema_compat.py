@@ -177,6 +177,57 @@ def test_catalog_alignment_and_fixtures_pass():
     assert issues == [], issues
 
 
+# ── 可空性对齐(2026-10-25 parentEventId 漂移回归) ──────────────────
+
+
+def test_avro_nullable_json_strict_is_alignment_break():
+    """Avro 可空 + JSON 纯类型 = 消费端会拒收 null, 门禁必须报(旧实现剥 null 后失明)。"""
+    from schema_compat import alignment_issues
+
+    js = {
+        "type": "object",
+        "properties": {"parentEventId": {"type": "string"}},
+        "required": [],
+        "additionalProperties": True,
+    }
+    avro = {"fields": [{"name": "parentEventId", "type": ["null", "string"], "default": None}]}
+    issues = alignment_issues(js, avro, None)
+    assert any("parentEventId" in i and "可空" in i for i in issues), issues
+
+
+def test_avro_nullable_json_nullable_passes():
+    from schema_compat import alignment_issues
+
+    js = {
+        "type": "object",
+        "properties": {"parentEventId": {"type": ["string", "null"]}},
+        "required": [],
+        "additionalProperties": True,
+    }
+    avro = {"fields": [{"name": "parentEventId", "type": ["null", "string"], "default": None}]}
+    assert alignment_issues(js, avro, None) == []
+
+
+def test_writer_nullable_reader_strict_is_forward_break():
+    """JSON 演化把字段收紧为非空(旧 reader 视角)也必须被 FULL 模式抓住。"""
+    old = _base_schema()
+    new = _base_schema()
+    new["properties"]["score"] = {"type": ["number", "null"]}
+    issues = compatibility_issues(new, old, "FULL")
+    assert any("FORWARD" in i and "score" in i for i in issues), issues
+
+
+def test_security_event_accepts_null_optional_fields():
+    """Flink 存量消息的可空字段漂移不得再毒丸化消费者。"""
+    event = _load("security_event.legacy.json")
+    for key, value in (
+        ("parentEventId", None), ("schemaVersion", None),
+        ("producer", None), ("correlationId", None), ("occurredAt", None),
+    ):
+        event[key] = value
+    assert schema_registry.validate("security-events-enriched", event) == []
+
+
 def test_python_and_flink_share_fixtures():
     java_dir = ROOT / "flink-jobs" / "src" / "test" / "resources" / "fixtures"
     for name in (

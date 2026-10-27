@@ -34,11 +34,9 @@
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -94,15 +92,7 @@ SRC_IP = "10.60.0.1"
 _CALLS = [0]
 
 
-@contextlib.contextmanager
-def pinned_clock(ts: float):
-    """把 ``time.time()`` 钉在 ts 上（退出时恢复）。"""
-    real = time.time
-    time.time = lambda: ts
-    try:
-        yield
-    finally:
-        time.time = real
+from eval_datasets.evaluate_detection import pinned_clock  # noqa: E402  (权威实现, 单一来源)
 
 
 def _ev(event_id: str, event_type: str, ts: float, severity: str = "info") -> dict:

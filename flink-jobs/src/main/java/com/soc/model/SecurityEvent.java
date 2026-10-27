@@ -2,6 +2,7 @@ package com.soc.model;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -10,8 +11,13 @@ import java.util.Map;
 /**
  * 安全事件模型
  * 表示一条经过验证的安全日志事件
+ *
+ * 序列化为 NON_NULL: 未赋值的可选字段(parentEventId/srcIp/traceId 等)不得输出
+ * null 键 —— 2026-10-25 审计: 每条 enriched 事件都带 "parentEventId": null,
+ * 与后端契约的「缺省 vs null」语义漂移, 曾把消费端全量毒丸化。
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class SecurityEvent implements Serializable {
 
     private static final long serialVersionUID = 1L;

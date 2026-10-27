@@ -98,6 +98,16 @@ def _required(schema: dict) -> set[str]:
 
 
 def _type_ok(writer: set[str], reader: set[str]) -> bool:
+    """writer 可能写出的每个类型都必须被 reader 接受。
+
+    可空性显式比较: writer 可写 null 而 reader 不收 null → 不兼容。
+    旧实现把两侧的 null 都剥掉再比较, 对「Avro 可空 / JSON 纯 string」
+    这类漂移失明 —— parentEventId 契约漂移因此存活(2026-10-25 审计 #2)。
+    """
+    if not writer or "any" in reader:
+        return True
+    if "null" in writer and "null" not in reader:
+        return False
     w = set(writer) - {"null"}
     r = set(reader) - {"null"}
     if not w or not r or "any" in r:
@@ -261,12 +271,19 @@ def alignment_issues(
             if name not in avro_fields:
                 issues.append(f"ALIGN: JSON 字段 {name} 在 Avro 中缺失")
                 continue
-            if not _type_ok(_avro_types(avro_fields[name]), _types(json_props[name])) and not _type_ok(
-                _types(json_props[name]), _avro_types(avro_fields[name])
-            ):
+            avro_t = _avro_types(avro_fields[name])
+            json_t = _types(json_props[name])
+            if not _type_ok(avro_t, json_t) and not _type_ok(json_t, avro_t):
                 issues.append(
-                    f"ALIGN: 字段 {name} JSON 类型 {sorted(_types(json_props[name]))} "
-                    f"与 Avro {sorted(_avro_types(avro_fields[name]))} 不一致"
+                    f"ALIGN: 字段 {name} JSON 类型 {sorted(json_t)} "
+                    f"与 Avro {sorted(avro_t)} 不一致"
+                )
+            # 危险方向单查: Avro(writer)可空而 JSON(reader)不收 null ——
+            # 双向 or 逻辑会吞掉这个单向失败, parentEventId 漂移即此型。
+            if "null" in avro_t and "null" not in json_t:
+                issues.append(
+                    f"ALIGN: 字段 {name} Avro 可空但 JSON Schema 非可空, "
+                    f"消费端会拒收 null 值(2026-10-25 parentEventId 漂移同类)"
                 )
         for name in sorted(avro_fields):
             if name not in json_props:

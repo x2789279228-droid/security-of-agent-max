@@ -262,14 +262,19 @@ def anomaly_cases() -> list:
     case("ANO-P-02", "detected",
          _ev(event_id="p2", event_type="RARE_ATTACK_TYPE", severity="critical",
              src_ip=src2, event_time=_ts(BASELINE_HOURS + 0.1)),
-         "已建立基线的实体出现罕见事件类型 + critical + 非活跃时段",
+         "已建立基线的实体出现罕见事件类型 + critical（探针在工作时段, "
+         "时序维度无证据）。2026-10-25 前实测 score=0.4357 低于阈值"
+         "（known_gap 登记）；severity_shift 维度接入后 0.6435 过阈值 —— "
+         "缺口已修复，本条转为反向回归锚点",
          baseline=_baseline(src_ip=src2))
 
     src3 = "10.50.0.3"
     case("ANO-P-03", "detected",
          _ev(event_id="p3", event_type="RARE_ATTACK_TYPE", severity="critical",
              src_ip=src3, event_time=_ts(3.5)),
-         "已建立基线的实体在凌晨 3 点半活动（时序 + 罕见度双证据）",
+         "已建立基线的实体在凌晨 3 点半活动（时序 + 罕见度双证据）。"
+         "2026-10-25 前实测 score=0.4957 低于阈值（known_gap 登记）；"
+         "severity_shift 维度接入后 0.6955 过阈值 —— 缺口已修复",
          baseline=_baseline(src_ip=src3))
 
     # ── 应判正常 ──

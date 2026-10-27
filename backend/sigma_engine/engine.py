@@ -449,6 +449,39 @@ class PySigmaDetector:
                 files.extend(sorted(pathlib.Path(d).glob("*.yml")))
         return files
 
+    @staticmethod
+    def _segment_required_cols(seg: str) -> frozenset:
+        """提取一段 SQL 里「**列有值**才可能命中」的 presence-必须列。
+
+        用途（PERF-OPT Wave 1-3 规则预筛）：事件缺该列时整段不可能命中，
+        可整段跳过。安全性论证：
+          · 正向条件（col LIKE / col = / col IN）：SQLite 列值为 NULL 时
+            谓词非 TRUE → 不命中 → 列缺席 ⇒ 段死，可跳；
+          · `NOT col LIKE`：NULL 三值逻辑下 NOT NULL ≠ TRUE → 不命中 →
+            同样 presence-必须；
+          · `col IS NULL`（无 NOT 前缀）：**列缺席正是命中条件** —— 这类列
+            必须从 presence 集合剔除（真实规则 C-013 的 cs-referer/cs-user-agent
+            即此形态），否则预筛会引入漏报；
+          · 保守默认：解析不了的引用一律算 presence-必须（只会让预筛
+            少跳、不会错跳）。
+        """
+        cols: set = set()
+        for m in re.finditer(r"`([^`]+)`", seg):
+            cols.add(m.group(1))
+        for m in re.finditer(
+                r"(?i)(?:\bWHERE\b|\bAND\b|\bOR\b|\()\s*([A-Za-z_][\w.\-]*)\s*(?:=|LIKE|IN|!=|<>)",
+                seg):
+            if m.group(1).upper() not in {
+                    "SELECT", "FROM", "WHERE", "AND", "OR", "LIKE", "IN",
+                    "NOT", "NULL"}:
+                cols.add(m.group(1))
+        # 剔除「无 NOT 前缀的 col IS NULL」——缺席即命中条件
+        for m in re.finditer(
+                r"(NOT\s+)?(?:`([^`]+)`|([A-Za-z_][\w.\-]*))\s+IS\s+NULL", seg, re.I):
+            if not m.group(1):
+                cols.discard(m.group(2) or m.group(3))
+        return frozenset(c for c in cols if c)
+
     def _build_compiled(self):
         """按文件加载并编译。单文件失败只 skip,不拖垮整库。不改 self._compiled。
 
@@ -488,6 +521,13 @@ class PySigmaDetector:
                         "severity": _severity_of(meta.get("severity")),
                     })
                     continue
+                # PERF-OPT Wave 1-3: 每段的 presence-必须列集合（预筛索引）。
+                # 必须在 UNION ALL 合并**之前**按段提取 —— 合并后段边界丢失,
+                # 只能取到跨段并集, 而段间是 OR 语义: 跳过判据是
+                # 「每一段都至少缺一个必须列」(段死), 不是「并集里有列缺」。
+                seg_cols = [self._segment_required_cols(str(s))
+                            for s in (sql_list if isinstance(sql_list, list)
+                                      else [sql_list])]
                 if isinstance(sql_list, list) and len(sql_list) > 1:
                     # P1: pySigma 对多 selection/复合条件规则会产出**多条** SQL —
                     # 修复前只编译第一条, 其余静默丢弃 → 带 `1 of them` 类条件的
@@ -498,6 +538,7 @@ class PySigmaDetector:
                 else:
                     sql = (sql_list[0] if isinstance(sql_list, list) and sql_list else str(sql_list))
                 sql = sql.replace("<TABLE_NAME>", self.TABLE)
+                meta["req_col_sets"] = [sorted(s) for s in seg_cols if s]
                 for m in re.finditer(r"`([^`]+)`", sql):
                     field_index.add(m.group(1))
                 for m in re.finditer(r"(?i)(?:\bWHERE\b|\bAND\b|\bOR\b|\()\s*([A-Za-z_][\w.\-]*)\s*(?:=|LIKE|IN|!=|<>)", sql):
@@ -695,8 +736,11 @@ class PySigmaDetector:
             return self._legacy_detect(event), []
         # 用 apply_mapping 同时提供平台字段(url/event/...)与 Sigma 社区字段(cs-uri-query/...),
         # 使内置规则与 SigmaHQ 子集规则都能命中。
+        # 规范化视图(B4/EVASION 对抗保持率 0.438 的修复面)在映射**之前**:
+        # url/message 先受限解码归一再匹配, 原始事件不被改写, 规则无需逐条加编码变体。
         from sigma_engine.mapping import apply_mapping
-        ev = apply_mapping(event)
+        from normalization import canonical_matching_view
+        ev = apply_mapping(canonical_matching_view(event))
         cols = list(ev.keys())
         if not cols:
             return [], []
@@ -708,13 +752,27 @@ class PySigmaDetector:
             # 每事件重建单行表，避免历史行残留造成假命中
             self._ensure_table(cols, ev, conn=conn)
             results = []
-            str(ev.get("url", ""))
-            str(ev.get("src_ip", ""))
-            str(ev.get("event", ""))
             cur = conn.cursor()
             for meta, sql in compiled:
                 if not meta.get("enabled", True):
                     continue
+                # PERF-OPT Wave 1-3 规则预筛: 每段至少缺一个 presence-必须列
+                # ⇒ 该段不可能命中(正向谓词在 NULL 上非 TRUE); 全段死 ⇒ 整条跳过。
+                # 段集合在编译期按 UNION ALL 前的段提取(见 _segment_required_cols
+                # 的安全性论证)。空集合 = 提取不到必须列 = 不预筛, 恒执行。
+                req_sets = meta.get("req_col_sets")
+                if req_sets:
+                    dead = True
+                    for cols in req_sets:
+                        for c in cols:
+                            v = ev.get(c)
+                            if v is not None and v != "":
+                                dead = False
+                                break
+                        if not dead:
+                            break
+                    if dead:
+                        continue
                 try:
                     row = cur.execute(sql)
                     hit = row.fetchone() is not None
@@ -1035,7 +1093,10 @@ class PySigmaDetector:
             except Exception as e:
                 logger.warning(f"[Sigma] legacy fallback unavailable: {e}")
                 return []
-        return self._legacy.detect(event)
+        # 降级路径同样走规范化视图 —— 主/备两条路径的匹配语义必须一致,
+        # 否则降级期间编码攻击的检出会静默回退到 0.438 时代的口径。
+        from normalization import canonical_matching_view
+        return self._legacy.detect(canonical_matching_view(event))
 
     # ── 对外兼容接口 ──
     def detect_batch(self, events: list[dict]) -> dict:

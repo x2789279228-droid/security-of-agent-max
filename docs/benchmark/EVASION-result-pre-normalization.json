@@ -1,0 +1,108 @@
+{
+  "families": {
+    "traversal": {
+      "baseline_detected": true,
+      "per_operator": {
+        "baseline": true,
+        "url_encode": false,
+        "double_encode": true,
+        "partial_encode": false,
+        "case_flip": true
+      },
+      "retention": 0.5,
+      "note": ""
+    },
+    "traversal_encoded": {
+      "baseline_detected": true,
+      "per_operator": {
+        "baseline": true,
+        "url_encode": true,
+        "double_encode": false,
+        "partial_encode": true,
+        "case_flip": true
+      },
+      "retention": 0.75,
+      "note": ""
+    },
+    "xss": {
+      "baseline_detected": true,
+      "per_operator": {
+        "baseline": true,
+        "url_encode": false,
+        "double_encode": false,
+        "partial_encode": false,
+        "case_flip": true
+      },
+      "retention": 0.25,
+      "note": ""
+    },
+    "es_unauth": {
+      "baseline_detected": true,
+      "per_operator": {
+        "baseline": true,
+        "url_encode": false,
+        "double_encode": false,
+        "partial_encode": true,
+        "case_flip": true
+      },
+      "retention": 0.5,
+      "note": ""
+    },
+    "env_probe": {
+      "baseline_detected": true,
+      "per_operator": {
+        "baseline": true,
+        "url_encode": false,
+        "double_encode": false,
+        "partial_encode": true,
+        "case_flip": true
+      },
+      "retention": 0.5,
+      "note": ""
+    },
+    "git_probe": {
+      "baseline_detected": true,
+      "per_operator": {
+        "baseline": true,
+        "url_encode": false,
+        "double_encode": false,
+        "partial_encode": true,
+        "case_flip": true
+      },
+      "retention": 0.5,
+      "note": ""
+    },
+    "actuator": {
+      "baseline_detected": true,
+      "per_operator": {
+        "baseline": true,
+        "url_encode": false,
+        "double_encode": false,
+        "partial_encode": false,
+        "case_flip": true
+      },
+      "retention": 0.25,
+      "note": ""
+    },
+    "webshell_cmd": {
+      "baseline_detected": true,
+      "per_operator": {
+        "baseline": true,
+        "url_encode": false,
+        "double_encode": false,
+        "partial_encode": false,
+        "case_flip": true
+      },
+      "retention": 0.25,
+      "note": ""
+    }
+  },
+  "overall_retention": 0.438,
+  "operators": [
+    "url_encode",
+    "double_encode",
+    "partial_encode",
+    "case_flip"
+  ],
+  "scope_note": "签名层对抗韧性; 语义级规避属 ingest 规范化/行为层职责"
+}

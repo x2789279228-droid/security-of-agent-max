@@ -6,6 +6,7 @@ import com.soc.util.EventEnvelope;
 import com.soc.util.KafkaConfig;
 import com.soc.util.TraceIdHeaderProvider;
 import com.soc.util.TraceUtil;
+import com.soc.util.UrlCanonicalizer;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.state.MapState;
@@ -741,7 +742,45 @@ public class LogValidationJob {
                 fixes++;
             }
 
+            // 检测输入规范化（2026-10-25, 与 backend/normalization.py 镜像）:
+            // url 原值不动, 规范形附加进 rawData._urlCanonical —— 供下游分析/对账;
+            // Sigma 匹配的权威规范化在 backend 引擎视图（canonical_matching_view）,
+            // 这里是同语义的管道侧落地, 保证 validated 流可观测"解码后形态"。
+            fixes += normalizeCanonicalUrl(event);
+
             return fixes;
+        }
+
+        /**
+         * 从 rawData 的 url 系字段提取规范形 URL 附加为 {@code _urlCanonical}。
+         * 字段候选与 backend log_ingestion._normalize_fields 的 url 兜底一致
+         * （url / requestUrl / request_uri / path）。无 url 系字段或规范化
+         * 无变化时不写标记。
+         *
+         * @return 修正的字段数量（0 或 1）
+         */
+        private int normalizeCanonicalUrl(SecurityEvent event) {
+            Map<String, Object> raw = event.getRawData();
+            if (raw == null) {
+                return 0;
+            }
+            String url = null;
+            for (String key : new String[]{"url", "requestUrl", "request_uri", "path"}) {
+                Object v = raw.get(key);
+                if (v instanceof String && !((String) v).isEmpty()) {
+                    url = (String) v;
+                    break;
+                }
+            }
+            if (url == null) {
+                return 0;
+            }
+            String canon = UrlCanonicalizer.canonicalUrl(url);
+            if (canon == null || canon.equals(url)) {
+                return 0;
+            }
+            raw.put("_urlCanonical", canon);
+            return 1;
         }
 
         private String computeFingerprint(SecurityEvent event) {

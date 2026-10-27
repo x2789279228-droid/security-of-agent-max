@@ -16,8 +16,8 @@
     "producer": { "type": "string", "description": "生产方标识" },
     "correlationId": { "type": "string", "description": "同一业务处理过程的关联 ID" },
     "correlation_id": { "type": "string" },
-    "parentEventId": { "type": "string", "description": "派生事件指向的来源业务事件 ID" },
-    "parent_event_id": { "type": "string" },
+    "parentEventId": { "type": ["string", "null"], "description": "派生事件指向的来源业务事件 ID (可空, 与 Avro 对齐)" },
+    "parent_event_id": { "type": ["string", "null"] },
     "payload": { "type": "object", "description": "实际业务内容" }
   },
   "anyOf": [

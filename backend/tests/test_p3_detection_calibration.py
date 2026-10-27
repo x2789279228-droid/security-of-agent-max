@@ -59,10 +59,13 @@ KNOWN_GAPS = {
     #   单事件阶段本就证据不足，却直接产出 block_ip；已降级为 partial + alert。
     # 回归由 test_benign_cases_never_* 两条断言守护。
     #
-    # 未修复：ANOMALY_SCORE_THRESHOLD=0.60 漏掉 ANO-P-02(0.4357)、
-    # ANO-P-03(0.4957)。标定集是合成的，阈值定多少必须由生产数据决定，
-    # 不在合成集上擅自下调 —— 否则就是拿标定集调参调出绿。
-    "anomaly_threshold_above_recall_floor": ["ANO-P-02", "ANO-P-03"],
+    # 已修复（原值 ["ANO-P-02","ANO-P-03"]，2026-10-25a 登记、2026-10-25b 关闭）：
+    #   ANOMALY_SCORE_THRESHOLD=0.60 漏掉两条「罕见类型 + critical」正类
+    #   （0.4357 / 0.4957）。按纪律未在合成集上擅自下调阈值，而是走
+    #   整改方案 §七.2：新增 severity_shift 基线相对证据维度
+    #   （全量权重重归一到 1.0，证据分母 0.70→0.74）→ 两样本 0.6435/0.6955
+    #   过原阈值。反向回归由 test_anomaly_threshold_gaps_resolved 守护；
+    #   阈值可行区间由 test_anomaly_threshold_feasibility 钉住。
 }
 
 
@@ -168,19 +171,24 @@ def test_known_gap_rows_do_not_constrain_the_bound():
 
 
 def test_real_calibration_exposes_a_quantisation_gap(anomaly_rows):
-    """前提守卫：真实标定集上这个量化差额必须**大于 0**。
+    """量化差额守卫（数值随 severity_shift 维度演进，2026-10-25b 更新）。
 
-    若哪天标定集的正样本恰好落在网格点上（gap=0），本文件
-    讨论的整个问题就不存在了 —— 那时这条会提醒把结论收回，
-    而不是让报告继续引用一个已经精确的 [0.0, 0.4]。
+    量化差额 = 精确上界 − 网格上界：网格(0.05 步长)最右的「只按召回」
+    完美落点永远达不到精确上界，照网格值调阈值会无谓损失这段召回面。
+
+    演进：0.0357（第一段，exact=0.4357/grid=0.40）→ 无讨论（第二段，
+    exact=None）→ **0.0435**（本段，exact=0.6435/grid=0.60）。
     """
     s = sweep_anomaly_threshold(anomaly_rows)
+    assert s["exact_upper_bound"] is not None, (
+        "测量面无分数约束的正类了 —— 量化差额讨论的前提消失, "
+        "本条应按当时的口径重写而不是保留旧数字")
     gap = s["exact_upper_bound"] - s["grid_upper"]
     assert gap > 0, (
-        f"标定集上网格上界已等于精确上界（gap={gap}）—— "
-        "§4.4 里「区间 [0.0, 0.4]」的量化误差讨论需要相应更新")
-    assert round(gap, 4) == 0.0357, (
-        f"量化差额变了（{gap:.4f}）—— 报告 §4.4 / §6.2 引用的 0.0357 需要更新")
+        f"网格上界已等于精确上界（gap={gap}）—— "
+        "量化误差讨论的前提消失, 本条需要按新事实改写")
+    assert round(gap, 4) == 0.0435, (
+        f"量化差额变了（{gap:.4f}）—— 本条钉的 0.0435 需要更新")
 
 
 def test_inconclusive_is_not_counted_as_negative(anomaly_rows):
@@ -270,19 +278,30 @@ def test_partial_cases_are_reported_as_pending_not_as_detection(sigma_rows):
             f"{r['id']} 全部命中都在待聚合，却同时报成了确定检出"
 
 
-def test_anomaly_threshold_gap_is_registered(anomaly_rows):
-    """当前阈值高于标定集的召回下限 —— 这是已登记缺口。"""
-    missed = sorted(
-        r["id"] for r in anomaly_rows
-        if r["expect"] == "detected" and not r["is_anomaly"])
-    assert missed == sorted(
-        KNOWN_GAPS["anomaly_threshold_above_recall_floor"]), (
-        "异常检测漏检集合变了。若阈值已调整，请同步更新 "
-        "KNOWN_GAPS 与 ANOMALY_SCORE_THRESHOLD 的说明。")
+def test_anomaly_threshold_gaps_resolved(anomaly_rows):
+    """[FIXED 反向回归] 原 known_gap「阈值高于召回下限」已由 severity_shift
+    维度关闭（演进史见 test_anomaly_threshold_feasibility 模块 docstring）。
+
+    三件事同时钉住：
+      1. fixture 不再登记任何 known_gap（修复后条目必须摘除，不留空壳）；
+      2. 原缺口样本 ANO-P-02/03 必须真实检出（缺陷不复现）；
+      3. 当前阈值落在完整可行区间内（§9.60 行动项完成的判据）。
+    """
+    fixture_gaps = [c for c in anomaly_cases() if c.get("known_gap")]
+    assert not fixture_gaps, (
+        f"fixture 仍登记 known_gap: {[c['id'] for c in fixture_gaps]} —— "
+        "已修复的缺口必须摘除登记, 而不是让空壳登记留在测量面外")
+
+    for r in anomaly_rows:
+        if r["id"] in ("ANO-P-02", "ANO-P-03"):
+            assert r["status"] == "detected" and r["is_anomaly"], (
+                f"{r['id']} 回归为漏检 (score={r['anomaly_score']}) —— "
+                "severity_shift 维度被移除或权重被改动")
 
     sweep = sweep_anomaly_threshold(anomaly_rows)
-    assert sweep["current_is_perfect"] is False, (
-        "当前阈值已落在完美区间内 —— KNOWN_GAPS 该条目应移除了")
+    assert sweep["current_is_perfect"] is True, (
+        "当前阈值不再自洽 —— 阈值/权重/标定集任一被改动都会走到这里")
+    assert sweep["complete_feasible"] is True
 
 
 def test_no_regression_below_threshold(sigma_rows):

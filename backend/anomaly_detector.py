@@ -73,23 +73,54 @@ RECEIVED_TIME_FIELDS = (
 #: **证据维度**：由本实体/全局基线算出的独立异常证据。
 #: 权重分母恒为 EVIDENCE_TOTAL —— 缺失证据维度不会让分母变小，
 #: 因此单个弱维度**无法**通过「重新归一」把自己放大到阈值以上。
+#: 全量权重（证据+上下文）和恒为 1.0（声明一致性问题，见
+#: tests/test_review_anomaly.py::TestQ6WeightedScore）—— 新增维度时
+#: 必须**重归一**而不是追加，2026-10-25 severity_shift 即按此办理。
 EVIDENCE_DIMENSIONS = {
-    "statistical_deviation": 0.35,
-    "rarity": 0.20,
-    "target_concentration": 0.15,
+    "statistical_deviation": 0.28,
+    "rarity": 0.16,
+    "target_concentration": 0.08,
+    # 严重度偏移（2026-10-25, 整改方案 §七.2 的「新证据维度」）：
+    # 成熟基线实体历史上从未出现 high/critical，突然发出一条 ——
+    # 这是**基线相对**的行为证据，与 severity_prior（上游给的静态先验，
+    # 属上下文）有本质区别：它必须先有实体基线、且窗口内零高危史才成立，
+    # 因此不违反 §七.4「severity 不能独立发起告警」的纪律 ——
+    # 独立发起的是「基线偏移」这件事本身，severity 只是偏移的方向。
+    # 消融证据：修复前 ANO-P-02(0.4357)/ANO-P-03(0.4957) 双双低于阈值
+    # （known_gap 登记），接入后 0.6435/0.6955 过阈值，负类不受影响。
+    "severity_shift": 0.22,
 }
 
 #: **上下文维度**：上游 severity、非活跃时段。它们只能**放大**已有证据，
 #: 不能独立发起告警（整改方案 §七.4：severity 是上下文不是独立证据）。
 CONTEXT_DIMENSIONS = {
-    "temporal": 0.15,
-    "severity_prior": 0.15,
+    "temporal": 0.13,
+    "severity_prior": 0.13,
 }
 
 #: 全量权重（文档/报告展示口径）
 DIMENSION_WEIGHTS = {**EVIDENCE_DIMENSIONS, **CONTEXT_DIMENSIONS}
-EVIDENCE_TOTAL = sum(EVIDENCE_DIMENSIONS.values())    # 0.70
-CONTEXT_TOTAL = sum(CONTEXT_DIMENSIONS.values())      # 0.30
+EVIDENCE_TOTAL = sum(EVIDENCE_DIMENSIONS.values())    # 0.74
+CONTEXT_TOTAL = sum(CONTEXT_DIMENSIONS.values())      # 0.26
+
+#: **实体相对证据维度**（2026-10-26 聚合降级判定用，PERF-OPT Wave 0-2）。
+#: 这些维度由**本实体（src，行为主体）**的基线算出；它们至少一个可用 ⇒
+#: 报告就有了「对这条事件的行为面判断依据」，其余维度的不可判（dst 侧
+#: 无基线、全局罕见度样本不足、事件无时间戳）降级为 per-dimension 披露，
+#: 不再否决整体状态 —— 修复前"任一维度 inconclusive ⇒ 整体 inconclusive"
+#: 会让一个 src 基线充分、仅 dst 侧缺历史的成熟报告被整个作废成
+#: 「无法判定」，这是误报方向的反面：**有证据的阴性被谎报成不可判**。
+#:
+#: ⚠ `target_concentration` 刻意**不在**本集合：它是 **dst 侧**维度，
+#: 描述的是目标的暴露集中度而不是行为主体的异常 —— 若算作实体证据，
+#: 全新攻击者 IP 会踩着受害者的成熟基线拿到干净的阴性判定
+#: （tests/test_anomaly_partial_evidence.py 首触用例钉住这一点）。
+#: 全新实体（没有任何 src 相对证据）仍然整体 inconclusive ——
+#: q6_3 防误报语义保持不变（待决项 41 的冷启动规则是另一条路，
+#: 需要独立的 FP 评估，不在本次范围）。
+ENTITY_EVIDENCE_DIMENSIONS = frozenset({
+    "statistical_deviation", "severity_shift",
+})
 
 #: 判定阈值
 ANOMALY_SCORE_THRESHOLD = 0.60
@@ -152,6 +183,11 @@ class EntityBaseline:
     first_seen: float = 0
     #: 滚动窗口桶 [[ts, count], ...]（JSON 友好）
     recent: list = field(default_factory=list)
+    #: 窗口内高危事件（high/critical）滚动桶 [[ts, count], ...] ——
+    #: severity_shift 证据维度的历史面。与 `recent` 同一套合并/过期纪律；
+    #: 旧 Redis 基线没有该字段 → 默认空表（= 无高危史，对既有实体
+    #: 这在语义上等价于「历史上没见过高危」，不会造成行为突变）。
+    recent_sev: list = field(default_factory=list)
     #: 窗口内已计入的事件 ID（重放幂等，整方案 §七.1）
     seen_ids: set = field(default_factory=set)
 
@@ -440,6 +476,10 @@ class AnomalyDetector:
                             first_seen=bl_dict.get("first_seen", 0),
                             recent=[tuple(x) for x in (bl_dict.get("recent") or [])
                                     if isinstance(x, (list, tuple)) and len(x) == 2],
+                            # 旧基线无 recent_sev → 默认空表（无高危史）：
+                            # 对既有实体等价于「窗口内没见过高危」，不会突变。
+                            recent_sev=[tuple(x) for x in (bl_dict.get("recent_sev") or [])
+                                        if isinstance(x, (list, tuple)) and len(x) == 2],
                             seen_ids=set(bl_dict.get("seen_ids", [])),
                         )
                         entity_key = key.decode() if isinstance(key, bytes) else key
@@ -505,6 +545,7 @@ class AnomalyDetector:
                             "event_types": sorted(bl.event_types),
                             "first_seen": bl.first_seen,
                             "recent": [list(x) for x in bl.recent],
+                            "recent_sev": [list(x) for x in (bl.recent_sev or [])],
                             "seen_ids": sorted(bl.seen_ids)[-5000:],
                             "version": self.version,
                             **self.timezone_audit(),
@@ -564,13 +605,16 @@ class AnomalyDetector:
 
     def _update_baseline(self, entity_type: str, entity_key: str,
                          event_type: str, hour: int, ts: float = 0.0,
-                         event_id: str = "") -> bool:
+                         event_id: str = "", severity: str = "info") -> bool:
         """更新实体基线。
 
         整改方案 §七.1：
           - 写入带时间戳的滚动窗口桶（`recent`），并按窗口过期；
           - **先读后写分离**：打分在 `_update_baseline` 之前完成；
           - 按 event_id 幂等：同一条事件重复投递不会重复计入。
+          - `severity` 只服务 recent_sev（severity_shift 历史面）：
+            high/critical 计 1，其余不计 —— 与打分用的 severity_prior
+            是两回事，这里记录的是**实体高危史**。
         返回 False 表示该事件此前已计入，本次是重放。
         """
         bl = self.baselines[entity_type][entity_key]
@@ -633,6 +677,22 @@ class AnomalyDetector:
             merged[int(ets // 3600) * 3600] = \
                 merged.get(int(ets // 3600) * 3600, 0) + c
         bl.recent = sorted(merged.items())
+        # 高危史与总量同一套合并/过期纪律（severity_shift 的历史面）。
+        merged_sev: dict = {}
+        sev_inc = 1 if str(severity or "").lower() in ("high", "critical") else 0
+        for entry in list(getattr(bl, "recent_sev", []) or []) + \
+                [(int(now // 3600) * 3600, sev_inc)]:
+            if not (isinstance(entry, (list, tuple)) and len(entry) == 2):
+                continue
+            try:
+                ets, c = float(entry[0]), int(entry[1])
+            except (TypeError, ValueError):
+                continue
+            if c <= 0 or ets < cutoff:
+                continue
+            merged_sev[int(ets // 3600) * 3600] = \
+                merged_sev.get(int(ets // 3600) * 3600, 0) + c
+        bl.recent_sev = sorted(merged_sev.items())
         return True
 
     def decay_entity(self, entity_type: str, entity_key: str, factor: float = 0.5) -> bool:
@@ -653,6 +713,10 @@ class AnomalyDetector:
         bl.weekly_count = int(bl.weekly_count * factor)
         bl.total_count = int(bl.total_count * factor)
         bl.recent = [(ts, max(1, int(c * factor))) for ts, c in bl.recent]
+        # 高危史随衰减淡出（不设 min 1 下限）：FP 收敛衰减后实体应能
+        # 重新获得「窗口内零高危史」的判定 —— 否则一次误报高危永久
+        # 关闭 severity_shift 证据面。归零的桶会在下次合并时被过期淘汰。
+        bl.recent_sev = [(ts, int(c * factor)) for ts, c in (bl.recent_sev or [])]
         logger.info(
             f"AnomalyDetector: decayed {entity_type}/{entity_key} "
             f"by {factor:.2f} → total_count={bl.total_count}"
@@ -837,6 +901,40 @@ class AnomalyDetector:
         if sigma is None:
             return None
         return max(0.0, min(sigma / 5.0, 1.0))
+
+    def _calc_severity_shift(self, entity_type: str, entity_key: str,
+                             severity: str, now_ts: float = 0.0) -> Optional[float]:
+        """严重度偏移（§七.2 新证据维度，2026-10-25）。
+
+        语义：**成熟基线**实体在滚动窗口内从未出现 high/critical 事件，
+        当前却发出一条 → 基线相对的行为偏移，得 1.0。
+
+        与 severity_prior（上下文）的三条硬边界：
+          1. 必须有实体基线 —— 全新实体返回 None（能力不可用，维度缺席，
+             不进 inconclusive：那会把「没有历史」说成「证据不足」，
+             而它其实是「无从偏移」）；
+          2. 窗口样本量必须 ≥ COLD_START_MIN_SAMPLES —— 与统计维度
+             同一成熟度门槛，防止 2 个样本的「基线」给出满分偏移；
+          3. 探针 severity 不是 high/critical → 恒 0.0（不产生证据，
+             维度缺席 —— 与 temporal 的「平静即缺席」同一惯例，
+             避免把现有场景的 effective_weights 全部改掉）。
+
+        Returns: 1.0 / 0.0（可判定），None（维度缺席：无基线/样本不足）
+        """
+        sev_l = str(severity or "").lower()
+        if sev_l not in ("high", "critical"):
+            return None
+        bl = self.baselines.get(entity_type, {}).get(entity_key)
+        if bl is None:
+            return None
+        if len(bl.recent) < COLD_START_MIN_SAMPLES:
+            return None
+        cutoff = (now_ts or time.time()) - self.window_days * 86400
+        prior = sum(
+            int(c) for ts, c in (bl.recent_sev or [])
+            if isinstance(ts, (int, float)) and float(ts) >= cutoff
+        )
+        return 0.0 if prior > 0 else 1.0
 
     async def analyze(self, event: dict) -> AnomalyReport:
         """分析单条事件，返回异常检测报告（**带耗时与五态埋点**的外层）。
@@ -1045,6 +1143,19 @@ class AnomalyDetector:
             if conc > 0.8:
                 reasons.append(f"目标集中: {dst_ip} 近一小时流量高度集中")
 
+        # ── 6. 严重度偏移（§七.2 新证据维度, 2026-10-25）──
+        # 基线相对证据：成熟实体窗口内零高危史，突然发出 high/critical。
+        # 维度缺席（None）= 无基线或探针非高危 —— 不进 inconclusive，
+        # 理由见 _calc_severity_shift 的 docstring。
+        shift = self._calc_severity_shift(
+            "src_ip", src_ip, str(severity), now_ts) if src_ip else None
+        if shift is not None:
+            dimensions["severity_shift"] = shift
+            if shift > 0:
+                reasons.append(
+                    f"严重度偏移: {src_ip} 窗口内无 high/critical 史，"
+                    f"当前事件 severity={severity}")
+
         # ── 打分：证据归一 + 上下文加成 ──
         # 证据分母固定为 EVIDENCE_TOTAL（不是「可用维度之和」）：
         # 若按可用维度重新归一，一个全新实体只剩 severity_prior 可用时
@@ -1084,7 +1195,8 @@ class AnomalyDetector:
         # ── 更新基线（打分之后；按 event_id 幂等）──
         counted = self._update_baseline("src_ip", src_ip, event_type,
                                         hour if hour is not None else 0,
-                                        now_ts, eid_key) if src_ip else False
+                                        now_ts, eid_key,
+                                        severity=str(severity)) if src_ip else False
         if dst_ip:
             # 去重键就是**事件 id 本身**。曾经写成 f"{eid_key}:dst"，
             # 而没有 event_id 时 eid_key 是 int 0 → 键变成真值字符串 "0:dst"，
@@ -1098,7 +1210,8 @@ class AnomalyDetector:
             # 不共享对象，不需要靠后缀隔开命名空间。
             self._update_baseline("dst_ip", dst_ip, event_type,
                                   hour if hour is not None else 0,
-                                  now_ts, eid_key)
+                                  now_ts, eid_key,
+                                  severity=str(severity))
         # 不可解释的事件类型**不入基线、也不进全局分布**：
         # 基线是「这个实体长什么样」，用一个都读不懂的值去建基线，
         # 建出来的也是读不懂的；而进了全局分布就会被当成新型事件。
@@ -1133,12 +1246,29 @@ class AnomalyDetector:
                 self.global_event_types[event_type] += 1
 
         # ── 状态（有证据不足的维度 → inconclusive，不当作完整阴性）──
+        #
+        # 聚合降级（2026-10-26, PERF-OPT Wave 0-2 / 整改报告 §9.x）：
+        # 修复前"任一维度 inconclusive ⇒ 整体 inconclusive"——一个 src 基线
+        # 充分的成熟报告，会因 dst 侧无基线（target_concentration None）或
+        # 事件缺时间戳（temporal None）被**整个作废**成「无法判定」。
+        # 那是谎报的反方向：有实体证据的阴性被谎报成不可判，
+        # SOC 读到的是"什么都判不了"。现在：
+        #   · 至少一个**实体相对证据**可用 → 按证据判定（detected/not_detected），
+        #     不可判维度保留在 inconclusive_dimensions 里逐维披露；
+        #   · 一个实体相对证据都没有（全新实体/冷启动）→ 仍然整体
+        #     inconclusive —— q6_3 防误报语义保持（新实体不判、不假装能判）。
+        entity_evidence = any(k in dimensions for k in ENTITY_EVIDENCE_DIMENSIONS)
         if is_anomaly:
             status = "detected"
-        elif inconclusive:
+        elif inconclusive and not entity_evidence:
             status = "inconclusive"
         else:
             status = "not_detected"
+        if inconclusive and entity_evidence and not is_anomaly:
+            # 降级发生时留痕：这不是"干净"的阴性，而是"部分证据下的阴性"
+            reasons.append(
+                "partial_evidence: "
+                + ",".join(sorted(inconclusive)) + " 不可判但实体证据已足判定")
         if not counted and src_ip:
             # 重放：本次没有改变基线
             reasons.append("replay:baseline_not_updated")
@@ -1159,7 +1289,10 @@ class AnomalyDetector:
             dimensions=dimensions,
             status=status,
             error_code=("cold_start_no_evidence" if not ev_used else
-                        ("inconclusive_dimensions" if (inconclusive and not is_anomaly) else "")),
+                        ("inconclusive_dimensions"
+                         if (inconclusive and not is_anomaly and not entity_evidence)
+                         else ("partial_evidence_disclosure"
+                               if (inconclusive and not is_anomaly) else ""))),
             error_message=("; ".join(sorted(inconclusive)) if inconclusive else ""),
             analysis_window={
                 "window_days": self.window_days,

@@ -20,11 +20,11 @@
     "anomalyScore": { "type": "number", "description": "Flink 异常评分 (富化后附加)" },
     "anomalyReasons": { "type": ["array", "null"] },
     "rawData": { "type": ["object", "null"], "description": "原始日志字段 (透传, 含 Flink _anomalyScore)" },
-    "schemaVersion": { "type": "string", "description": "事件结构版本 (semver)，缺省视为 1.0.0" },
-    "producer": { "type": "string", "description": "生产方标识" },
-    "correlationId": { "type": "string", "description": "同一业务处理过程的关联 ID" },
-    "occurredAt": { "type": "integer", "description": "事件产生时间 (epoch millis)" },
-    "parentEventId": { "type": "string", "description": "派生事件指向的来源业务事件 ID" }
+    "schemaVersion": { "type": ["string", "null"], "description": "事件结构版本 (semver)，缺省视为 1.0.0" },
+    "producer": { "type": ["string", "null"], "description": "生产方标识" },
+    "correlationId": { "type": ["string", "null"], "description": "同一业务处理过程的关联 ID" },
+    "occurredAt": { "type": ["integer", "null"], "description": "事件产生时间 (epoch millis)" },
+    "parentEventId": { "type": ["string", "null"], "description": "派生事件指向的来源业务事件 ID (可空: Avro 声明 [\"null\",\"string\"] default null, 与 flink-jobs/schemas/security-event.avsc 对齐)" }
   },
   "required": ["eventId", "eventType", "severity", "message", "timestamp"],
   "additionalProperties": true

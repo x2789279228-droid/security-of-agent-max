@@ -15,7 +15,7 @@
     "reasons": { "type": "array", "items": { "type": "string" } },
     "evidenceEventIds": { "type": ["array", "null"] },
     "evidenceChain": { "type": ["array", "null"] },
-    "timeSpanMs": { "type": "integer" },
+    "timeSpanMs": { "type": ["integer", "null"] },
     "timestamp": { "type": "integer", "description": "告警时间戳 (epoch millis)" },
     "traceId": { "type": ["string", "null"] }
   },

@@ -4,12 +4,12 @@
       "baseline_detected": true,
       "per_operator": {
         "baseline": true,
-        "url_encode": false,
+        "url_encode": true,
         "double_encode": true,
-        "partial_encode": false,
+        "partial_encode": true,
         "case_flip": true
       },
-      "retention": 0.5,
+      "retention": 1.0,
       "note": ""
     },
     "traversal_encoded": {
@@ -17,87 +17,87 @@
       "per_operator": {
         "baseline": true,
         "url_encode": true,
-        "double_encode": false,
+        "double_encode": true,
         "partial_encode": true,
         "case_flip": true
       },
-      "retention": 0.75,
+      "retention": 1.0,
       "note": ""
     },
     "xss": {
       "baseline_detected": true,
       "per_operator": {
         "baseline": true,
-        "url_encode": false,
-        "double_encode": false,
-        "partial_encode": false,
+        "url_encode": true,
+        "double_encode": true,
+        "partial_encode": true,
         "case_flip": true
       },
-      "retention": 0.25,
+      "retention": 1.0,
       "note": ""
     },
     "es_unauth": {
       "baseline_detected": true,
       "per_operator": {
         "baseline": true,
-        "url_encode": false,
-        "double_encode": false,
+        "url_encode": true,
+        "double_encode": true,
         "partial_encode": true,
         "case_flip": true
       },
-      "retention": 0.5,
+      "retention": 1.0,
       "note": ""
     },
     "env_probe": {
       "baseline_detected": true,
       "per_operator": {
         "baseline": true,
-        "url_encode": false,
-        "double_encode": false,
+        "url_encode": true,
+        "double_encode": true,
         "partial_encode": true,
         "case_flip": true
       },
-      "retention": 0.5,
+      "retention": 1.0,
       "note": ""
     },
     "git_probe": {
       "baseline_detected": true,
       "per_operator": {
         "baseline": true,
-        "url_encode": false,
-        "double_encode": false,
+        "url_encode": true,
+        "double_encode": true,
         "partial_encode": true,
         "case_flip": true
       },
-      "retention": 0.5,
+      "retention": 1.0,
       "note": ""
     },
     "actuator": {
       "baseline_detected": true,
       "per_operator": {
         "baseline": true,
-        "url_encode": false,
-        "double_encode": false,
-        "partial_encode": false,
+        "url_encode": true,
+        "double_encode": true,
+        "partial_encode": true,
         "case_flip": true
       },
-      "retention": 0.25,
+      "retention": 1.0,
       "note": ""
     },
     "webshell_cmd": {
       "baseline_detected": true,
       "per_operator": {
         "baseline": true,
-        "url_encode": false,
-        "double_encode": false,
-        "partial_encode": false,
+        "url_encode": true,
+        "double_encode": true,
+        "partial_encode": true,
         "case_flip": true
       },
-      "retention": 0.25,
+      "retention": 1.0,
       "note": ""
     }
   },
-  "overall_retention": 0.438,
+  "overall_retention": 1.0,
   "operators": [
     "url_encode",
     "double_encode",

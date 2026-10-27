@@ -93,12 +93,38 @@ def layer2_shadow_contribution(detector: PySigmaDetector) -> dict:
 
 
 def layer3_anomaly() -> dict:
+    """L3 统计异常检测消融。
+
+    ⚠️ 词表对齐（2026-10-25 修复）：anomaly_cases 的 expect 词表是
+    ``detected`` / ``not_detected`` / ``inconclusive``（见
+    detection_cases.anomaly_cases），不是 Sigma 用的 malicious/benign。
+    修复前本函数用 ``expect == "malicious"`` 计数 —— 词表不匹配导致
+    TP/FP/FN 恒为 0，报告里的 L3 行是**空值而非满分**（ABLATION.md
+    曾写"L3 接近满分"，该说法不成立，已随本次修正）。
+
+    口径：正类 = expect=="detected"；负类 = expect=="not_detected"；
+    ``inconclusive`` 是结构性不可判（新实体/冷启动/无时间戳），既不是
+    TP 也不是 TN，**排除出二分类计数并单独报出** —— 把它们算进阴性
+    会把"结构上无法判定"伪装成"完整阴性"（与 detection_cases 的
+    ANO-I-01 注释同一纪律）。
+    """
     rows = run_anomaly()
-    tp = sum(1 for r in rows if r.get("expect") == "malicious" and r.get("got_positive"))
-    fn = sum(1 for r in rows if r.get("expect") == "malicious" and not r.get("got_positive"))
-    fp = sum(1 for r in rows if r.get("expect") == "benign" and r.get("got_positive"))
-    tn = sum(1 for r in rows if r.get("expect") == "benign" and not r.get("got_positive"))
-    return {"dataset": "anomaly_cases(行为面)", "anomaly": _pr(tp, fp, fn), "tn": tn}
+    # known_gap(显式登记的检测缺口, 见 detection_cases.anomaly_cases)不进
+    # 二分类计数, 单列报出 —— 与 evaluate_detection 的记账纪律一致:
+    # 已登记缺口既不冒充漏报, 也不从报告里消失。
+    scored = [r for r in rows if not r.get("known_gap")]
+    tp = sum(1 for r in scored if r.get("expect") == "detected" and r.get("got_positive"))
+    fn = sum(1 for r in scored if r.get("expect") == "detected" and not r.get("got_positive"))
+    fp = sum(1 for r in scored if r.get("expect") == "not_detected" and r.get("got_positive"))
+    tn = sum(1 for r in scored if r.get("expect") == "not_detected" and not r.get("got_positive"))
+    inconclusive_ids = [r["id"] for r in rows if r.get("expect") == "inconclusive"]
+    known_gap_ids = [r["id"] for r in rows if r.get("known_gap")]
+    return {"dataset": "anomaly_cases(行为面)", "anomaly": _pr(tp, fp, fn), "tn": tn,
+            "inconclusive_excluded": len(inconclusive_ids),
+            "inconclusive_ids": inconclusive_ids,
+            "known_gap_excluded": len(known_gap_ids),
+            "known_gap_ids": known_gap_ids,
+            "note": "inconclusive(结构不可判)与 known_gap(已登记标定缺口)均排除出二分类计数"}
 
 
 def layer4_correlation() -> dict:
@@ -209,13 +235,16 @@ def render_md(r: dict) -> str:
         return (f"P={d['precision']} R={d['recall']} F1={d['f1']} "
                 f"(TP={d['tp']} FP={d['fp']} FN={d['fn']})")
 
+    l3_excl = (f"排除: inconclusive {l3.get('inconclusive_excluded', 0)}"
+               f" + known_gap {l3.get('known_gap_excluded', 0)}")
+
     lines = [
         "# 分层消融 — 各检测层的边际贡献(合成标定口径)", "",
         "| 层 | 工作面/数据集 | 指标 |", "|---|---|---|",
         f"| L1 Sigma 执行层(非影子) | {l1['dataset']} | {fmt(l1['enforced_confirmed'])} |",
         f"| L2 社区影子层(125 条) | {l2.get('dataset', '-')} | "
         f"补充证据 {l2.get('shadow_extra_evidence', '-')} / 良性侧影子误报 {l2.get('shadow_fp_on_benign', '-')} |",
-        f"| L3 统计异常检测 | {l3['dataset']} | {fmt(l3['anomaly'])} |",
+        f"| L3 统计异常检测 | {l3['dataset']} | {fmt(l3['anomaly'])} TN={l3.get('tn', '-')} ({l3_excl}) |",
         f"| L4 关联引擎(11 链) | {l4['dataset']} | {fmt(l4['correlation'])} |",
         f"| L5 SOAR 决策层 | {l5['dataset']} | 决策分布 {l5['decisions']}, 均 {l5['match_ms_avg']}ms/次 |",
         "",
@@ -223,9 +252,14 @@ def render_md(r: dict) -> str:
         "",
         "- **L2 的确认口径与 L1 相同** —— 影子层不改变确认检出, 它的价值是"
         "在真实公开数据(CSIC)上提供补充证据与晋升候选(全量口径见 REPLAY 报告:"
-        "签名子集召回 34.5%, 其中 SQLi 全部由影子层接住);",
-        "- **L3/L4 各在自己擅长的工作面上接近满分** —— 异常检测管行为面、"
-        "关联引擎管攻击链面, 这正是多层堆叠的理由: 单层视角必然漏掉其它面的攻击;",
+        "签名子集召回 34.7%, 其中 SQLi 全部由影子层接住);",
+        "- **L3 的口径(2026-10-25 两步修正)**: 第一步修评估器 —— 修复前本函数用"
+        " Sigma 的 malicious/benign 词表数 anomaly_cases 的 detected/not_detected"
+        " 样本, 词表不匹配 → TP/FP/FN 恒 0, \"接近满分\"是空值假象; 正类=detected,"
+        " 负类=not_detected, inconclusive(结构不可判)排除出二分类并单列。"
+        " 第二步修检测器 —— ANO-P-02/03 双双低于阈值的缺口由 severity_shift"
+        " 基线相对证据维度关闭(§七.2), 本表现在是测量面全量口径: TP=3 FP=0 FN=0;"
+        " L4 关联引擎在链面满分 —— 多层堆叠的理由不变: 单层视角必然漏掉其它面的攻击;",
         "- **L5 的 UNCERTAIN 兜底是设计**: 执行层检出的攻击类型若无专属策略,"
         "落入 5 分钟短封+高优告警的不确定模板, 而不是放行或乱封;",
         "- LLM 审计层的贡献不在本表: 无 key 时它退化为规则收口(无区分度),"
@@ -234,6 +268,9 @@ def render_md(r: dict) -> str:
         "## 边界",
         "",
         "- 全部为合成标定数据, 绝对值不可外推到生产; 真实流量面见 REPLAY 报告;",
+        "- L3 的两条标定缺口(ANO-P-02/03)已由 severity_shift 证据维度关闭"
+        " (2026-10-25b, 演进史见 tests/test_anomaly_threshold_feasibility docstring);"
+        " 真实行为面评估仍需生产基线数据, 见升级证据文档的范围边界;",
         "- 消融刻度是\"层\", 不是\"多智能体角色\" —— 四层 Agent 流水线的",
         "  内部消融(拆 Decompiler/Reviewer)需要 LLM 在环, 属后续工作。",
     ]

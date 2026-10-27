@@ -234,15 +234,21 @@ class TestTheMatrixDoesNotContaminateTheCalibrationSet:
             f"既有标定集变成 {len(rows)} 条了 —— 矩阵不该动它")
 
     def test_the_sweep_bounds_are_unchanged(self):
-        """精确可行区间上界 0.4357 是 §9.3 / 待决项 18 的依据，
-        不能被矩阵改动。"""
+        """扫描口径骨架不能被矩阵改动。
+
+        演进（2026-10-25）：0.4357（severity_shift 前）→ None（known_gap
+        登记期）→ **0.6435**（severity_shift 维度接入后, known_gap 摘除）。
+        钉住非空可行区间 + 当前阈值在内 —— 矩阵若改动扫描口径，这里先红。
+        """
         from eval_datasets.evaluate_detection import (
             run_anomaly, sweep_anomaly_threshold)
 
         sweep = sweep_anomaly_threshold(run_anomaly())
-        assert sweep["exact_upper_bound"] == pytest.approx(0.4357, abs=1e-4), sweep
+        assert sweep["exact_upper_bound"] == pytest.approx(0.6435, abs=1e-4), sweep
         assert sweep["current"] == 0.6, sweep
-        assert sweep["current_is_perfect"] is False, sweep
+        assert sweep["current_is_perfect"] is True, sweep
+        assert sweep["false_positive_lower_bound"] == pytest.approx(0.1297, abs=1e-4), sweep
+        assert sweep["inconclusive_lower_bound"] == pytest.approx(0.3982, abs=1e-4), sweep
 
 
 if __name__ == "__main__":       # pragma: no cover

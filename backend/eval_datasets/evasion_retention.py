@@ -60,13 +60,20 @@ def _variants(payload: str) -> dict[str, str]:
 def _enforced_hit(detector: PySigmaDetector, url: str) -> bool:
     """构造贴近真实接入口径的事件。
 
+    - **先规范化再拆分**(2026-10-25 随检测输入规范化升级同步):
+      引擎匹配读规范形视图(normalization.canonical_matching_view),
+      接入口径的 host:port 拆分也必须发生在规范化**之后** —— 编码 URL
+      在原始形态上拆不出端口, SIG-006 这类端口型规则会系统性漏检
+      (es_unauth 家族 url_encode/double_encode/partial_encode 全 ✗ 的根因)。
     - method=GET: 真实 access 日志必带(社区 webserver 规则普遍以
       cs-method 为前置条件, 缺它会整体失真);
     - URL 带 host:port 时拆 dst_ip:port(与 mapping.apply_mapping 的
       平台口径一致), ES 9200 这类端口型规则才能按真实形态命中。
     """
+    from normalization import canonical_url
+    canon = canonical_url(url)
     dst = "10.0.0.5"
-    m = re.match(r"^[a-z]+://([^/:]+):(\d+)", url, re.I)
+    m = re.match(r"^[a-z]+://([^/:]+):(\d+)", canon, re.I)
     if m:
         dst = f"{m.group(1)}:{m.group(2)}"
     ev = {"event": "REQ", "method": "GET", "src_ip": "203.0.113.90",
@@ -103,12 +110,23 @@ def run() -> dict:
     }
 
 
-def render_md(r: dict) -> str:
+def render_md(r: dict, baseline: dict | None = None) -> str:
     lines = [
         "# 对抗变体检出保持率(签名层)", "",
         f"- 总体保持率: **{r['overall_retention']}**"
         f"(算子: {', '.join(r['operators'])})",
         "",
+    ]
+    if baseline:
+        old = baseline.get("overall_retention")
+        lines += [
+            f"- 规范化前基线(2026-10-25 之前, 见"
+            f" EVASION-result-pre-normalization.json): **{old}**"
+            f" → 接入 `normalization.canonical_matching_view` 后 **{r['overall_retention']}**"
+            f"(升级证据: docs/upgrade/evidence/DETECTION-NORMALIZATION-2026-10-25.md)",
+            "",
+        ]
+    lines += [
         "| 家族 | 基线命中 | url_encode | double_encode | partial_encode | case_flip | 保持率 |",
         "|---|---|---|---|---|---|---|",
     ]
@@ -121,11 +139,19 @@ def render_md(r: dict) -> str:
             f"| {'✓' if p.get('partial_encode') else '✗'} "
             f"| {'✓' if p.get('case_flip') else '✗'} "
             f"| {f['retention']} |")
+    if baseline:
+        lines += ["", "## 改前改后(同口径同向量)", "",
+                  "| 家族 | 改前保持率 | 改后保持率 |", "|---|---|---|"]
+        for fam, f in r["families"].items():
+            old_f = baseline.get("families", {}).get(fam, {})
+            lines.append(f"| {fam} | {old_f.get('retention', '-')} | {f['retention']} |")
     lines += [
         "", "## 怎么读", "",
         "- 基线未命中的家族是评测器自身的对齐问题(见 note), 不计入引擎评价;",
         "- 保持率低的算子 = 该编码形态需要 ingest 侧规范化(与 REPLAY 报告的",
         "  双重编码发现一致), 修复面在接入管道而非逐条规则;",
+        "- 2026-10-25 起 `normalization.canonical_matching_view` 接入引擎匹配",
+        "  视图(受限多轮解码+反斜杠归一+缺省 dst 补齐), 编码算子不再是规避通道;",
         "- 本表只覆盖签名层; 行为层(anomaly)与链层(correlation)的对抗评估",
         "  由 self_play 红蓝自博弈承担(其课程化变体见 self_play/ 模块)。",
     ]
@@ -135,15 +161,21 @@ def render_md(r: dict) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="")
+    ap.add_argument("--baseline", default="",
+                    help="改前 result JSON(如 EVASION-result-pre-normalization.json), "
+                         "提供时报告附改前改后对比")
     args = ap.parse_args()
     res = run()
+    baseline = None
+    if args.baseline and Path(args.baseline).is_file():
+        baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
     print(json.dumps(res, ensure_ascii=False, indent=2))
     if args.out:
         out = Path(args.out)
         out.mkdir(parents=True, exist_ok=True)
         (out / "EVASION-result.json").write_text(
             json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
-        (out / "EVASION.md").write_text(render_md(res), encoding="utf-8")
+        (out / "EVASION.md").write_text(render_md(res, baseline), encoding="utf-8")
         print(f"报告已写 {out}/EVASION.md")
     return 0
 

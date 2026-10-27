@@ -242,7 +242,9 @@ class TestExcludedRowsAreCountedNotPreFiltered:
         assert m["excluded_suspicious"] == n_inc, (
             f"--json 的 excluded_suspicious={m['excluded_suspicious']}，"
             f"但数据集里有 {n_inc} 条 inconclusive —— 预过滤把它们吞了")
-        assert (m["tp"], m["fn"], m["tn"]) == (1, 2, 2), m
+        # 演进：(1,2,2)（ANO-P-02/03 为 known_gap 时期）→ (3,0,2)
+        # （2026-10-25 severity_shift 维度关闭缺口，正类 3 条全检出）。
+        assert (m["tp"], m["fn"], m["tn"]) == (3, 0, 2), m
 class TestGoldenSetsStillHaveDiscriminatingPower:
     """黄金样本集必须**有区分度** —— 否则 §十三 的指标就是空转的。
 

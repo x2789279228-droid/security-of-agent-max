@@ -16,14 +16,14 @@
     "reasons": { "type": "array", "items": { "type": "string" } },
     "evidenceEventIds": { "type": ["array", "null"] },
     "evidenceChain": { "type": ["array", "null"] },
-    "timeSpanMs": { "type": "integer" },
+    "timeSpanMs": { "type": ["integer", "null"] },
     "timestamp": { "type": "integer", "description": "告警时间戳 (epoch millis)" },
     "traceId": { "type": ["string", "null"] },
-    "schemaVersion": { "type": "string", "description": "事件结构版本 (semver)，缺省视为 1.0.0" },
-    "producer": { "type": "string", "description": "生产方标识" },
-    "correlationId": { "type": "string", "description": "同一业务处理过程的关联 ID" },
-    "occurredAt": { "type": "integer", "description": "事件产生时间 (epoch millis)" },
-    "parentEventId": { "type": "string", "description": "派生告警指向的来源业务事件 ID" }
+    "schemaVersion": { "type": ["string", "null"], "description": "事件结构版本 (semver)，缺省视为 1.0.0" },
+    "producer": { "type": ["string", "null"], "description": "生产方标识" },
+    "correlationId": { "type": ["string", "null"], "description": "同一业务处理过程的关联 ID" },
+    "occurredAt": { "type": ["integer", "null"], "description": "事件产生时间 (epoch millis)" },
+    "parentEventId": { "type": ["string", "null"], "description": "派生告警指向的来源业务事件 ID (可空, 与 Avro 对齐)" }
   },
   "required": ["alertId", "eventType", "severity", "message", "anomalyScore", "alertType", "timestamp"],
   "additionalProperties": true

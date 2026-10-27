@@ -5,6 +5,7 @@ sigma_engine.mapping — 薄版字段映射 pipeline（平台归一化事件 →
 第 1 节字段表)转换为社区规则索引使用的 Sigma 标准字段名。
 强调"薄": 只覆盖平台现有字段即可直接命中的映射; 新增日志源时按尾部规范扩展。
 """
+import re
 from typing import Dict, Any
 
 # ── 平台字段 → 常见 Sigma 标准字段 别名表 ──
@@ -38,22 +39,31 @@ PLATFORM_TO_SIGMA: Dict[str, list[str]] = {
 
 __all__ = ["PLATFORM_TO_SIGMA", "apply_mapping"]
 
+#: "IPv4:port" 形态。端口拆分只认这个 —— IPv6 字面量含多个冒号,
+#: "见冒号就拆"的宽松写法（rpartition）会把它拆坏：
+#: "2001:db8::1".rpartition(":") → host "2001:db8:" + port 1，
+#: 目标 IP 从此匹配不上任何规则。平台校验面（Flink/HTTP）当前收 IPv4，
+#: 但 mapping 是纯函数，防御在拆分处而不是假设上游永远干净。
+_IPV4_PORT_RE = re.compile(r"^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$")
+
 
 def apply_mapping(event: Dict[str, Any]) -> Dict[str, Any]:
     """把平台事件(含 src_ip/dst_ip(可含端口)/url/... )转为 Sigma 标准字段 dict。
 
-    端口: 若 dst_ip 形如 "1.2.3.4:9200", 拆出 dst_port。
+    端口: 若 dst_ip 形如 "1.2.3.4:9200"（严格 IPv4:port），拆出 dst_port；
+    其它含冒号的值（IPv6、畸形输入）原样保留 —— 宁可不拆端口，
+    不可损坏目标地址。
     输出 = {sigma_field: value}, 同字段名同时保留平台原名, 便于规则双名引用。
     """
     out: Dict[str, Any] = {}
     for src, targets in PLATFORM_TO_SIGMA.items():
         if src in event and event[src] is not None:
             v = event[src]
-            if isinstance(v, str) and ":" in str(v) and src in ("dst_ip", "dest_ip"):
-                host, _, port = str(v).rpartition(":")
-                if port.isdigit():
-                    v = host
-                    out["dst_port"] = int(port)
+            if isinstance(v, str) and src in ("dst_ip", "dest_ip"):
+                m = _IPV4_PORT_RE.match(v.strip())
+                if m:
+                    v = m.group(1)
+                    out["dst_port"] = int(m.group(2))
             out[src] = v
             for t in targets:
                 if t not in out:

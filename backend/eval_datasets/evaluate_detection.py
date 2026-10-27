@@ -26,10 +26,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import statistics
+import time
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 # Windows 控制台可能是 GBK；报告含 ⚠ / ✅ 等字符，直接 print 会崩。
@@ -40,6 +43,7 @@ except Exception:
     pass
 
 from eval_datasets.detection_cases import (
+    BASELINE_HOURS, BASE_DT,
     anomaly_cases, correlation_cases, sigma_cases,
 )
 
@@ -247,12 +251,33 @@ def _feed(det: AnomalyDetector, events):
         _probe_report(det, e)
 
 
+@contextlib.contextmanager
+def pinned_clock(ts: float):
+    """把 ``time.time()`` 钉在 ts 上（退出时恢复）。权威实现在本模块，
+    evaluate_scale_window 复用 —— 勿在两处各写一份。"""
+    real = time.time
+    time.time = lambda: ts
+    try:
+        yield
+    finally:
+        time.time = real
+
+
+#: 标定集的墙钟锚点：BASE_DT + 基线时长 + 1h 余量。
+#: ``_update_baseline`` 的 7 天窗口淘汰用**墙钟**（防旧时间戳续命，语义正确），
+#'  但标定集的事件时间锚在固定日期 —— 不钉钟的话，fixture 会在锚点满 7 天后
+#: 开始掉桶（2026-10-26 实测翻车：P1/P02/P03 分数漂移、statistical 恒 None）。
+#: 钉在锚点+13h 让窗口淘汰对所有 fixture 桶永远确定，评测从此不随挂钟漂移。
+EVAL_FREEZE_TS = (BASE_DT + timedelta(hours=BASELINE_HOURS + 1)).timestamp()
+
+
 def run_anomaly() -> list:
     out = []
     for c in anomaly_cases():
         det = AnomalyDetector()
-        _feed(det, c["baseline"])
-        rep = _probe_report(det, c["probe"])
+        with pinned_clock(EVAL_FREEZE_TS):
+            _feed(det, c["baseline"])
+            rep = _probe_report(det, c["probe"])
         out.append({
             "id": c["id"], "expect": c["expect"], "note": c["note"],
             "status": rep.status, "anomaly_score": rep.anomaly_score,
@@ -493,7 +518,12 @@ def sweep_anomaly_threshold(rows: list, step: float = 0.05) -> dict:
         "note": ("exact_upper_bound 只是**召回下界**（只约束「不漏掉应检出样本」）；"
                  "完整可行区间还要满足负类不被误报、不可判类不被翻成 "
                  "detected —— 见 complete_lower_bound / complete_feasible。"
-                 "同一份标定集上 complete_feasible=False ⇒ 缺口不是阈值问题。"),
+                 "同一份标定集上 complete_feasible=False ⇒ 缺口不是阈值问题。"
+                 "2026-10-25 起 known_gap(已登记标定缺口)排除出全部约束面:"
+                 "若应检出样本全部由 sigma>3 命中或已登记 known_gap,"
+                 "exact_upper_bound=None(分数面无召回约束),"
+                 "此时 complete_feasible=True 只描述测量面,"
+                 "已登记缺口的召回缺口仍需 §七.2 重设计, 不因可行区间非空而消失。"),
     }
 
 
@@ -738,16 +768,27 @@ def render(sigma_rows, anomaly_rows, corr_rows, sigma_bd, sweep) -> str:
              "这些**不计入**阴性，是结构性不可判，不是漏报也不是误报")
     L.append("")
     L.append(f"  阈值扫描：当前 ANOMALY_SCORE_THRESHOLD = {sweep['current']}")
-    L.append(f"    召回下界 = [0, {sweep['exact_upper_bound']})"
-             f"   ← 只约束「不漏掉应检出样本」，**不是**可行区间")
+    if sweep["exact_upper_bound"] is not None:
+        L.append(f"    召回下界 = [0, {sweep['exact_upper_bound']})"
+                 f"   ← 只约束「不漏掉应检出样本」，**不是**可行区间")
+    else:
+        L.append("    召回下界 = 无约束"
+                 "   ← 应检出样本全部由 sigma>3 命中或已登记 known_gap,"
+                 "分数面不构成召回约束（见 known_gap 登记与 §七.2 行动项）")
     L.append(f"    负类下界   = {_f(sweep.get('false_positive_lower_bound'), 4)}"
              f"   ← 阈值必须 ≥ 它，否则已知正常样本变误报")
     L.append(f"    不可判下界 = {_f(sweep.get('inconclusive_lower_bound'), 4)}"
              f"   ← 阈值低于它，「结构性不可判」的样本会被报成 detected")
     if sweep.get("complete_feasible"):
-        L.append(f"    完整可行区间 = [{_f(sweep.get('complete_lower_bound'), 4)}, "
-                 f"{_f(sweep.get('exact_upper_bound'), 4)})"
-                 f"   ← 正样本全检出 ∧ 负类不误报 ∧ 不可判类不翻转")
+        up = sweep.get("exact_upper_bound")
+        if up is not None:
+            L.append(f"    完整可行区间 = [{_f(sweep.get('complete_lower_bound'), 4)}, "
+                     f"{_f(up, 4)})"
+                     f"   ← 正样本全检出 ∧ 负类不误报 ∧ 不可判类不翻转")
+        else:
+            L.append(f"    完整可行区间 = [{_f(sweep.get('complete_lower_bound'), 4)}, "
+                     f"1.0]  ← 上界无约束: 测量面正类全部由 sigma>3 命中"
+                     f"(known_gap 排除在外, 其召回缺口仍需 §七.2 重设计)")
     else:
         L.append(f"    ⚠ 完整可行区间 = **空集**"
                  f"（下界 {_f(sweep.get('complete_lower_bound'), 4)} ≥ "
