@@ -136,6 +136,10 @@ class LogIngestor:
             "method": ["method", "http_method", "csMethod", "requestMethod", "methodType", "httpMethod"],
             "status": ["status", "status_code", "httpStatus", "http_response_status", "sc-status", "httpCode"],
             "url": ["url", "http_url", "requestUrl", "request_uri", "cs-uri-query", "uri"],
+            # 2026-10-27 路线 4: DNS 查询域 / 文件哈希 —— 释放 SigmaHQ dns 类别
+            # 规则(query 字段实测 14/14), 并为第二批 Sysmon hash 字段预铺链路。
+            "dns_query": ["dns_query", "dnsQuery", "dns_query_name", "queryName", "rrname", "query"],
+            "file_hash": ["file_hash", "fileHash", "sha256", "sha1", "md5", "imageHash"],
         }
         normalized = dict(log_data)
         for target, candidates in field_map.items():
@@ -155,7 +159,9 @@ class LogIngestor:
         if isinstance(raw, dict) and raw:
             for target, keys in (("method", ["method", "requestMethod", "httpMethod"]),
                                  ("status", ["status", "statusCode", "httpStatus"]),
-                                 ("url", ["url", "requestUrl", "request_uri", "path"])):
+                                 ("url", ["url", "requestUrl", "request_uri", "path"]),
+                                 ("dns_query", ["query", "rrname", "dnsQuery", "queryName"]),
+                                 ("file_hash", ["sha256", "md5", "sha1", "fileHash", "imageHash"])):
                 if target in normalized and normalized.get(target):
                     continue
                 for k in keys:

@@ -35,6 +35,16 @@ PLATFORM_TO_SIGMA: Dict[str, list[str]] = {
                    # SigmaHQ proxy 规则的 c-useragent(普查 ×24)同源于平台 user_agent
                    "c-useragent", "UserAgent", "cs-UserAgent"],
     "referer": ["referer", "http.referrer", "cs-referer", "c-referer"],
+    # 2026-10-27 路线 4: DNS 查询域。SigmaHQ network/dns 类规则的 detection
+    # 字段是裸 `query`(实测 14/14), 平台字段 dns_query(Suricata EVE dns.rrname/
+    # Zeek dns.query/Sysmon EID22 QueryName 归一)。释放 dns 类别规则解锁面。
+    "dns_query": ["dns_query", "dns.query", "dns.query.name", "dns.question.name",
+                  "query", "rrname"],
+    # 2026-10-27 路线 4 预铺: 文件哈希。当前平台类别(webserver/proxy/network/dns)
+    # 无 hash 字段规则(实测普查 0 条, hash 规则全在 windows 类=需 Sysmon 数据源
+    # 的第二批), 链路先通, 第二批字段(process.command_line 等)到位后即测解锁。
+    "file_hash": ["file_hash", "file.hash.sha256", "file.hash.md5", "file.hash.sha1",
+                  "sha256", "sha1", "md5"],
 }
 
 __all__ = ["PLATFORM_TO_SIGMA", "apply_mapping"]

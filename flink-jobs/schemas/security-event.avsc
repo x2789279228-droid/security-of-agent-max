@@ -16,6 +16,8 @@
     {"name": "confidence", "type": "double", "default": 50.0, "doc": "置信度 [0, 100]"},
     {"name": "timestamp", "type": "long", "doc": "事件时间戳 (epoch millis, 2020~2030)"},
     {"name": "traceId", "type": ["null", "string"], "default": null, "doc": "全链路追踪 ID"},
+    {"name": "dnsQuery", "type": ["null", "string"], "default": null, "doc": "路线4(2026-10-27): 查询域名(Suricata dns.rrname/Zeek query/Sysmon EID22)。SigmaHQ dns 类别 query 字段的命中通道。"},
+    {"name": "fileHash", "type": ["null", "string"], "default": null, "doc": "路线4(2026-10-27): 文件哈希(sha256 优先)。第二批 Sysmon 字段的预铺通道。"},
     {"name": "rawData", "type": ["null", {"type": "map", "values": ["null", "string", "long", "double", "boolean"]}], "default": null, "doc": "原始日志字段 (透传)"},
     {"name": "schemaVersion", "type": ["null", "string"], "default": null, "doc": "事件结构版本 (semver)"},
     {"name": "producer", "type": ["null", "string"], "default": null, "doc": "生产方标识"},

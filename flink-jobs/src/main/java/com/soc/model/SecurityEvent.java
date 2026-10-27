@@ -74,6 +74,14 @@ public class SecurityEvent implements Serializable {
     @JsonProperty("traceId")
     private String traceId;
 
+    /** 路线4(2026-10-27): 查询域名(Suricata dns.rrname/Zeek query/Sysmon EID22) */
+    @JsonProperty("dnsQuery")
+    private String dnsQuery;
+
+    /** 路线4(2026-10-27): 文件哈希(sha256 优先)，第二批 Sysmon 字段预铺 */
+    @JsonProperty("fileHash")
+    private String fileHash;
+
     /** 事件结构版本 (semver)，缺省视为 1.0.0 */
     @JsonProperty("schemaVersion")
     private String schemaVersion;

@@ -32,7 +32,7 @@ detection:
 falsepositives:
 - Unknown
 level: critical
-x-soc-id: C-168
+x-soc-id: C-174
 x-soc-shadow: true
 x-soc-action: alert
 x-soc-confidence: high

@@ -54,9 +54,16 @@ COMPAT_FIELDS = {
     "http.referrer", "cs-referer", "c-referer", "referer",
     "cs-uri-query", "cs-uri-stem", "c-uri", "cs-uri", "c-uri-query",
     "UriPath", "UriQuery", "cs-host", "c-host", "Hostname",
+    # 2026-10-27 路线 4: DNS 查询域(mapping.py dns_query 别名, 同步)
+    "dns_query", "dns.query", "dns.query.name", "dns.question.name",
+    "query", "rrname",
+    # 2026-10-27 路线 4 预铺: 文件哈希(mapping.py file_hash 别名, 同步)。
+    # 当前类别无 hash 规则, 第二批(Sysmon 数据源)到位后生效。
+    "file_hash", "file.hash.sha256", "file.hash.md5", "file.hash.sha1",
+    "sha256", "sha1", "md5",
 }
 
-CATEGORIES = {"webserver", "proxy", "network"}
+CATEGORIES = {"webserver", "proxy", "network", "dns"}
 ID_START = 101          # C-101 起, 避开手策展的 C-001..C-005
 PREFIX = "hq_"
 LEVEL_TO_CONF = {"critical": "high", "high": "high", "medium": "medium",

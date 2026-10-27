@@ -136,6 +136,10 @@ class SigmaDetector:
         "msg": "message", "description": "message",
         "proto": "protocol",
         "sev": "severity", "level": "severity",
+        # 2026-10-27 路线 4: DNS 查询域 / 文件哈希别名归一(与 mapping.py 同步)
+        "dnsQuery": "dns_query", "queryName": "dns_query", "rrname": "dns_query",
+        "sha256": "file_hash", "md5": "file_hash", "sha1": "file_hash",
+        "fileHash": "file_hash", "imageHash": "file_hash",
     }
 
     def __init__(self):
