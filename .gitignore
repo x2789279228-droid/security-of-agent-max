@@ -123,3 +123,10 @@ config/ssh/
 tools/.sigmahq-cache/
 # 公开数据集缓存(B2 评测数据源, 许可与体积原因不入库)
 tools/datasets-cache/
+
+# 覆盖率产物(CI 已上传 artifact, 仓库内副本零价值且每次 --cov 都改写)
+audit_cov.json
+coverage.json
+
+# preflight 自检回执(时间戳报告, 运行时产物)
+tools/.preflight/
