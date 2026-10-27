@@ -1,0 +1,114 @@
+{
+  "n_malicious": 20,
+  "n_benign": 90,
+  "default_threshold": 0.6,
+  "per_threshold": [
+    {
+      "threshold": 0.4,
+      "tp": 18,
+      "fp": 4,
+      "fn": 2,
+      "tn": 86,
+      "tpr": 0.9,
+      "fpr": 0.0444,
+      "feasible": true
+    },
+    {
+      "threshold": 0.45,
+      "tp": 17,
+      "fp": 2,
+      "fn": 3,
+      "tn": 88,
+      "tpr": 0.85,
+      "fpr": 0.0222,
+      "feasible": true
+    },
+    {
+      "threshold": 0.5,
+      "tp": 16,
+      "fp": 0,
+      "fn": 4,
+      "tn": 90,
+      "tpr": 0.8,
+      "fpr": 0.0,
+      "feasible": true
+    },
+    {
+      "threshold": 0.55,
+      "tp": 16,
+      "fp": 0,
+      "fn": 4,
+      "tn": 90,
+      "tpr": 0.8,
+      "fpr": 0.0,
+      "feasible": true
+    },
+    {
+      "threshold": 0.6,
+      "tp": 12,
+      "fp": 0,
+      "fn": 8,
+      "tn": 90,
+      "tpr": 0.6,
+      "fpr": 0.0,
+      "feasible": true
+    },
+    {
+      "threshold": 0.65,
+      "tp": 0,
+      "fp": 0,
+      "fn": 20,
+      "tn": 90,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.7,
+      "tp": 0,
+      "fp": 0,
+      "fn": 20,
+      "tn": 90,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.75,
+      "tp": 0,
+      "fp": 0,
+      "fn": 20,
+      "tn": 90,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.8,
+      "tp": 0,
+      "fp": 0,
+      "fn": 20,
+      "tn": 90,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    }
+  ],
+  "feasible_interval": {
+    "criterion": "TPR>=0.6 且 FPR<=0.05",
+    "thresholds": [
+      0.4,
+      0.45,
+      0.5,
+      0.55,
+      0.6
+    ],
+    "conclusion": "可行区间 = 0.4~0.6"
+  },
+  "dataset": "cicids2017",
+  "source_file": "cicids2017_sample.csv",
+  "n_events": 110,
+  "elapsed_s": 1.1,
+  "throughput_eps": 96.8,
+  "fixture": true
+}

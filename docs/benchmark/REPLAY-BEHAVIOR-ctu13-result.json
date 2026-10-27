@@ -1,0 +1,108 @@
+{
+  "n_malicious": 30,
+  "n_benign": 30,
+  "default_threshold": 0.6,
+  "per_threshold": [
+    {
+      "threshold": 0.4,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.45,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.5,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.55,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.6,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.65,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.7,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.75,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    },
+    {
+      "threshold": 0.8,
+      "tp": 0,
+      "fp": 0,
+      "fn": 30,
+      "tn": 30,
+      "tpr": 0.0,
+      "fpr": 0.0,
+      "feasible": false
+    }
+  ],
+  "feasible_interval": {
+    "criterion": "TPR>=0.6 且 FPR<=0.05",
+    "thresholds": [],
+    "conclusion": "完整可行区间为空 —— 缺口不是调阈值能解决的, 需补维度/数据源"
+  },
+  "dataset": "ctu13",
+  "source_file": "ctu13_sample.binetflow.csv",
+  "n_events": 60,
+  "elapsed_s": 1.2,
+  "throughput_eps": 49.2,
+  "fixture": true
+}
