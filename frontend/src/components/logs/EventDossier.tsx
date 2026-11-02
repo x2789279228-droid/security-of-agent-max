@@ -114,21 +114,21 @@ export function EventDossier({ eventId, onClose }: { eventId: number | null; onC
             exit={{ x: '100%' }}
             transition={{ type: 'spring', stiffness: 320, damping: 34 }}
             role="dialog"
-            aria-label="事件案卷"
+            aria-label="事件详情"
           >
             {/* 卷头 */}
             <div className="flex items-start justify-between gap-4 border-b border-line px-6 py-4">
               <div>
-                <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-ink-faint">
-                  案卷 · EVENT {eventId}
+                <p className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">
+                  事件详情 · #{eventId}
                 </p>
-                <p className="mt-1 font-serif text-[19px] font-black text-ink">
+                <p className="mt-1 text-[19px] font-semibold text-ink">
                   {detail?.event_type || (status === 'loading' ? '调卷中 …' : '—')}
                 </p>
               </div>
               <button
                 onClick={onClose}
-                className="shrink-0 border border-line px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-ink-soft hover:bg-mist transition-colors"
+                className="shrink-0 border border-line px-3 py-1.5 font-mono text-[10px] tracking-[0.06em] text-ink-soft hover:bg-mist transition-colors"
               >
                 合卷 Esc
               </button>
@@ -144,7 +144,7 @@ export function EventDossier({ eventId, onClose }: { eventId: number | null; onC
 
               {status === 'missing' && (
                 <div className="px-6 py-14 text-center">
-                  <p className="font-serif text-[16px] font-bold text-ink">该事件不存在或尚未入库</p>
+                  <p className="text-[16px] font-bold text-ink">该事件不存在或尚未入库</p>
                   <p className="mt-2 text-[13px] text-ink-faint">事件可能仍在流水线中,稍后重试。</p>
                 </div>
               )}
@@ -249,13 +249,13 @@ export function EventDossier({ eventId, onClose }: { eventId: number | null; onC
                     <div className="flex flex-wrap gap-2.5">
                       <button
                         onClick={() => navigate(eventHref.monitor(detail.id))}
-                        className="border border-ink bg-vault px-4 py-2 font-mono text-[10px] tracking-[0.18em] uppercase text-[#f1e8d6] hover:bg-vault-soft transition-colors"
+                        className="rounded-[4px] border border-accent bg-accent px-4 py-2 text-[12px] font-medium text-on-accent hover:bg-accent-hover transition-colors"
                       >
                         监控 · 思维链 →
                       </button>
                       <button
                         onClick={() => navigate(eventHref.audit(detail.id))}
-                        className="border border-line px-4 py-2 font-mono text-[10px] tracking-[0.18em] uppercase text-ink-soft hover:border-accent hover:text-accent transition-colors"
+                        className="border border-line px-4 py-2 font-mono text-[10px] tracking-[0.06em] text-ink-soft hover:border-accent hover:text-accent transition-colors"
                       >
                         审计 · 流水线 →
                       </button>

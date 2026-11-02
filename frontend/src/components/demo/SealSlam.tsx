@@ -60,7 +60,7 @@ export function SealSlam({
 
         {/* 印章本体 */}
         <motion.div
-          className="relative flex h-[240px] w-[240px] flex-col items-center justify-center border-[3px] border-[#e2604f] text-[#e2604f]"
+          className="relative flex h-[240px] w-[240px] flex-col items-center justify-center border-[3px] border-[#e2604f] text-alert"
           style={{ boxShadow: '0 0 0 2px rgba(224,96,79,0.35), 0 0 60px rgba(224,96,79,0.25)' }}
           initial={reduced ? { opacity: 0 } : { scale: 2.6, opacity: 0, rotate: -18 }}
           animate={reduced ? { opacity: 1 } : { scale: 1, opacity: 1, rotate: -7 }}
@@ -69,9 +69,9 @@ export function SealSlam({
         >
           {/* 内框 */}
           <span className="pointer-events-none absolute inset-2 border border-[#e2604f]/45" aria-hidden />
-          <span className="font-mono text-[10px] tracking-[0.4em] uppercase text-[#e2604f]/80">Shouwang · 结案</span>
-          <span className="mt-2 font-serif text-[64px] font-black leading-none tracking-[0.08em]">{text}</span>
-          <span className="mt-3 font-mono text-[10px] tracking-[0.3em] uppercase text-[#e2604f]/70">
+          <span className="font-mono text-[10px] tracking-[0.4em] uppercase text-alert/80">Shouwang · 结案</span>
+          <span className="mt-2 text-[64px] font-semibold leading-none tracking-[0.08em]">{text}</span>
+          <span className="mt-3 font-mono text-[10px] tracking-[0.3em] uppercase text-alert/70">
             {new Date().toLocaleDateString('zh-CN')}
           </span>
         </motion.div>
@@ -83,7 +83,7 @@ export function SealSlam({
           animate={shown ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.45 }}
         >
-          <p className="font-serif text-[15px] leading-relaxed text-[#c9d6cf]">{sub}</p>
+          <p className="text-[15px] leading-relaxed text-[#c9d6cf]">{sub}</p>
           {degradedNote && (
             <p className="mt-2 font-mono text-[11px] tracking-[0.12em] text-[#d9b06b]">{degradedNote}</p>
           )}

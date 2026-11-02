@@ -8,16 +8,21 @@
  *     并向请求头注入 W3C traceparent → 后端 HttpTraceMiddleware 提取续接,
  *     从而把「浏览器发起 → 后端 HTTP → 审计流水线」串成同一条 trace 树。
  *
+ * OTel JS 3.x 迁移 (2.10 → 3.0):
+ *   - sdk-trace-web 包已删除, WebTracerProvider/register() 一并移除;
+ *     改用合并后的 sdk-trace 包, 手工完成「全局 provider + context manager」注册
+ *     (等价于旧 .register() 做的事)。
+ *   - 传播器用 api 包默认的 W3C TraceContext + Baggage 组合, 无需显式设置。
+ *
  * 说明: 生产环境默认开启; 若想关闭可在构建时注入 VITE_OTEL_DISABLED=1。
  */
-import { WebTracerProvider } from '@opentelemetry/sdk-trace-web'
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base'
+import { BatchSpanProcessor, StackContextManager, TracerProvider } from '@opentelemetry/sdk-trace'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch'
 import { registerInstrumentations } from '@opentelemetry/instrumentation'
 import { resourceFromAttributes } from '@opentelemetry/resources'
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions'
-import { trace } from '@opentelemetry/api'
+import { context, trace } from '@opentelemetry/api'
 
 let initialized = false
 
@@ -32,20 +37,23 @@ export function initBrowserTelemetry(): void {
   if (import.meta.env.VITE_OTEL_DISABLED === '1') return
   if (typeof window === 'undefined') return
 
-  const provider = new WebTracerProvider({
+  const provider = new TracerProvider({
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: 'soc-frontend',
       'soc.node.role': 'browser',
     }),
     spanProcessors: [
-      new BatchSpanProcessor(
-        new OTLPTraceExporter({
+      // 3.x: 构造参数从 (exporter, config) 改为 { exporter, ...config }
+      new BatchSpanProcessor({
+        exporter: new OTLPTraceExporter({
           url: '/otlp/v1/traces',
         }),
-      ),
+      }),
     ],
   })
-  provider.register()
+  // 3.x: register() 移除 — 手工注册全局 provider 与 context manager
+  trace.setGlobalTracerProvider(provider)
+  context.setGlobalContextManager(new StackContextManager().enable())
 
   registerInstrumentations({
     instrumentations: [
@@ -60,4 +68,3 @@ export function initBrowserTelemetry(): void {
   // 便于控制台调试 (window.__OTEL_TRACER__)
   ;(window as any).__OTEL_TRACER__ = trace.getTracer('soc-frontend', '1.0.0')
 }
-

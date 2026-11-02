@@ -21,7 +21,7 @@ function Num({ label, v, tone }: { label: string; v: number | null | undefined; 
   return (
     <span className="flex flex-col items-start leading-none">
       <span className={`text-[17px] ${color}`}>{fmt(v)}</span>
-      <span className="mt-0.5 text-[9px] tracking-[0.18em] uppercase text-ink-faint">{label}</span>
+      <span className="mt-0.5 text-[9px] tracking-[0.06em] text-ink-faint">{label}</span>
     </span>
   )
 }
@@ -43,7 +43,7 @@ export default function LedgerPanel() {
   return (
     <div className="font-mono tabular-nums">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[10px] tracking-[0.22em] uppercase text-ink-faint">零丢失账本 · live</span>
+        <span className="text-[10px] tracking-[0.06em] text-ink-faint">零丢失账本 · live</span>
         <span className={`text-[10px] ${frame ? 'text-ok' : 'text-ink-faint'}`}>
           {frame ? `${fmt(frame.eps)} eps` : '等待首帧…'}
         </span>

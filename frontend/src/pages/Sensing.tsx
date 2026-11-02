@@ -58,7 +58,7 @@ function SeedQuick() {
         onClick={() => void seed()}
         disabled={busy}
         title="灌入 demo-seed 标注的感知演示数据(可在 /demo 开场页清空)"
-        className="border border-line px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint hover:border-accent hover:text-accent transition-colors disabled:opacity-40"
+        className="rounded-[4px] border border-line px-3 py-1.5 text-[12px] text-ink-faint hover:border-accent hover:text-accent transition-colors disabled:opacity-40"
       >
         {busy ? '灌入中 …' : '演示补给'}
       </button>
@@ -81,13 +81,13 @@ export default function Sensing() {
     <PageTransition>
       {/* 实时感知带 */}
       <div className="page-shell pt-4">
-        <div className="flex flex-wrap items-center gap-5 border border-line bg-paper px-5 py-3.5">
-          <LiveBadge live={status === 'online'} label={status === 'online' ? '感知 LIVE' : '离线'} />
+        <div className="flex flex-wrap items-center gap-5 rounded-[6px] border border-line bg-card px-5 py-3.5">
+          <LiveBadge live={status === 'online'} label={status === 'online' ? '感知实时' : '离线'} />
           <div className="flex flex-wrap items-center gap-5">
             {SENSE_COUNTERS.map(({ type, label }) => (
               <div key={type} className="flex items-baseline gap-2">
-                <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">{label}</span>
-                <span className="font-serif text-[20px] font-black tabular-nums text-ink">
+                <span className="text-[11px] text-ink-faint">{label}</span>
+                <span className="text-[18px] font-semibold tabular-nums text-ink">
                   {typeCounts[type] ?? 0}
                 </span>
               </div>
@@ -99,18 +99,18 @@ export default function Sensing() {
           </div>
         </div>
 
-        {/* 标签条(卷宗耳页式) */}
-        <nav className="mt-4 flex items-stretch gap-1 border-b border-line" aria-label="感知能力标签">
+        {/* 标签条（下划线式） */}
+        <nav className="mt-4 flex items-center gap-5 border-b border-line" aria-label="感知能力标签">
           {TABS.map((t) => {
             const active = t.key === activeTab.key
             return (
               <button
                 key={t.key}
                 onClick={() => setParams(active ? params : { t: t.key })}
-                className={`relative -mb-px border border-b-0 px-4 py-2 text-[13px] transition-colors ${
+                className={`relative -mb-px pb-2 pt-1 text-[13px] transition-colors ${
                   active
-                    ? 'border-line bg-paper font-medium text-ink'
-                    : 'border-transparent text-ink-soft hover:text-ink'
+                    ? 'font-medium text-ink after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent'
+                    : 'text-ink-soft hover:text-ink'
                 }`}
               >
                 {t.label}

@@ -66,6 +66,19 @@ function isRelayStage(stage: string): stage is AgentRelayStage {
 }
 
 /** 从事件缓冲派生按 event_id 聚合的接力状态（新事件在前，遍历时用旧→新覆盖） */
+// W2-3(复审 P2-4): deriveRelays 单点化 — Monitor/AgentRelayStrip/ActiveRelayCards
+// 各自对同一 buffer 各扫一遍 O(500)×3/flush。模块级 memo: 同一 buffer 引用
+// (eventStream 的不可变追加语义下每 flush 一次新引用)只派生一次。
+let _lastRelayBuffer: StreamEvent[] | null = null
+let _lastRelayResult: ReturnType<typeof deriveRelays> | null = null
+
+export function deriveRelaysMemo(buffer: StreamEvent[]) {
+  if (buffer === _lastRelayBuffer && _lastRelayResult) return _lastRelayResult
+  _lastRelayResult = deriveRelays(buffer)
+  _lastRelayBuffer = buffer
+  return _lastRelayResult
+}
+
 export function deriveRelays(buffer: StreamEvent[]): {
   active: RelayState[]
   recent: RelayState[]

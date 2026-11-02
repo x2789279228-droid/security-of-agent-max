@@ -192,7 +192,7 @@ export function OverviewTab({ onNavigate }: { onNavigate: (tab: string) => void 
       {/* 右：实时活动流 */}
       <div className="border border-line bg-paper self-start xl:sticky xl:top-[6.25rem]">
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
-          <h3 className="font-serif text-[16px] font-bold text-ink tracking-tight">实时活动</h3>
+          <h3 className="text-[16px] font-bold text-ink tracking-tight">实时活动</h3>
           <span className="flex items-center gap-1.5 text-[10px] text-ink-faint">
             {streamStatus === 'online' ? (
               <>
@@ -249,7 +249,7 @@ export function OverviewTab({ onNavigate }: { onNavigate: (tab: string) => void 
           <div className="border-t border-line px-6 py-3">
             <button
               onClick={load}
-              className="w-full py-1.5 text-[11px] font-mono tracking-[0.18em] uppercase text-ink-soft hover:text-ink"
+              className="w-full py-1.5 text-[11px] font-mono tracking-[0.06em] text-ink-soft hover:text-ink"
             >
               刷新指标
             </button>

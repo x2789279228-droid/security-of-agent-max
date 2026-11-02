@@ -13,6 +13,7 @@ import ToolAnomalyBanner from './ToolAnomalyBanner'
 import { useWallKeepalive } from '../../hooks/useWallKeepalive'
 import { severityOf, useEventStreamStore, getLastActivityTs, type StreamEvent, type StreamStatus } from '../../lib/eventStream'
 import type { RelayState } from '../../lib/agentPipeline'
+import type { StatsResponse } from '../../types/stats'
 
 /**
  * 审计大屏(Monitor 战模式,阶段 4) — 1920×1080 投影优先的三列无滚动网格。
@@ -49,9 +50,9 @@ function BattlePanel({
   className?: string
 }) {
   return (
-    <section className={`relative border border-[#24384a] bg-[#1a2d3f] ${className}`}>
+    <section className={`relative border border-[#2a323c] bg-[#161b21] ${className}`}>
       <span
-        className="absolute -top-[12px] left-4 border border-[#24384a] bg-[#0e1a26] px-2.5 py-0.5 font-mono text-[11px] tracking-[0.26em] uppercase text-[#8fa0ad]"
+        className="absolute -top-[12px] left-4 border border-[#2a323c] bg-[#0f1216] px-2.5 py-0.5 font-mono text-[11px] tracking-[0.26em] uppercase text-[#9daab6]"
         aria-hidden
       >
         {tab}
@@ -89,7 +90,7 @@ export interface BattleScreenProps {
   hydratedRecent: RelayState[]
   onDemo: () => void
   demoBusy: boolean
-  stats: any
+  stats: StatsResponse | null
   onExit: () => void
 }
 
@@ -164,7 +165,7 @@ export default function BattleScreen(props: BattleScreenProps) {
   const securityPending = Math.max(0, Number(stats?.security_pending ?? 0) || 0)
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-[#0e1a26] text-[#dfe7e3]">
+    <div className="stage-voice fixed inset-0 z-[70] flex flex-col bg-[#0f1216] text-[#e9edf2]">
       {/* critical 爆闪 vignette */}
       <AnimatePresence>
         {flashTick > 0 && (
@@ -182,13 +183,13 @@ export default function BattleScreen(props: BattleScreenProps) {
       </AnimatePresence>
 
       {/* ── 顶栏 64px ── */}
-      <header className="flex h-16 shrink-0 items-center gap-5 border-b border-[#24384a] px-6">
-        <span className="font-serif text-[24px] font-black tracking-[-0.02em]">守望</span>
-        <span className="font-mono text-[12px] tracking-[0.3em] uppercase text-[#c9a574]">审计作战</span>
+      <header className="flex h-16 shrink-0 items-center gap-5 border-b border-[#2a323c] px-6">
+        <span className="font-serif text-[24px] font-semibold tracking-[-0.02em]">守望</span>
+        <span className="font-mono text-[12px] tracking-[0.3em] uppercase text-[#d9b36a]">审计作战</span>
         <WatchShift />
-        <span className="h-4 w-px bg-[#24384a]" aria-hidden />
+        <span className="h-4 w-px bg-[#2a323c]" aria-hidden />
         {replayActive ? (
-          <span className="inline-flex items-center gap-2 border border-[#c9a574]/50 bg-[#c9a574]/10 px-2.5 py-1 font-mono text-[11px] tracking-[0.2em] uppercase text-[#c9a574]">
+          <span className="inline-flex items-center gap-2 border border-[#d9b36a]/50 bg-[#d9b36a]/10 px-2.5 py-1 font-mono text-[11px] tracking-[0.2em] uppercase text-[#d9b36a]">
             <LiveBadge live={false} label="回放口径" className="!text-[#d9bc8b]" />
           </span>
         ) : (
@@ -204,13 +205,13 @@ export default function BattleScreen(props: BattleScreenProps) {
           <button
             onClick={onDemo}
             disabled={demoBusy}
-            className="border border-[#c9a574]/50 px-3.5 py-2 font-mono text-[11px] tracking-[0.2em] uppercase text-[#c9a574] hover:bg-[#203349] transition-colors disabled:opacity-40"
+            className="border border-[#d9b36a]/50 px-3.5 py-2 font-mono text-[11px] tracking-[0.2em] uppercase text-[#d9b36a] hover:bg-[#203349] transition-colors disabled:opacity-40"
           >
             ▶ 演示剧本
           </button>
           <button
             onClick={onExit}
-            className="border border-[#33475a] px-3.5 py-2 font-mono text-[11px] tracking-[0.2em] uppercase text-[#a7b4bd] hover:border-[#c9a574]/50 hover:text-[#c9a574] transition-colors"
+            className="border border-[#33475a] px-3.5 py-2 font-mono text-[11px] tracking-[0.2em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#d9b36a] transition-colors"
             title="退出大屏(Esc)"
           >
             F 退出大屏
@@ -292,11 +293,11 @@ export default function BattleScreen(props: BattleScreenProps) {
               wall-zoom:整体放大(距离字号),ThoughtDag 自带 ResizeObserver 会随缩放重测连线 */}
           <div className="relative z-10 -mx-4 flex min-h-0 flex-1">
             <section
-              className="relative flex min-h-0 w-full flex-col border border-[#c9a574]/35 bg-[#1a2d3f]"
+              className="relative flex min-h-0 w-full flex-col border border-[#d9b36a]/35 bg-[#161b21]"
               style={{ boxShadow: '0 0 44px rgba(201,165,116,0.14), 0 18px 48px -22px rgba(0,0,0,0.6)' }}
             >
               <span
-                className="absolute -top-[12px] left-4 border border-[#c9a574]/45 bg-[#0e1a26] px-3 py-0.5 font-mono text-[11px] tracking-[0.3em] uppercase text-[#c9a574]"
+                className="absolute -top-[12px] left-4 border border-[#d9b36a]/45 bg-[#0f1216] px-3 py-0.5 font-mono text-[11px] tracking-[0.3em] uppercase text-[#d9b36a]"
                 aria-hidden
               >
                 思维链 · 主舞台
@@ -327,41 +328,52 @@ export default function BattleScreen(props: BattleScreenProps) {
 
         {/* 右列 */}
         <aside className="flex min-h-0 flex-col gap-5">
-          {/* 实时事件流:固定 12 行窗口,超出顶部推走(层叠手法③:新行滑入) */}
+          {/* 实时事件流:固定 12 行窗口,透视纵深墙(v6)——新行从前方推入,
+              旧行逐层后退缩小;推入辉光按语义分级(critical 红/high 琥珀/其余青蓝) */}
           <BattlePanel tab="实时事件流" className="flex min-h-0 flex-1 flex-col px-3 pb-3 pt-6">
-            <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
+            <div
+              className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden"
+              style={{ perspective: 900 }}
+            >
               {streamLines.length === 0 ? (
                 <p className="m-auto text-center font-serif text-[16px] italic text-[#78889a]">等待事件流入……</p>
               ) : (
-                streamLines.map((e) => {
+                streamLines.map((e, i) => {
                   const sev = severityOf(e.type, e.data)
                   const meta = e.type
                   const message = String(e.data?.message || e.data?.event || e.type).slice(0, 40)
+                  const pulseCls =
+                    sev === 'critical'
+                      ? 'deck-pulse-alert'
+                      : sev === 'high'
+                        ? 'deck-pulse-warn'
+                        : 'deck-pulse-info'
                   return (
                     <button
                       key={e.id}
                       onClick={() => e.seq > 0 && onSelectEvent(e.seq)}
-                      className="group flex shrink-0 items-center gap-2.5 border border-transparent px-1.5 py-[7px] text-left hover:border-[#24384a] hover:bg-[#203349]"
+                      className="group flex shrink-0 items-center gap-2.5 border border-transparent px-1.5 py-[7px] text-left [transform-style:preserve-3d] hover:border-[#2a323c] hover:bg-[#203349]"
                     >
                       <motion.span
-                        initial={{ opacity: 0, x: -14 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.25, ease: 'easeOut' }}
+                        initial={{ opacity: 0, x: -14, z: 110 }}
+                        animate={{ opacity: 1, x: 0, z: -i * 22, scale: 1 - i * 0.015 }}
+                        transition={{ duration: 0.35, ease: 'easeOut' }}
                         className="flex min-w-0 flex-1 items-center gap-2.5"
                       >
                         <span
-                          className="h-4 w-1 shrink-0"
+                          key={e.id}
+                          className={`h-4 w-1 shrink-0 ${pulseCls}`}
                           style={{ background: SEV_COLOR[sev] ?? SEV_COLOR.info }}
                           aria-hidden
                         />
                         <span className="shrink-0 font-mono text-[12px] tabular-nums text-[#78889a]">{fmtClock(e.ts)}</span>
                         <span className="shrink-0 font-mono text-[12px] tracking-[0.1em] text-[#8fc0cc]">{meta}</span>
                         {e.replay && (
-                          <span className="shrink-0 border border-[#c9a574]/40 px-1 py-px font-mono text-[9px] tracking-[0.14em] text-[#c9a574]/70" aria-hidden>
+                          <span className="shrink-0 border border-[#d9b36a]/40 px-1 py-px font-mono text-[9px] tracking-[0.14em] text-[#d9b36a]/70" aria-hidden>
                             回放
                           </span>
                         )}
-                        <span className="truncate font-mono text-[13px] text-[#a7b4bd] group-hover:text-[#dfe7e3]">{message}</span>
+                        <span className="truncate font-mono text-[13px] text-[#a7b4bd] group-hover:text-[#e9edf2]">{message}</span>
                       </motion.span>
                     </button>
                   )
@@ -380,8 +392,8 @@ export default function BattleScreen(props: BattleScreenProps) {
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 8)
                 .map(([type, n]) => (
-                  <span key={type} className="border border-[#24384a] px-2 py-1 font-mono text-[12px] text-[#a7b4bd]">
-                    {type} <b className="tabular-nums text-[#c9a574]">{n}</b>
+                  <span key={type} className="border border-[#2a323c] px-2 py-1 font-mono text-[12px] text-[#a7b4bd]">
+                    {type} <b className="tabular-nums text-[#d9b36a]">{n}</b>
                   </span>
                 ))}
             </div>
@@ -395,7 +407,7 @@ export default function BattleScreen(props: BattleScreenProps) {
       </div>
 
       {/* ── 底栏:封条跑马灯(骑在三列下缝)── */}
-      <footer className="relative h-10 shrink-0 overflow-hidden border-t border-[#c9a574]/25 bg-[#0b1520]">
+      <footer className="relative h-10 shrink-0 overflow-hidden border-t border-[#d9b36a]/25 bg-[#0b1520]">
         <div className="duty-tape flex h-full items-center whitespace-nowrap">
           {[0, 1].map((copy) => (
             <div key={copy} className="flex items-center gap-10 pr-10">
@@ -408,7 +420,7 @@ export default function BattleScreen(props: BattleScreenProps) {
                     </span>
                   ))
                 : replayActive ? (
-                  <span className="font-mono text-[13px] text-[#c9a574]">
+                  <span className="font-mono text-[13px] text-[#d9b36a]">
                     回放口径 · 后端离线,幕布以剧本事件保持呼吸 · 事件 ID 9xxx 段为合成回放,不计入真实统计
                   </span>
                 ) : (

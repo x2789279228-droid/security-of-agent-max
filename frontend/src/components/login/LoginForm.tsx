@@ -32,10 +32,8 @@ export default function LoginForm({
 
   return (
     <form onSubmit={onSubmit} className="w-full" noValidate>
-      <h2 className="font-serif text-[28px] font-black tracking-tight text-ink">登录</h2>
-
-      <div className="mt-8">
-        <label htmlFor={userId} className="block text-[12px] text-ink-faint mb-1">
+      <div>
+        <label htmlFor={userId} className="mb-1 block text-[12px] text-ink-faint">
           用户名
         </label>
         <input
@@ -48,12 +46,12 @@ export default function LoginForm({
           onChange={(e) => onUsernameChange(e.target.value)}
           placeholder=""
           aria-invalid={hasError}
-          className="auth-input text-[16px] lg:text-[15px]"
+          className="auth-input text-[15px]"
         />
       </div>
 
-      <div className="mt-6">
-        <label htmlFor={passId} className="block text-[12px] text-ink-faint mb-1">
+      <div className="mt-5">
+        <label htmlFor={passId} className="mb-1 block text-[12px] text-ink-faint">
           密码
         </label>
         <div className="relative">
@@ -66,7 +64,7 @@ export default function LoginForm({
             onChange={(e) => onPasswordChange(e.target.value)}
             placeholder=""
             aria-invalid={hasError}
-            className="auth-input text-[16px] lg:text-[15px] pr-14"
+            className="auth-input pr-14 text-[15px]"
           />
           <button
             type="button"
@@ -81,7 +79,7 @@ export default function LoginForm({
       </div>
 
       {error && (
-        <p role="alert" className="mt-4 text-[13px] text-alert">
+        <p role="alert" className="mt-4 rounded-[4px] border border-alert/40 bg-alert/10 px-3 py-2 text-[12px] text-alert">
           {error}
         </p>
       )}
@@ -90,15 +88,15 @@ export default function LoginForm({
         type="submit"
         variant="primary"
         disabled={loading}
-        className="mt-10 h-11 w-full disabled:opacity-40"
+        className="mt-7 h-10 w-full disabled:opacity-40"
       >
-        {loading ? '登录中…' : '进入'}
+        {loading ? '登录中…' : '进入工作台'}
       </Button>
 
-      <p className="mt-6 text-[13px] text-ink-faint">
+      <p className="mt-5 text-[13px] text-ink-faint">
         还没有账号？{' '}
-        <Link to="/register" className="border-b border-accent/50 text-accent hover:opacity-80">
-          去注册
+        <Link to="/register" className="text-accent hover:opacity-80">
+          注册
         </Link>
       </p>
     </form>

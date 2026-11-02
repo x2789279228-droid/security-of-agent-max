@@ -20,15 +20,15 @@ interface SandboxTask {
 
 const statusBadge: Record<string, string> = {
   pending: 'border border-line text-ink-faint',
-  running: 'border border-[#c9a574] text-[#c9a574]',
+  running: 'border border-line text-warn',
   completed: 'border border-[#0e1a26] bg-[#0e1a26] text-[#f1e8d6]',
-  failed: 'border border-[#b03a30] text-[#b03a30]',
+  failed: 'border border-alert text-alert',
 }
 
 const verdictBadge: Record<string, string> = {
   clean: 'border border-ok text-ok',
   suspicious: 'border border-[#b88940] text-[#b88940]',
-  malicious: 'border border-[#b03a30] bg-[#b03a30] text-paper',
+  malicious: 'border border-alert bg-alert text-paper',
 }
 
 export default function Sandbox() {
@@ -44,7 +44,6 @@ export default function Sandbox() {
     <PageFrame
       title="沙箱检测"
       hint="CAPE 动态分析 · 行为报告 · 变种聚类。怀疑但无法判断时，扔进沙箱。"
-      marginalia="——真伪的最后一道，不靠签名，靠行为。"
     >
       <StatBand
         items={[
@@ -64,17 +63,17 @@ export default function Sandbox() {
           >
             <div>
               <div className="flex items-center gap-3">
-                <span className="font-serif text-[20px] font-bold tracking-tight text-ink">
+                <span className="text-[20px] font-bold tracking-tight text-ink">
                   {t.sample_name || t.sample_type}
                 </span>
                 <span
-                  className={`px-2 py-0.5 font-mono text-[10px] tracking-[0.22em] uppercase ${statusBadge[t.status] || 'border border-line'}`}
+                  className={`px-2 py-0.5 font-mono text-[10px] tracking-[0.06em] ${statusBadge[t.status] || 'border border-line'}`}
                 >
                   {t.status}
                 </span>
                 {t.verdict && (
                   <span
-                    className={`px-2 py-0.5 font-mono text-[10px] tracking-[0.22em] uppercase ${verdictBadge[t.verdict] || 'border border-line'}`}
+                    className={`px-2 py-0.5 font-mono text-[10px] tracking-[0.06em] ${verdictBadge[t.verdict] || 'border border-line'}`}
                   >
                     {t.verdict}
                   </span>
@@ -92,7 +91,7 @@ export default function Sandbox() {
                       key={idx}
                       className="border border-line px-2 py-0.5 font-mono text-[11px] text-ink"
                     >
-                      <span className="text-[#c9a574]">{tech.id}</span> {tech.name}
+                      <span className="text-warn">{tech.id}</span> {tech.name}
                     </span>
                   ))}
                 </div>
@@ -100,14 +99,14 @@ export default function Sandbox() {
             </div>
             <div className="flex flex-col items-start gap-1 md:items-end">
               {t.score > 0 && (
-                <span className="font-serif text-[36px] font-black tabular-nums leading-none text-ink">
+                <span className="text-[36px] font-semibold tabular-nums leading-none text-ink">
                   {(t.score * 10).toFixed(1)}
-                  <span className="font-mono text-[11px] tracking-[0.22em] uppercase text-ink-faint">
+                  <span className="font-mono text-[11px] tracking-[0.06em] text-ink-faint">
                     {' '}/ 10
                   </span>
                 </span>
               )}
-              <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
+              <span className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">
                 Risk · 风险评分
               </span>
               <span className="font-mono text-[10px] text-ink-faint/80">

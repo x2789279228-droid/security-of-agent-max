@@ -80,7 +80,7 @@ export function ConfirmDialog({ request, onConfirm, onCancel, busy }: Props) {
         <div className="px-6 py-5">
           <h2
             id="confirm-title"
-            className={`font-serif text-[20px] font-bold tracking-tight ${danger ? 'text-alert' : 'text-ink'}`}
+            className={`text-[20px] font-bold tracking-tight ${danger ? 'text-alert' : 'text-ink'}`}
           >
             {request.title}
           </h2>

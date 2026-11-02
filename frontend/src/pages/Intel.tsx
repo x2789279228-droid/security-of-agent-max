@@ -17,7 +17,7 @@ interface Ioc {
 
 const typeBadge: Record<string, string> = {
   ip: 'bg-[#0e1a26] text-[#f1e8d6]',
-  domain: 'bg-[#c9a574] text-[#0e1a26]',
+  domain: 'bg-warn text-[#0e1a26]',
   file_hash: 'bg-[#7ba9b5] text-[#0e1a26]',
   url: 'border border-ink text-ink',
 }
@@ -38,7 +38,6 @@ export default function Intel() {
     <PageFrame
       title="威胁情报"
       hint="IOC 管理 · 情报源 · 信誉查询。把外部情报变成系统已知。"
-      marginalia="——情报的价值在「可用」，不在「很多」。"
     >
       <StatBand
         items={[
@@ -65,22 +64,22 @@ export default function Intel() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line text-left">
-                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                   类型
                 </th>
-                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                   指标
                 </th>
-                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                   威胁
                 </th>
-                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                   严重度
                 </th>
-                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                   来源
                 </th>
-                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+                <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                   状态
                 </th>
               </tr>
@@ -97,7 +96,7 @@ export default function Intel() {
                     {ioc.ioc_value}
                   </td>
                   <td className="px-4 py-2.5 text-[13px] text-ink-soft">{ioc.threat_type || '—'}</td>
-                  <td className="px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.18em] text-ink">
+                  <td className="px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.06em] text-ink">
                     {ioc.severity}
                   </td>
                   <td className="px-4 py-2.5 font-mono text-[11px] text-ink-faint">
@@ -105,7 +104,7 @@ export default function Intel() {
                   </td>
                   <td className="px-4 py-2.5">
                     <span
-                      className={`inline-block h-1.5 w-1.5 ${ioc.is_active ? 'bg-[#c9a574]' : 'bg-ink-faint/40'}`}
+                      className={`inline-block h-1.5 w-1.5 ${ioc.is_active ? 'bg-warn' : 'bg-ink-faint/40'}`}
                       aria-hidden
                     />
                   </td>
@@ -143,7 +142,7 @@ export default function Intel() {
               className={`flex items-center justify-between px-6 py-5 ${i < feeds.length - 1 ? 'border-b border-line' : ''}`}
             >
               <div>
-                <p className="font-serif text-[18px] font-bold tracking-tight text-ink">
+                <p className="text-[18px] font-bold tracking-tight text-ink">
                   {f.name}
                 </p>
                 <p className="mt-1 font-mono text-[11px] text-ink-faint">
@@ -152,7 +151,7 @@ export default function Intel() {
               </div>
               <div className="text-right">
                 <span
-                  className={`inline-flex items-center gap-2 border px-2.5 py-1 font-mono text-[10px] tracking-[0.22em] uppercase ${
+                  className={`inline-flex items-center gap-2 border px-2.5 py-1 font-mono text-[10px] tracking-[0.06em] ${
                     f.enabled
                       ? 'border-ok text-ok'
                       : 'border-line text-ink-faint'
@@ -164,7 +163,7 @@ export default function Intel() {
                   />
                   {f.enabled ? 'ENABLED' : 'DISABLED'}
                 </span>
-                <p className="mt-1.5 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
+                <p className="mt-1.5 font-mono text-[10px] tracking-[0.06em] text-ink-faint">
                   {f.last_poll_status === 'success'
                     ? `上次 · ${f.last_poll_count} 条`
                     : f.last_poll_status}

@@ -77,8 +77,8 @@ function Collapse({ title, children, defaultOpen = false }: { title: string; chi
   return (
     <div className="border border-line bg-paper">
       <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-5 py-3 hover:bg-mist transition-colors">
-        <span className="font-serif text-[15px] font-bold text-ink tracking-tight">{title}</span>
-        <span className={`font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint transition-transform ${open ? 'rotate-180' : ''}`}>
+        <span className="text-[15px] font-bold text-ink tracking-tight">{title}</span>
+        <span className={`font-mono text-[10px] tracking-[0.06em] text-ink-faint transition-transform ${open ? 'rotate-180' : ''}`}>
           {open ? 'Close' : 'Open'}
         </span>
       </button>
@@ -240,15 +240,11 @@ export default function SecurityAudit() {
       <div className="page-shell pt-4 pb-12">
         <header className="flex flex-col gap-2 border-b border-line pb-3 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0 md:max-w-[44rem]">
-            <h1 className="font-serif text-[28px] font-black tracking-[-0.04em] text-ink leading-[1.1]">
+            <h1 className="text-[20px] font-semibold leading-tight text-ink">
               安全审计测试台
             </h1>
             <p className="mt-1 text-[13px] leading-snug text-ink-soft">
               Audit-LLM + CAD 系统可靠性测试 — 单条 / 批量 / 文件导入。
-            </p>
-            <p className="mt-1 hidden font-serif italic text-[12px] leading-snug text-ink-faint/80 md:block">
-              <span aria-hidden className="mr-1 text-[#c9a574]/70">¶</span>
-              ——把审计当成产品来测。
             </p>
           </div>
         </header>
@@ -294,7 +290,7 @@ export default function SecurityAudit() {
                 onChange={e => setSessionId(e.target.value)}
                 className="flex-1 px-3 py-2 text-xs font-sans border border-line rounded-none focus:outline-none focus:ring-1 focus:ring-accent" />
               <button onClick={handleInject} disabled={loading}
-                className="border border-[#0e1a26] bg-[#0e1a26] px-5 py-2 font-mono text-[11px] tracking-[0.18em] uppercase text-[#f1e8d6] hover:bg-[#182838] transition-colors disabled:opacity-50">
+                className="border border-[#0e1a26] bg-[#0e1a26] px-5 py-2 font-mono text-[11px] tracking-[0.06em] text-[#f1e8d6] hover:bg-[#182838] transition-colors disabled:opacity-50">
                 {loading ? '注入中 …' : '注入事件'}
               </button>
             </div>
@@ -307,7 +303,7 @@ export default function SecurityAudit() {
                 try { const data = await api.runAuditLLM(JSON.parse(eventJson)); setResult(data) }
                 catch (e: any) { setError(e.message) } finally { setLoading(false) }
               }} disabled={loading}
-                className="border border-[#0e1a26] bg-[#0e1a26] px-4 py-2 font-mono text-[11px] tracking-[0.18em] uppercase text-[#f1e8d6] hover:bg-[#182838] transition-colors disabled:opacity-50">
+                className="border border-[#0e1a26] bg-[#0e1a26] px-4 py-2 font-mono text-[11px] tracking-[0.06em] text-[#f1e8d6] hover:bg-[#182838] transition-colors disabled:opacity-50">
                 运行 Audit-LLM
               </button>
             </div>

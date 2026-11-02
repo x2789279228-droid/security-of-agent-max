@@ -35,21 +35,21 @@ function SceneRail({ state }: { state: ReturnType<typeof useDemoDirector>['state
             key={scene.id}
             className={`relative border px-4 py-3 transition-colors ${
               active
-                ? 'border-[#c9a574]/40 bg-[#182838]'
+                ? 'border-[#d9b36a]/40 bg-[#263041]'
                 : status === 'done' || status === 'skipped'
                   ? 'border-transparent opacity-70'
                   : 'border-transparent opacity-40'
             }`}
           >
-            {active && <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-[#c9a574]" aria-hidden />}
+            {active && <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-[#d9b36a]" aria-hidden />}
             <p className="flex items-baseline gap-2.5">
-              <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-[#c9a574]">{scene.num}</span>
-              <span className="font-serif text-[16px] font-bold text-[#dfe7e3]">{scene.title}</span>
-              <span className="ml-auto font-mono text-[11px] text-[#78889a]">
+              <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-[#d9b36a]">{scene.num}</span>
+              <span className="font-serif text-[16px] font-bold text-[#e9edf2]">{scene.title}</span>
+              <span className="ml-auto font-mono text-[11px] text-[#6e7a88]">
                 {status === 'done' ? '✓' : status === 'skipped' ? '—' : active ? '▶' : ''}
               </span>
             </p>
-            <p className="mt-1 text-[12px] leading-snug text-[#78889a]">{scene.caption}</p>
+            <p className="mt-1 text-[12px] leading-snug text-[#6e7a88]">{scene.caption}</p>
           </div>
         )
       })}
@@ -63,9 +63,9 @@ function RelayStage({ stages }: { stages: ReturnType<typeof useDemoDirector>['st
   const frac = activeIdx >= 0 ? (activeIdx + 0.5) / AGENT_RELAY_STAGES.length : 0
   return (
     <div className="relative">
-      <div className="absolute left-0 right-0 top-[22px] h-px bg-[#24384a]" aria-hidden />
+      <div className="absolute left-0 right-0 top-[22px] h-px bg-[#2a323c]" aria-hidden />
       <motion.div
-        className="absolute top-[19px] h-[7px] w-[7px] rounded-full bg-[#c9a574]"
+        className="absolute top-[19px] h-[7px] w-[7px] rounded-full bg-[#d9b36a]"
         style={{ boxShadow: '0 0 12px rgba(201,165,116,0.8)' }}
         animate={{ left: `calc(${frac * 100}% - 3px)` }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
@@ -78,7 +78,7 @@ function RelayStage({ stages }: { stages: ReturnType<typeof useDemoDirector>['st
             cell.status === 'success'
               ? '#5da583'
               : cell.status === 'running'
-                ? '#c9a574'
+                ? '#d9b36a'
                 : cell.status === 'error' || cell.status === 'timeout'
                   ? '#e05a4e'
                   : '#33475a'
@@ -92,7 +92,7 @@ function RelayStage({ stages }: { stages: ReturnType<typeof useDemoDirector>['st
               />
               <span
                 className="text-center font-mono text-[10px] leading-tight tracking-[0.14em]"
-                style={{ color: cell.status === 'idle' ? '#78889a' : '#a7b4bd' }}
+                style={{ color: cell.status === 'idle' ? '#6e7a88' : '#a7b4bd' }}
               >
                 {STAGE_LABELS[stage] ?? stage}
               </span>
@@ -165,35 +165,35 @@ export default function Demo() {
 
   return (
     <PageTransition>
-      <div className="flex min-h-screen flex-col bg-[#0e1a26] font-sans text-[#dfe7e3]">
+      <div className="stage-voice flex min-h-screen flex-col bg-[#0f1216] font-sans text-[#e9edf2]">
         {/* ── 顶栏 ── */}
-        <header className="flex h-14 shrink-0 items-center gap-5 border-b border-[#24384a] px-6">
-          <span className="font-serif text-[18px] font-black tracking-[-0.02em]">守望</span>
-          <span className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#c9a574]">
+        <header className="flex h-14 shrink-0 items-center gap-5 border-b border-[#2a323c] px-6">
+          <span className="font-serif text-[18px] font-semibold tracking-[-0.02em]">守望</span>
+          <span className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#d9b36a]">
             攻击剧本 · 沉浸演示
           </span>
           <span className={`px-2 py-0.5 font-mono text-[10px] tracking-[0.2em] uppercase ${badge.cls}`}>
             {badge.label}
           </span>
           {state.running && (
-            <span className="font-mono text-[11px] tabular-nums text-[#78889a]">{fmtElapsed(state.elapsedMs)}</span>
+            <span className="font-mono text-[11px] tabular-nums text-[#6e7a88]">{fmtElapsed(state.elapsedMs)}</span>
           )}
           {state.degradedNote && (
-            <span className="hidden truncate font-mono text-[10px] text-[#d9b06b] md:inline">{state.degradedNote}</span>
+            <span className="hidden truncate font-mono text-[10px] text-[#e4c489] md:inline">{state.degradedNote}</span>
           )}
           <div className="ml-auto flex items-center gap-2">
             {state.running && !state.finished && (
               <>
                 <button
                   onClick={togglePause}
-                  className="border border-[#24384a] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#c9a574]/50 hover:text-[#dfe7e3] transition-colors"
+                  className="border border-[#2a323c] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#e9edf2] transition-colors"
                 >
                   {state.paused ? '▶ 继续' : '⏸ 暂停'}
                 </button>
                 <button
                   onClick={skipScene}
                   disabled={state.paused}
-                  className="border border-[#24384a] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#c9a574]/50 hover:text-[#dfe7e3] transition-colors disabled:opacity-40"
+                  className="border border-[#2a323c] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#e9edf2] transition-colors disabled:opacity-40"
                 >
                   ⏭ 跳过本幕
                 </button>
@@ -202,14 +202,14 @@ export default function Demo() {
             {(state.running || state.finished) && (
               <button
                 onClick={reset}
-                className="border border-[#24384a] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#c9a574]/50 hover:text-[#dfe7e3] transition-colors"
+                className="border border-[#2a323c] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#e9edf2] transition-colors"
               >
                 ↺ 重演
               </button>
             )}
             <button
               onClick={() => navigate(ROUTES.MONITOR)}
-              className="border border-[#c9a574]/40 px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#c9a574] hover:bg-[#182838] transition-colors"
+              className="border border-[#d9b36a]/40 px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#d9b36a] hover:bg-[#263041] transition-colors"
             >
               退出
             </button>
@@ -219,8 +219,8 @@ export default function Demo() {
         {/* ── 开场(未开演)── */}
         {notStarted && (
           <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
-            <p className="font-mono text-[11px] tracking-[0.4em] uppercase text-[#c9a574]">Demo Script · 六幕</p>
-            <h1 className="mt-4 font-serif text-[52px] font-black leading-tight tracking-[-0.03em]">
+            <p className="font-mono text-[11px] tracking-[0.4em] uppercase text-[#d9b36a]">Demo Script · 六幕</p>
+            <h1 className="mt-4 font-serif text-[52px] font-semibold leading-tight tracking-[-0.03em]">
               一次 C2 外联的
               <br />
               完整处置
@@ -232,19 +232,19 @@ export default function Demo() {
             <div className="mt-9 flex items-center gap-4">
               <button
                 onClick={start}
-                className="border border-[#c9a574] bg-[#0e1a26] px-8 py-3.5 font-serif text-[16px] font-black tracking-[0.06em] text-[#f1e8d6] hover:bg-[#182838] transition-colors"
+                className="border border-[#d9b36a] bg-[#0f1216] px-8 py-3.5 font-serif text-[16px] font-semibold tracking-[0.06em] text-[#f1e8d6] hover:bg-[#263041] transition-colors"
               >
                 ▶ 实时开演
               </button>
               <button
                 onClick={startRehearsal}
-                className="border border-[#33475a] px-8 py-3.5 font-mono text-[11px] tracking-[0.24em] uppercase text-[#a7b4bd] hover:border-[#c9a574]/60 hover:text-[#c9a574] transition-colors"
+                className="border border-[#33475a] px-8 py-3.5 font-mono text-[11px] tracking-[0.24em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/60 hover:text-[#d9b36a] transition-colors"
               >
                 演练模式(离线)
               </button>
             </div>
             {state.error && (
-              <p className="mt-6 max-w-[32rem] border border-[#d4a054]/40 bg-[#d4a054]/10 px-4 py-2.5 text-[13px] text-[#d9b06b]">
+              <p className="mt-6 max-w-[32rem] border border-[#d4a054]/40 bg-[#d4a054]/10 px-4 py-2.5 text-[13px] text-[#e4c489]">
                 {state.error}
               </p>
             )}
@@ -265,7 +265,7 @@ export default function Demo() {
             </aside>
 
             {/* 中:当前幕内容 */}
-            <main className="relative flex min-w-0 flex-col overflow-hidden border border-[#24384a] bg-[#14222f] p-7">
+            <main className="relative flex min-w-0 flex-col overflow-hidden border border-[#2a323c] bg-[#14222f] p-7">
               <AnimatePresence mode="wait">
                 <motion.div
                   key={state.sceneIdx}
@@ -277,10 +277,10 @@ export default function Demo() {
                 >
                   {currentScene && (
                     <>
-                      <p className="font-mono text-[10px] tracking-[0.3em] uppercase text-[#c9a574]">
+                      <p className="font-mono text-[10px] tracking-[0.3em] uppercase text-[#d9b36a]">
                         {currentScene.num} · {currentScene.title}
                       </p>
-                      <p className="mt-1 font-serif text-[22px] font-black text-[#dfe7e3]">{currentScene.caption}</p>
+                      <p className="mt-1 font-serif text-[22px] font-semibold text-[#e9edf2]">{currentScene.caption}</p>
                     </>
                   )}
 
@@ -291,23 +291,23 @@ export default function Demo() {
                         initial={{ opacity: 0, x: -70 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-                        className="mx-auto w-full max-w-[30rem] border border-[#e05a4e]/50 bg-[#182838] p-5"
+                        className="mx-auto w-full max-w-[30rem] border border-[#e05a4e]/50 bg-[#263041] p-5"
                       >
                         <div className="flex items-center justify-between">
                           <span className="border border-[#e05a4e]/50 bg-[#e05a4e]/10 px-2 py-0.5 font-mono text-[10px] tracking-[0.2em] uppercase text-[#e8887c]">
                             critical
                           </span>
-                          <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-[#78889a]">
+                          <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-[#6e7a88]">
                             {state.eventId ? `事件 #${state.eventId}` : '注入中…'}
                           </span>
                         </div>
                         <p className="mt-3 font-mono text-[15px] font-bold tracking-[0.06em] text-[#e8eee9]">C2_BEACON</p>
                         <p className="mt-2 font-mono text-[13px] text-[#a7b4bd]">
                           {state.event?.src ?? '192.168.1.105'}
-                          <span className="mx-2 text-[#c9a574]">──→</span>
+                          <span className="mx-2 text-[#d9b36a]">──→</span>
                           {state.event?.dst ?? '23.129.64.33'}
                         </p>
-                        <p className="mt-2 text-[13px] leading-relaxed text-[#78889a]">
+                        <p className="mt-2 text-[13px] leading-relaxed text-[#6e7a88]">
                           {state.event?.message ?? '内部主机疑似与 C2 服务器周期性通信'}
                         </p>
                       </motion.div>
@@ -321,14 +321,14 @@ export default function Demo() {
                             initial={{ opacity: 0, scale: 0.96 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ duration: 0.3 }}
-                            className="border border-[#c9a574]/40 bg-[#182838] p-5"
+                            className="border border-[#d9b36a]/40 bg-[#263041] p-5"
                           >
-                            <p className="font-mono text-[10px] tracking-[0.24em] uppercase text-[#c9a574]">检测信号</p>
+                            <p className="font-mono text-[10px] tracking-[0.24em] uppercase text-[#d9b36a]">检测信号</p>
                             <p className="mt-2 font-serif text-[19px] font-bold text-[#e8eee9]">{state.detection.title}</p>
                             <p className="mt-2 text-[13px] leading-relaxed text-[#a7b4bd]">{state.detection.detail}</p>
                           </motion.div>
                         ) : (
-                          <div className="skeleton h-32 !bg-[#182838]" />
+                          <div className="skeleton h-32 !bg-[#263041]" />
                         )}
                       </div>
                     )}
@@ -349,23 +349,23 @@ export default function Demo() {
                             initial={{ opacity: 0, y: 12 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.32 }}
-                            className="border border-[#5da583]/40 bg-[#182838] p-5"
+                            className="border border-[#5da583]/40 bg-[#263041] p-5"
                           >
                             <p className="font-mono text-[10px] tracking-[0.24em] uppercase text-[#5da583]">响应引擎</p>
                             <p className="mt-2 font-serif text-[17px] font-bold text-[#e8eee9]">{state.response.summary}</p>
-                            <p className="mt-2 font-mono text-[11px] text-[#78889a]">
+                            <p className="mt-2 font-mono text-[11px] text-[#6e7a88]">
                               {state.response.blocked ? '动作已执行 · 可回滚' : '等待人工审批 · 工单已建立'}
                             </p>
                           </motion.div>
                         ) : (
-                          <div className="skeleton h-28 !bg-[#182838]" />
+                          <div className="skeleton h-28 !bg-[#263041]" />
                         )}
                       </div>
                     )}
 
                     {/* 幕 6:等待落印(印章为全屏 overlay) */}
                     {state.sceneIdx === 5 && !state.finished && (
-                      <p className="text-center font-serif text-[15px] italic text-[#78889a]">案卷归档中……</p>
+                      <p className="text-center font-serif text-[15px] italic text-[#6e7a88]">案卷归档中……</p>
                     )}
                     {state.finished && state.seal && (
                       <div className="text-center">
@@ -376,13 +376,13 @@ export default function Demo() {
                               reset()
                               void start()
                             }}
-                            className="border border-[#c9a574] px-6 py-2.5 font-serif text-[14px] font-bold text-[#f1e8d6] hover:bg-[#182838] transition-colors"
+                            className="border border-[#d9b36a] px-6 py-2.5 font-serif text-[14px] font-bold text-[#f1e8d6] hover:bg-[#263041] transition-colors"
                           >
                             ↺ 重演
                           </button>
                           <button
                             onClick={gotoScreen}
-                            className="border border-[#33475a] px-6 py-2.5 font-mono text-[11px] tracking-[0.22em] uppercase text-[#a7b4bd] hover:border-[#c9a574]/60 hover:text-[#c9a574] transition-colors"
+                            className="border border-[#33475a] px-6 py-2.5 font-mono text-[11px] tracking-[0.22em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/60 hover:text-[#d9b36a] transition-colors"
                           >
                             移交作战大屏
                           </button>
@@ -396,8 +396,8 @@ export default function Demo() {
 
             {/* 右:事件档案 + 模式说明 */}
             <aside className="flex flex-col gap-4 overflow-y-auto">
-              <div className="border border-[#24384a] bg-[#14222f] p-5">
-                <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#78889a]">事件档案</p>
+              <div className="border border-[#2a323c] bg-[#14222f] p-5">
+                <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#6e7a88]">事件档案</p>
                 <dl className="mt-3 space-y-2 text-[12px]">
                   {[
                     ['事件', state.eventId ? `#${state.eventId} · C2_BEACON` : '—'],
@@ -406,21 +406,21 @@ export default function Demo() {
                     ['严重度', 'critical'],
                   ].map(([k, v]) => (
                     <div key={k} className="flex justify-between gap-3">
-                      <dt className="font-mono text-[10px] tracking-[0.18em] uppercase text-[#78889a]">{k}</dt>
+                      <dt className="font-mono text-[10px] tracking-[0.18em] uppercase text-[#6e7a88]">{k}</dt>
                       <dd className="font-mono tabular-nums text-[#c9d6cf]">{v}</dd>
                     </div>
                   ))}
                 </dl>
               </div>
 
-              <div className="border border-[#24384a] bg-[#14222f] p-5">
-                <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#78889a]">数据源口径</p>
+              <div className="border border-[#2a323c] bg-[#14222f] p-5">
+                <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#6e7a88]">数据源口径</p>
                 <ul className="mt-3 space-y-2.5 text-[12px] leading-relaxed text-[#a7b4bd]">
                   <li><b className="text-[#7fd4a8]">实时</b> — 事件经真实流水线,SSE 驱动画面</li>
                   <li><b className="text-[#e5b96b]">降级</b> — 某幕事件超时,合成信号推进(徽章常驻,不伪装)</li>
                   <li><b className="text-[#d9bc8b]">演练</b> — 纯前端时间轴,无后端,供录屏</li>
                 </ul>
-                <p className="mt-3 border-t border-[#24384a] pt-3 text-[11px] leading-relaxed text-[#78889a]">
+                <p className="mt-3 border-t border-[#2a323c] pt-3 text-[11px] leading-relaxed text-[#6e7a88]">
                   流水线:Decomposer → Tool Builder → Executor → Reviewer → CAD → Response;
                   CAD 为独立监督位,不参与内容生产。
                 </p>
@@ -440,18 +440,18 @@ export default function Demo() {
                       <div className="flex items-center gap-3">
                         <button
                           onClick={gotoScreen}
-                          className="border border-[#c9a574]/60 bg-[#0e1a26] px-6 py-2.5 font-serif text-[14px] font-bold tracking-[0.06em] text-[#f1e8d6] hover:bg-[#182838] transition-colors"
+                          className="border border-[#d9b36a]/60 bg-[#0f1216] px-6 py-2.5 font-serif text-[14px] font-bold tracking-[0.06em] text-[#f1e8d6] hover:bg-[#263041] transition-colors"
                         >
                           移交作战大屏 →
                         </button>
                         <button
                           onClick={() => handoffCtlRef.current?.stop()}
-                          className="border border-[#33475a] px-4 py-2.5 font-mono text-[10px] tracking-[0.22em] uppercase text-[#78889a] hover:border-[#c9a574]/50 hover:text-[#c9a574] transition-colors"
+                          className="border border-[#33475a] px-4 py-2.5 font-mono text-[10px] tracking-[0.22em] uppercase text-[#6e7a88] hover:border-[#d9b36a]/50 hover:text-[#d9b36a] transition-colors"
                         >
                           留在结案
                         </button>
                       </div>
-                      <p className="font-mono text-[11px] tracking-[0.14em] text-[#78889a]">
+                      <p className="font-mono text-[11px] tracking-[0.14em] text-[#6e7a88]">
                         {handoffIn !== null
                           ? `${handoffIn}s 后自动移交 · 同一事件将在大屏思维链继续`
                           : '自动移交已取消 · 可随时手动移交'}
@@ -465,24 +465,24 @@ export default function Demo() {
         )}
 
         {/* ── 底部进度 ── */}
-        <footer className="flex h-9 shrink-0 items-stretch border-t border-[#24384a]">
+        <footer className="flex h-9 shrink-0 items-stretch border-t border-[#2a323c]">
           {SCENES.map((scene, i) => {
             const status = state.sceneStatus[scene.id]
             return (
-              <div key={scene.id} className="relative flex-1 border-r border-[#24384a] last:border-r-0">
+              <div key={scene.id} className="relative flex-1 border-r border-[#2a323c] last:border-r-0">
                 <div
                   className={`absolute inset-0 transition-colors duration-500 ${
                     status === 'done'
                       ? 'bg-[#5da583]/12'
                       : status === 'playing'
-                        ? 'bg-[#c9a574]/14'
+                        ? 'bg-[#d9b36a]/14'
                         : status === 'skipped'
                           ? 'bg-[#33475a]/30'
                           : ''
                   }`}
                   aria-hidden
                 />
-                <p className="relative flex h-full items-center justify-center font-mono text-[10px] tracking-[0.24em] uppercase text-[#78889a]">
+                <p className="relative flex h-full items-center justify-center font-mono text-[10px] tracking-[0.24em] uppercase text-[#6e7a88]">
                   {String(i + 1).padStart(2, '0')} {scene.title}
                 </p>
               </div>

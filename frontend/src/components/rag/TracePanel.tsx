@@ -113,7 +113,7 @@ export function TracePanel() {
         {statCards.map((c) => (
           <div key={c.label} className="bg-card p-4">
             <p className="text-[10px] font-sans text-ink-faint">{c.label}</p>
-            <p className={`text-2xl font-serif font-bold tabular-nums mt-1 ${c.danger ? 'text-alert' : ''}`}>{c.value}</p>
+            <p className={`text-2xl font-bold tabular-nums mt-1 ${c.danger ? 'text-alert' : ''}`}>{c.value}</p>
             {c.sub && <p className={`text-[10px] font-sans mt-1 ${c.danger ? 'text-alert' : 'text-ink-faint'}`}>{c.sub}</p>}
           </div>
         ))}

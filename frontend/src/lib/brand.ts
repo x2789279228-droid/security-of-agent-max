@@ -10,19 +10,20 @@ export const BRAND = {
 
 /** 案卷深室（Vault Ledger）：深室底、黛墨字、暮青动作、松绿健康、朱砂只留给威胁、暮金唯一点缀。 */
 export const BRAND_COLORS = {
-  vault: '#0E1A26',
-  night: '#1C2838',
-  card: '#F5F7F5',
-  paper: '#F5F7F5',
-  surface: '#ECF0EE',
-  ink: '#1C2838',
-  accent: '#3A6570',
-  ok: '#3E7A64',
-  alert: '#B03A30',
-  warn: '#B88940',
-  signal: '#4A7A88',
-  dusk: '#C9A574',
-  onAccent: '#F5F7F5',
+  // 图表专用（Sparkline/RateHistogram 内联 SVG）：暗肤校准的语义色，亮肤下同样可读
+  vault: '#1D242D',
+  night: '#0F1216',
+  card: '#161B21',
+  paper: '#161B21',
+  surface: '#0F1216',
+  ink: '#E9EDF2',
+  accent: '#4FB3CF',
+  ok: '#3ECF8E',
+  alert: '#F0554A',
+  warn: '#E8A33D',
+  signal: '#57A9DE',
+  dusk: '#D9B36A',
+  onAccent: '#071318',
 } as const
 
 /** 暮青 → 灰青 → 松绿（dusk → pine）。无金。 */

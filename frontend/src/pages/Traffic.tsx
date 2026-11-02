@@ -42,10 +42,9 @@ export default function Traffic() {
     <PageFrame
       title="流量采集"
       hint="网络流 · 协议分布 · 采集状态。横向看流量，眼睛能看出异常。"
-      marginalia="——大多数攻击先在流上露出形状。"
       extra={
         stats && (
-          <div className="flex gap-3 font-mono text-[10px] tracking-[0.26em] uppercase">
+          <div className="flex gap-3 font-mono text-[10px] tracking-[0.06em] ">
             <span className="border border-line px-3 py-2">
               <span className="text-ink-faint">Packets</span>{' '}
               <span className="ml-1 text-ink tabular-nums">
@@ -79,25 +78,25 @@ export default function Traffic() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line text-left">
-              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                 源
               </th>
-              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                 目标
               </th>
-              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                 端口
               </th>
-              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                 协议
               </th>
-              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                 方向
               </th>
-              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal text-right">
+              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal text-right">
                 流出
               </th>
-              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">
+              <th className="px-4 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">
                 时间
               </th>
             </tr>
@@ -113,7 +112,7 @@ export default function Traffic() {
                     {f.app_protocol || f.protocol}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint">
+                <td className="px-4 py-2.5 font-mono text-[11px] tracking-[0.06em] text-ink-faint">
                   {f.direction}
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono text-[13px] tabular-nums">

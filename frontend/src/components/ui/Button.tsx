@@ -17,7 +17,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const base =
-    'inline-flex items-center justify-center gap-2.5 cursor-pointer whitespace-nowrap transition-colors rounded-[2px] box-border font-medium select-none disabled:opacity-50 disabled:cursor-not-allowed tracking-[0.04em]'
+    'inline-flex items-center justify-center gap-2.5 cursor-pointer whitespace-nowrap transition-colors rounded-[4px] box-border font-medium select-none disabled:opacity-50 disabled:cursor-not-allowed'
 
   const sizes = {
     sm: 'h-8 px-4 text-[12px]',
@@ -27,13 +27,13 @@ export function Button({
 
   const variants = {
     primary:
-      'bg-[#0e1a26] text-[#d8dee0] hover:bg-[#182838] border border-[#0e1a26]',
+      'bg-accent text-on-accent hover:bg-accent-hover border border-accent',
     outline:
-      'bg-transparent text-ink border border-line hover:border-[#0e1a26] hover:text-ink',
+      'bg-transparent text-ink border border-line hover:border-ink hover:text-ink',
     underline:
-      '!px-0 bg-transparent text-ink border-b border-[#0e1a26] rounded-none hover:opacity-70',
+      '!px-0 bg-transparent text-ink border-b border-ink rounded-none hover:opacity-70',
     ghost: 'bg-transparent text-ink-soft hover:text-ink',
-    danger: 'bg-alert text-paper hover:opacity-90',
+    danger: 'bg-alert text-on-accent hover:opacity-90',
   }
 
   return (
@@ -70,22 +70,6 @@ export function Button({
           />
         </svg>
       )}
-      {children as React.ReactNode}
-    </motion.button>
-  )
-}
-
-export function TextLink({
-  children,
-  className = '',
-  ...props
-}: HTMLMotionProps<'button'>) {
-  return (
-    <motion.button
-      className={`inline-flex items-center cursor-pointer text-[13px] text-ink border-b border-[#0e1a26] pb-0.5 hover:opacity-70 tracking-[0.04em] ${className}`}
-      whileTap={{ opacity: 0.85 }}
-      {...props}
-    >
       {children as React.ReactNode}
     </motion.button>
   )

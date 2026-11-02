@@ -63,7 +63,6 @@ export default function CapabilitiesDashboard() {
     <PageFrame
       title="能力总览"
       hint="只展示登记过的能力；状态分为已验证 / 实验 / 关闭。"
-      marginalia="——能力是资产，但只有被证据证明才是。"
     >
       {/* 顶部摘要 */}
       <div className="mb-10 grid grid-cols-2 gap-px border border-line bg-line md:grid-cols-4">
@@ -78,7 +77,7 @@ export default function CapabilitiesDashboard() {
           能力状态加载失败：{error}
         </p>
       ) : loading ? (
-        <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-ink-faint">加载中 …</p>
+        <p className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">加载中 …</p>
       ) : (
         <div className="grid grid-cols-1 border-t border-line md:grid-cols-2 lg:grid-cols-3">
           {caps.map((c, i) => {
@@ -104,20 +103,20 @@ export default function CapabilitiesDashboard() {
               >
                 {/* 顶部编号 + 证据状态 */}
                 <div className="flex items-center justify-between border-b border-ink/80 pb-3">
-                  <span className="font-mono text-[10px] tracking-[0.26em] uppercase text-ink-faint tabular-nums">
+                  <span className="font-mono text-[10px] tracking-[0.06em] text-ink-faint tabular-nums">
                     CAP · {String(i + 1).padStart(2, '0')}
                   </span>
-                  <span className={`inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.22em] uppercase ${tone}`}>
+                  <span className={`inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.06em] ${tone}`}>
                     <span className={`h-1.5 w-1.5 ${dot}`} aria-hidden />
                     {c.status.toUpperCase()}
                   </span>
                 </div>
 
                 <div className="mt-5">
-                  <div className="font-serif text-[22px] font-black tracking-[-0.02em] text-ink">
+                  <div className="text-[22px] font-semibold tracking-[-0.02em] text-ink">
                     {meta.label}
                   </div>
-                  <div className="mt-1 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
+                  <div className="mt-1 font-mono text-[10px] tracking-[0.06em] text-ink-faint">
                     {meta.desc}
                   </div>
                   {c.notes && (
@@ -127,15 +126,15 @@ export default function CapabilitiesDashboard() {
 
                 <div className="mt-6 flex items-baseline justify-between gap-3 border-t border-line pt-4">
                   <div className="flex items-baseline gap-3">
-                    <span className="font-serif text-[32px] font-black tabular-nums text-ink leading-none">
+                    <span className="text-[32px] font-semibold tabular-nums text-ink leading-none">
                       {c.count.toLocaleString()}
                     </span>
-                    <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
+                    <span className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">
                       Events
                     </span>
                   </div>
                   <span
-                    className={`font-mono text-[10px] tracking-[0.22em] uppercase ${
+                    className={`font-mono text-[10px] tracking-[0.06em] ${
                       c.enabled ? 'text-ok' : 'text-ink-faint'
                     }`}
                   >
@@ -177,10 +176,10 @@ function StatCell({
 }) {
   return (
     <div className="bg-paper px-6 py-5">
-      <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-ink-faint">
+      <p className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">
         {label}
       </p>
-      <p className="mt-2 font-serif text-[32px] font-black tabular-nums leading-none text-ink">
+      <p className="mt-2 text-[32px] font-semibold tabular-nums leading-none text-ink">
         {typeof value === 'number' ? value.toLocaleString() : value}
       </p>
       {hint && <p className="mt-2 text-[11px] text-ink-faint">{hint}</p>}

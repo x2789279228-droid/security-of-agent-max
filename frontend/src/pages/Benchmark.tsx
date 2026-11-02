@@ -48,8 +48,8 @@ function Dossier({
 
       <div className="border-b border-line px-6 py-4">
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          <h2 className="font-serif text-[20px] font-black tracking-tight text-ink">{title}</h2>
-          <span className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">{meta}</span>
+          <h2 className="text-[20px] font-semibold tracking-tight text-ink">{title}</h2>
+          <span className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">{meta}</span>
         </div>
         {note && (
           <p className="mt-1.5 max-w-[52rem] text-[12px] leading-relaxed text-ink-faint">{note}</p>
@@ -79,8 +79,8 @@ function Headline({
   const toneCls = { ink: 'text-ink', alert: 'text-alert', ok: 'text-ok', warn: 'text-warn' }[tone]
   return (
     <div className="relative border border-line bg-paper-warm px-5 py-4">
-      <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">{label}</p>
-      <p className={`mt-2 font-serif text-[34px] font-black leading-none tabular-nums ${toneCls}`}>
+      <p className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">{label}</p>
+      <p className={`mt-2 text-[34px] font-semibold leading-none tabular-nums ${toneCls}`}>
         <CountUp value={value} decimals={decimals} />
         {suffix && <span className="ml-1 font-mono text-[13px] font-normal text-ink-faint">{suffix}</span>}
       </p>
@@ -196,7 +196,7 @@ export default function Benchmark() {
 
   if (state.loading) {
     return (
-      <PageFrame num="§" title="评测战绩" hint="定量证据链 — 消融 · 对抗 · 回放 · 压测。">
+      <PageFrame title="评测战绩" hint="定量证据链 — 消融 · 对抗 · 回放 · 压测。">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="skeleton h-28" />
@@ -209,9 +209,9 @@ export default function Benchmark() {
 
   if (state.error || !state.data) {
     return (
-      <PageFrame num="§" title="评测战绩" hint="定量证据链 — 消融 · 对抗 · 回放 · 压测。">
+      <PageFrame title="评测战绩" hint="定量证据链 — 消融 · 对抗 · 回放 · 压测。">
         <div className="border border-line bg-paper px-8 py-16 text-center">
-          <p className="font-serif text-[18px] font-bold text-ink">卷宗尚未归档</p>
+          <p className="text-[18px] font-bold text-ink">暂无评测数据</p>
           <p className="mt-2 text-[13px] text-ink-faint">
             {state.error || '未找到评测结果文件'} — 请先运行 backend/eval_datasets 下的评测脚本生成 docs/benchmark 结果。
           </p>
@@ -227,12 +227,10 @@ export default function Benchmark() {
 
   return (
     <PageFrame
-      num="§"
       title="评测战绩"
       hint="定量证据链 — CSIC-2010 全量回放 · 对抗保持率 · 分层消融 · 压测故障注入。"
-      marginalia="——数字自己会说话,口径注释原样保留。"
       extra={
-        <span className="border border-line bg-qing px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">
+        <span className="border border-line bg-qing px-3 py-1.5 font-mono text-[10px] tracking-[0.06em] text-ink-faint">
           docs/benchmark · 只读
         </span>
       }
@@ -274,7 +272,7 @@ export default function Benchmark() {
         {csic && (
           <Dossier
             index={0}
-            tab="卷宗 I"
+            tab="报告 I"
             title="CSIC-2010 全量回放"
             meta={`${csic.rules_total} 条规则(影子 ${csic.rules_shadow})`}
             note={csic.note}
@@ -310,10 +308,10 @@ export default function Benchmark() {
                 </table>
 
                 <div className="mt-4 border border-ok/40 bg-mint px-4 py-3">
-                  <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-ok">误报防线</p>
+                  <p className="font-mono text-[10px] tracking-[0.06em] text-ok">误报防线</p>
                   <p className="mt-1 text-[13px] text-ink">
-                    <CountUp value={csic.benignN} className="font-serif font-bold tabular-nums" /> 条良性样本,
-                    <span className="font-serif font-bold text-ok"> 0 误报</span>
+                    <CountUp value={csic.benignN} className="font-bold tabular-nums" /> 条良性样本,
+                    <span className="font-bold text-ok"> 0 误报</span>
                     <span className="text-ink-faint"> — 全部 150 条规则(含 125 条影子)无一误击</span>
                   </p>
                 </div>
@@ -338,7 +336,7 @@ export default function Benchmark() {
                     )
                   })}
                 </div>
-                <p className="mt-4 font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">
+                <p className="mt-4 font-mono text-[10px] tracking-[0.06em] text-ink-faint">
                   吞吐 {csic.eps} eps · 单进程检测路径
                 </p>
               </div>
@@ -350,15 +348,15 @@ export default function Benchmark() {
         {evasion && (
           <Dossier
             index={1}
-            tab="卷宗 II"
+            tab="报告 II"
             title="对抗保持率 · 规范化整改前后"
             meta={`算子:${evasion.operators.map((o) => OPERATOR_LABEL[o] ?? o).join(' / ')}`}
             note={reportOf(reports, 'evasion')?.scope_note}
           >
             <div className="mb-5 grid gap-4 sm:grid-cols-2">
               <div className="border border-warn/40 bg-paper px-5 py-4">
-                <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-warn">整改前 · overall</p>
-                <p className="mt-1.5 font-serif text-[38px] font-black leading-none text-warn tabular-nums">
+                <p className="font-mono text-[10px] tracking-[0.06em] text-warn">整改前 · overall</p>
+                <p className="mt-1.5 text-[38px] font-semibold leading-none text-warn tabular-nums">
                   <CountUp value={(evasion.overallPre ?? 0) * 100} decimals={1} />%
                 </p>
                 <div className="mt-3">
@@ -366,8 +364,8 @@ export default function Benchmark() {
                 </div>
               </div>
               <div className="border border-ok/40 bg-paper px-5 py-4">
-                <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-ok">整改后 · overall</p>
-                <p className="mt-1.5 font-serif text-[38px] font-black leading-none text-ok tabular-nums">
+                <p className="font-mono text-[10px] tracking-[0.06em] text-ok">整改后 · overall</p>
+                <p className="mt-1.5 text-[38px] font-semibold leading-none text-ok tabular-nums">
                   <CountUp value={evasion.overall * 100} decimals={1} />%
                 </p>
                 <div className="mt-3">
@@ -411,7 +409,7 @@ export default function Benchmark() {
         {ablation && (
           <Dossier
             index={2}
-            tab="卷宗 III"
+            tab="报告 III"
             title="分层消融 · L1 → L5"
             meta={reportOf(reports, 'ablation')?.file ?? ''}
             note={typeof ablation.scope_note === 'string' ? ablation.scope_note : undefined}
@@ -472,27 +470,27 @@ export default function Benchmark() {
         {perf && (
           <Dossier
             index={3}
-            tab="卷宗 IV"
+            tab="报告 IV"
             title="压测与故障注入"
             meta={perf.meta?.date ?? ''}
             note={perf.meta?.note}
           >
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="border border-line bg-paper-warm px-4 py-3">
-                <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">接入峰值</p>
-                <p className="mt-1 font-serif text-[26px] font-black tabular-nums text-ink">
+                <p className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">接入峰值</p>
+                <p className="mt-1 text-[26px] font-semibold tabular-nums text-ink">
                   <CountUp value={perf.saturation?.ingest_peak_eps ?? 0} decimals={1} /> <span className="font-mono text-[11px] font-normal text-ink-faint">eps</span>
                 </p>
               </div>
               <div className="border border-ok/40 bg-mint px-4 py-3">
-                <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-ok">账面丢失</p>
-                <p className="mt-1 font-serif text-[26px] font-black tabular-nums text-ok">
+                <p className="font-mono text-[10px] tracking-[0.06em] text-ok">账面丢失</p>
+                <p className="mt-1 text-[26px] font-semibold tabular-nums text-ok">
                   <CountUp value={perf.ledger?.loss_rate ?? 0} decimals={1} />%
                 </p>
               </div>
               <div className="border border-line bg-paper-warm px-4 py-3">
-                <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">对账差额</p>
-                <p className="mt-1 font-serif text-[26px] font-black tabular-nums text-ink">
+                <p className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">对账差额</p>
+                <p className="mt-1 text-[26px] font-semibold tabular-nums text-ink">
                   <CountUp value={0} /> <span className="font-mono text-[11px] font-normal text-ink-faint">条</span>
                 </p>
               </div>
@@ -501,7 +499,7 @@ export default function Benchmark() {
             <div className="mt-4 grid gap-2 text-[12px] sm:grid-cols-2">
               {Object.entries(perf.profiles ?? {}).map(([k, v]: [string, any]) => (
                 <div key={k} className="border border-line px-3 py-2">
-                  <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">
+                  <p className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">
                     {k.replace('_', ' · ')}
                   </p>
                   <p className="mt-0.5 text-ink-soft">
@@ -531,7 +529,7 @@ export default function Benchmark() {
             </div>
 
             {perf.saturation?.verdict && (
-              <p className="mt-4 border-l-2 border-dusk pl-4 font-serif text-[14px] italic text-ink-soft">
+              <p className="mt-4 border-l-2 border-dusk pl-4 text-[14px] italic text-ink-soft">
                 「{perf.saturation.verdict}」
               </p>
             )}

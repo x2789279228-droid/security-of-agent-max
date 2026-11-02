@@ -89,7 +89,7 @@ export default function AttackGeoMap() {
   return (
     <div className="relative flex h-full flex-col">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[10px] tracking-[0.22em] uppercase text-ink-faint">攻击态势 · 来源地理</span>
+        <span className="text-[10px] tracking-[0.06em] text-ink-faint">攻击态势 · 来源地理</span>
         {frame && (
           <span className="font-mono text-[10px] text-ink-faint tabular-nums">
             {points.length} 源 / 近 {frame.sampled_events ?? '—'} 事件

@@ -108,7 +108,7 @@ export default function Poster() {
     <div className="fixed inset-0 z-[70] flex flex-col overflow-hidden bg-[#0e1a26] text-[#dfe7e3]">
       {/* ── 顶栏 ── */}
       <header className="flex h-14 shrink-0 items-center gap-5 border-b border-[#24384a] px-6">
-        <span className="font-serif text-[22px] font-black tracking-[-0.02em]">守望</span>
+        <span className="font-serif text-[22px] font-semibold tracking-[-0.02em]">守望</span>
         <span className="font-mono text-[11px] tracking-[0.3em] uppercase text-[#c9a574]">系统全景 · Poster</span>
         <span className="h-4 w-px bg-[#24384a]" aria-hidden />
         {replayActive ? (
@@ -137,7 +137,7 @@ export default function Poster() {
       <div className="flex shrink-0 items-end justify-between gap-8 px-8 pb-5 pt-6">
         <div>
           <p className="font-mono text-[11px] tracking-[0.4em] uppercase text-[#c9a574]">One-Screen System Poster</p>
-          <h1 className="mt-2 font-serif text-[56px] font-black leading-[0.95] tracking-[-0.04em] text-[#f1e8d6]">
+          <h1 className="mt-2 font-serif text-[56px] font-semibold leading-[0.95] tracking-[-0.04em] text-[#f1e8d6]">
             一屏,读完一次完整处置
           </h1>
           <p className="mt-2 max-w-[46rem] font-serif text-[14px] leading-relaxed text-[#a7b4bd]">
@@ -178,7 +178,7 @@ export default function Poster() {
                 <span className="live-arc text-[#c9a574]" aria-hidden />
               )}
             </div>
-            <p className={`mt-2 font-serif font-black tabular-nums tracking-[-0.04em] leading-none text-[46px] ${numTone[c.tone]}`}>
+            <p className={`mt-2 font-serif font-semibold tabular-nums tracking-[-0.04em] leading-none text-[46px] ${numTone[c.tone]}`}>
               {c.value ?? '—'}
             </p>
             <p className="mt-2 truncate font-mono text-[11px] text-[#78889a]">{c.note}</p>
@@ -220,7 +220,7 @@ export default function Poster() {
         ].map((x) => (
           <div key={x.k} className="border border-[#24384a] bg-[#1a2d3f] px-4 py-3">
             <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-[#78889a]">{x.k}</p>
-            <p className="mt-1 font-serif text-[28px] font-black tabular-nums leading-none text-[#dfe7e3]">{x.v}</p>
+            <p className="mt-1 font-serif text-[28px] font-semibold tabular-nums leading-none text-[#dfe7e3]">{x.v}</p>
             <p className="mt-1 font-mono text-[10px] text-[#5c6b7a]">{x.note}</p>
           </div>
         ))}

@@ -16,30 +16,32 @@
     "gen:api": "node scripts/gen-api.mjs"
   },
   "dependencies": {
-    "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
-    "@opentelemetry/instrumentation-fetch": "^0.221.0",
-    "@opentelemetry/resources": "^2.10.0",
-    "@opentelemetry/sdk-trace-web": "^2.10.0",
-    "@opentelemetry/semantic-conventions": "^1.43.0",
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
+    "@opentelemetry/instrumentation": "^0.300.0",
+    "@opentelemetry/instrumentation-fetch": "^0.300.0",
+    "@opentelemetry/resources": "^3.0.0",
+    "@opentelemetry/sdk-trace": "^3.0.0",
+    "@opentelemetry/semantic-conventions": "^1.44.0",
     "@tailwindcss/vite": "^4.3.3",
-    "framer-motion": "^12.42.2",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1",
-    "react-window": "^2.3.0",
+    "framer-motion": "^14.7.1",
+    "misans": "^5.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
+    "react-window": "^2.5.1",
     "recharts": "^3.10.1",
     "tailwindcss": "^4.3.3",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
     "openapi-typescript": "^7.13.0",
-    "oxlint": "^1.71.0",
+    "oxlint": "^1.90.0",
     "typescript": "~5.9.3",
-    "vite": "^7.3.6"
+    "vite": "^8.3.5"
   }
 }

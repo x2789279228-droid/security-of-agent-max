@@ -1,36 +1,36 @@
 import { motion } from 'framer-motion'
-import { BRAND_COLORS } from '../../lib/brand'
+import { ALERT, ACCENT, SIGNAL, WARN, INK_FAINT } from '../../lib/semanticColors'
 import type { CaseStatus, CasePriority, OrderType } from '../../types/operations'
-import { INK_FAINT } from '../../lib/operationsTokens'
 
 /** 守望徽章：soft chip = 文本色 + 1 层 12~15% 底色 + inset 细描边 */
-function chip(hex: string, bgA = '1f', ringA = '4d') {
-  return { color: hex, bg: `${hex}${bgA}`, ring: `${hex}${ringA}` }
+const mixPct = (v: string, pct: number) => `color-mix(in srgb, ${v} ${pct}%, transparent)`
+function chip(hex: string, bgPct = 12, ringPct = 30) {
+  return { color: hex, bg: mixPct(hex, bgPct), ring: mixPct(hex, ringPct) }
 }
 
 const CASE_STATUS_META: Record<CaseStatus, { label: string; color: string; bg: string; ring: string }> = {
-  open: { label: '待处理', ...chip(BRAND_COLORS.alert) },
-  investigating: { label: '调查中', ...chip(BRAND_COLORS.signal) },
-  pending_approval: { label: '待审批', ...chip(BRAND_COLORS.warn) },
-  responding: { label: '处置中', ...chip(BRAND_COLORS.accent) },
-  resolved: { label: '已解决', ...chip(BRAND_COLORS.accent, '12', '38') },
-  closed: { label: '已关闭', ...chip(INK_FAINT, '14', '40') },
-  false_positive: { label: '误报', ...chip(INK_FAINT, '14', '40') },
+  open: { label: '待处理', ...chip(ALERT) },
+  investigating: { label: '调查中', ...chip(SIGNAL) },
+  pending_approval: { label: '待审批', ...chip(WARN) },
+  responding: { label: '处置中', ...chip(ACCENT) },
+  resolved: { label: '已解决', ...chip(ACCENT) },
+  closed: { label: '已关闭', ...chip(INK_FAINT, 8, 25) },
+  false_positive: { label: '误报', ...chip(INK_FAINT, 8, 25) },
 }
 
 const SEVERITY_META: Record<string, { label?: string; color: string; bg: string; ring: string }> = {
-  critical: { label: 'critical', ...chip(BRAND_COLORS.alert) },
-  high: { label: 'high', ...chip(BRAND_COLORS.warn) },
-  medium: { label: 'medium', ...chip(BRAND_COLORS.signal) },
-  low: { label: 'low', ...chip(INK_FAINT, '12', '38') },
-  info: { label: 'info', ...chip(INK_FAINT, '10', '33') },
+  critical: { label: 'critical', ...chip(ALERT) },
+  high: { label: 'high', ...chip(WARN) },
+  medium: { label: 'medium', ...chip(SIGNAL) },
+  low: { label: 'low', ...chip(INK_FAINT, 7, 22) },
+  info: { label: 'info', ...chip(INK_FAINT, 6, 20) },
 }
 
 const PRIORITY_META: Record<CasePriority, { label: string; color: string; bg: string; ring: string }> = {
-  critical: { label: 'P0 紧急', ...chip(BRAND_COLORS.alert) },
-  high: { label: 'P1 高', ...chip(BRAND_COLORS.warn) },
-  medium: { label: 'P2 中', ...chip(BRAND_COLORS.signal) },
-  low: { label: 'P3 低', ...chip(INK_FAINT, '12', '38') },
+  critical: { label: 'P0 紧急', ...chip(ALERT) },
+  high: { label: 'P1 高', ...chip(WARN) },
+  medium: { label: 'P2 中', ...chip(SIGNAL) },
+  low: { label: 'P3 低', ...chip(INK_FAINT, 7, 22) },
 }
 
 export function StatusBadge({ status }: { status: CaseStatus }) {
@@ -71,7 +71,7 @@ export function PriorityChip({ priority }: { priority: CasePriority }) {
 
 export function GradientNumber({ value, suffix = '' }: { value: string | number; suffix?: string }) {
   return (
-    <span className="text-4xl font-black tracking-tight tabular-nums text-ink">
+    <span className="text-4xl font-semibold tracking-tight tabular-nums text-ink">
       {value}
       {suffix && <span className="text-lg font-bold">{suffix}</span>}
     </span>
@@ -117,14 +117,14 @@ export function SlaBadge({ deadline, breached }: { deadline: string | null; brea
       style={
         isOverdue
           ? {
-              color: BRAND_COLORS.alert,
-              background: `${BRAND_COLORS.alert}1a`,
-              boxShadow: `inset 0 0 0 1px ${BRAND_COLORS.alert}66`,
+              color: ALERT,
+              background: mixPct(ALERT, 10),
+              boxShadow: `inset 0 0 0 1px ${mixPct(ALERT, 40)}`,
             }
           : {
               color: INK_FAINT,
               background: 'transparent',
-              boxShadow: `inset 0 0 0 1px ${INK_FAINT}40`,
+              boxShadow: `inset 0 0 0 1px ${mixPct(INK_FAINT, 25)}`,
             }
       }
       animate={isOverdue ? { opacity: [1, 0.5, 1] } : {}}

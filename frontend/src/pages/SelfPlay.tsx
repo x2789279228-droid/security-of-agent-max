@@ -269,7 +269,6 @@ export default function SelfPlay() {
     <PageFrame
       title="红蓝自博弈"
       hint="Red Agent 生成对抗场景,Blue Agent 复用 Audit-LLM 流水线实时响应,漏报进入 overlay 课程学习。"
-      marginalia="——不自动改生产规则，是底线。"
       extra={
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-[12px] text-ink-faint">
@@ -325,7 +324,7 @@ export default function SelfPlay() {
         {METRIC_KEYS.map((m) => (
           <div key={m.key} className="p-4 border-r border-b border-line last:border-r-0">
             <div className="text-[11px] tracking-[0.14em] text-ink-faint uppercase">{m.label}</div>
-            <div className="mt-2 text-2xl font-black">
+            <div className="mt-2 text-2xl font-semibold">
               {m.key === 'mttd_ms'
                 ? `${Math.round(Number(metrics[m.key] || 0))}ms`
                 : pct(metrics[m.key])}
@@ -358,7 +357,7 @@ export default function SelfPlay() {
       <div className="grid grid-cols-1 lg:grid-cols-2 border border-line mb-10">
         <div className="p-6 border-b lg:border-b-0 lg:border-r border-line">
           <div className="text-[12px] tracking-[0.2em] text-ink-faint mb-3">RED AGENT</div>
-          <h2 className="text-xl font-black mb-2">攻击规划</h2>
+          <h2 className="text-xl font-semibold mb-2">攻击规划</h2>
           {redStep ? (
             <>
               <p className="text-sm font-medium">{redStep.name || redStep.event || redStep.event_type}</p>
@@ -376,7 +375,7 @@ export default function SelfPlay() {
         </div>
         <div className="p-6">
           <div className="text-[12px] tracking-[0.2em] text-ink-faint mb-3">BLUE AGENT</div>
-          <h2 className="text-xl font-black mb-2">检测与学习</h2>
+          <h2 className="text-xl font-semibold mb-2">检测与学习</h2>
           {blueObs ? (
             <>
               <p className="text-sm font-medium">

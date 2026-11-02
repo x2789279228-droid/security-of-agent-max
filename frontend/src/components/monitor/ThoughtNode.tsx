@@ -1,8 +1,8 @@
 import { KIND_LABELS, fmtConf, type ThoughtStep } from '../../lib/thoughtChain'
 
-// 状态音色：运行=磷光脉冲；成功=磷光；错误/阻断=朱砂；弃权=信号蓝虚线；丢弃=暗虚线
+// 状态音色：运行=旋转弧（live-arc 单元素，进行中的"呼吸"）；成功=磷光；
+// 错误/阻断=朱砂；弃权=信号蓝虚线；丢弃=暗虚线
 const statusDot: Record<string, string> = {
-  running: 'bg-accent animate-pulse',
   success: 'bg-accent/80',
   error: 'bg-alert',
   discarded: 'bg-dan',
@@ -47,7 +47,15 @@ export default function ThoughtNode({
       } ${selected ? 'ring-1 ring-accent shadow-[0_2px_12px_rgba(58,101,112,0.16)]' : 'hover:border-accent/50'} ${dimmed ? 'opacity-40' : ''}`}
     >
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot[st] ?? statusDot.success}`} />
+        {st === 'running' ? (
+          <span
+            className="live-arc shrink-0"
+            style={{ width: 8, height: 8, color: 'var(--color-accent)' }}
+            aria-hidden
+          />
+        ) : (
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot[st] ?? statusDot.success}`} />
+        )}
         <span className={`truncate text-[11px] font-semibold ${titleTone[st] ?? 'text-ink'}`}>{step.title}</span>
       </div>
       <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-ink-faint">

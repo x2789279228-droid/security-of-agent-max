@@ -25,7 +25,7 @@ function StepRow({ step, titleChars, bodyChars }: { step: ThoughtStep; titleChar
   const done = titleChars >= step.title.length && bodyChars >= step.summary.length
   return (
     <div className="relative pl-4">
-      <span className="absolute left-0 top-[7px] h-1.5 w-1.5 rotate-45 bg-[#c9a574]" aria-hidden />
+      <span className="absolute left-0 top-[7px] h-1.5 w-1.5 rotate-45 bg-warn" aria-hidden />
       <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <span className="font-mono text-[10px] tracking-[0.2em] uppercase text-[#78889a]">
           {step.stage} · {KIND_LABELS[step.kind] ?? step.kind}
@@ -33,18 +33,18 @@ function StepRow({ step, titleChars, bodyChars }: { step: ThoughtStep; titleChar
         <span className={`border px-1.5 py-px font-mono text-[10px] tracking-[0.14em] uppercase ${tone.chip}`}>
           {step.status}
         </span>
-        <span className="font-serif text-[16px] font-bold text-[#e8eee9]">
+        <span className="text-[16px] font-bold text-[#e8eee9]">
           {title}
-          {!done && <span className="ml-px inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-[#c9a574]" aria-hidden />}
+          {!done && <span className="ml-px inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-warn" aria-hidden />}
         </span>
         {step.confidence != null && (
           <span className="font-mono text-[10px] tabular-nums text-[#78889a]">置信 {step.confidence.toFixed(2)}</span>
         )}
       </p>
       {body && (
-        <p className={`mt-1 max-w-[36rem] font-serif text-[14px] leading-relaxed ${tone.text}`}>
+        <p className={`mt-1 max-w-[36rem] text-[14px] leading-relaxed ${tone.text}`}>
           {body}
-          {!done && <span className="ml-px inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-[#c9a574]/70" aria-hidden />}
+          {!done && <span className="ml-px inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-warn/70" aria-hidden />}
         </p>
       )}
     </div>
@@ -115,11 +115,11 @@ export function ThoughtTypewriter({
           )
         })}
         {steps.length === 0 && (
-          <p className="font-serif text-[14px] italic text-[#78889a]">等待思维链信号……</p>
+          <p className="text-[14px] italic text-[#78889a]">等待思维链信号……</p>
         )}
       </div>
       {steps.length > 0 && progress.doneSteps >= steps.length && (
-        <p className="mt-4 border-t border-[#24384a] pt-3 font-mono text-[10px] tracking-[0.22em] uppercase text-[#78889a]">
+        <p className="mt-4 border-t border-[#24384a] pt-3 font-mono text-[10px] tracking-[0.06em] text-[#78889a]">
           思维链完结 · {steps.length} 步
         </p>
       )}

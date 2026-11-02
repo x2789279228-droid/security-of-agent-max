@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { List, useDynamicRowHeight } from 'react-window'
+import { List, useDynamicRowHeight, type ListImperativeAPI } from 'react-window'
 import { motion } from 'framer-motion'
 import { PageFrame } from '../components/common/PageFrame'
 import StreamStatusBar from '../components/monitor/StreamStatusBar'
 import AgentRelayStrip from '../components/monitor/AgentRelayStrip'
 import ActiveRelayCards from '../components/monitor/ActiveRelayCards'
+import EventDeck from '../components/monitor/EventDeck'
 import EventToolbar, { type Filters } from '../components/monitor/EventToolbar'
 import EventRow from '../components/monitor/EventRow'
 import ThoughtChainPanel from '../components/monitor/ThoughtChainPanel'
@@ -17,9 +18,12 @@ import { LiveBadge } from '../components/ui/LiveBadge'
 import { api } from '../lib/api'
 import { ROUTES } from '../lib/constants'
 import { useEventParam } from '../lib/entityNav'
-import { deriveRelays } from '../lib/agentPipeline'
+import { deriveRelaysMemo } from '../lib/agentPipeline'
 import { pickThoughtEventId } from '../lib/thoughtChain'
+import { useArrivalBurst } from '../hooks/useArrivalBurst'
+import { pulseFocus, useFocusStore } from '../stores/focusStore'
 import { useServiceStore } from '../stores/serviceStore'
+import type { StatsResponse } from '../types/stats'
 import {
   severityOf,
   useEventStreamLifecycle,
@@ -110,6 +114,9 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
   // 连接生命周期托管（引用计数单例通道，含断点续传与保活监测）
   useEventStreamLifecycle()
 
+  // 事件涌入档位：surge 时事件列表顶边加青蓝扫描线
+  const { level: burstLevel } = useArrivalBurst()
+
   // ── 依赖健康探测（2026-10-03 新增）──
   // 修复前：services 初值硬编码 'ok'，且 setService/setAll 零调用点，
   // 健康环无论依赖是否可用都显示绿色 NOMINAL。
@@ -152,7 +159,7 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
   }, [])
 
   // 运行指标：初始加载 + 任一事件到达后节流刷新（最短间隔 5s，避免高压时高频打全表统计）
-  const [stats, setStats] = useState<any>(null)
+  const [stats, setStats] = useState<StatsResponse | null>(null)
   const arrivalTick = useEventStreamStore((s) => s.arrivalTick)
   useEffect(() => {
     api.stats().then(setStats).catch(() => {})
@@ -197,8 +204,13 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
   const [paused, setPaused] = useState(false)
   const [frozen, setFrozen] = useState<StreamEvent[] | null>(null)
 
+  // W2-3(复审 P2-3): 序列化结果按事件 id 缓存 — 修复前每次 flush(高压 ~20/s)
+  // 对 500 条事件各做一次 JSON.stringify+toLowerCase, 是 surge 场景 CPU 热点。
+  const searchIndexRef = useRef(new Map<number, string>())
+  const searchIndex = searchIndexRef.current
   const filtered = useMemo(() => {
     const q = filters.query.trim().toLowerCase()
+    const keep = searchIndex.size > 4096 ? (searchIndex.clear(), searchIndex) : searchIndex
     return buffer.filter((e) => {
       if (e.kind !== 'event') return true // 空洞/重启标记行始终保留，保证过程可解释
       if (filters.type !== 'all' && e.type !== filters.type) return false
@@ -207,10 +219,18 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
         const stage = String(e.data?.stage ?? e.data?.agent_id ?? '')
         if (stage !== filters.stage) return false
       }
-      if (q && !JSON.stringify(e.data ?? {}).toLowerCase().includes(q)) return false
+      if (q) {
+        // e.id = 本地渲染自增, 唯一(seq 对合成标记恒 0)
+        let s = keep.get(e.id)
+        if (s === undefined) {
+          s = JSON.stringify(e.data ?? {}).toLowerCase()
+          keep.set(e.id, s)
+        }
+        if (!s.includes(q)) return false
+      }
       return true
     })
-  }, [buffer, filters])
+  }, [buffer, filters, searchIndex])
 
   // 暂停推送：冻结当前视图，新事件继续进入缓冲但不渲染；恢复时一次性放行
   const visible = paused && frozen ? frozen : filtered
@@ -247,11 +267,25 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
   const [awaitingLive, setAwaitingLive] = useState(false)
   const [demoBusy, setDemoBusy] = useState(false)
   const [demoError, setDemoError] = useState('')
+
+  // 联动脉冲（FocusLink）：接力卡/事件堆选中事件 → 事件行闪光 + 滚入视口
+  const pulse = useFocusStore((s) => s.pulse)
+  const listRef = useRef<ListImperativeAPI | null>(null)
+  const visibleRef = useRef<StreamEvent[]>([])
+  useEffect(() => {
+    visibleRef.current = visible
+  }, [visible])
+
   const selectEvent = useCallback((eventId: number) => {
     if (!eventId) return
     setDismissedThought(false)
     setAwaitingLive(false)
     setSelectedEventId((prev) => (prev === eventId ? prev : eventId))
+    pulseFocus('event', eventId)
+    const idx = visibleRef.current.findIndex(
+      (e) => e.kind === 'event' && Number(e.data?.event_id) === eventId,
+    )
+    if (idx >= 0) listRef.current?.scrollToRow({ index: idx, align: 'smart', behavior: 'smooth' })
   }, [])
   const closeThought = useCallback(() => {
     setSelectedEventId(null)
@@ -267,7 +301,7 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
 
   useEffect(() => {
     if (dismissedThought) return
-    const liveId = deriveRelays(buffer).active[0]?.eventId || 0
+    const liveId = deriveRelaysMemo(buffer).active[0]?.eventId || 0
     if (liveId && (awaitingLive || selectedEventId == null)) {
       setSelectedEventId(liveId)
       setAwaitingLive(false)
@@ -387,7 +421,6 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
     <PageFrame
       title="系统监控"
       hint="服务健康 · 多 Agent 审查接力 · 实时事件流。"
-      marginalia="——系统在跳，证明它活着。"
       extra={
         <div className="flex items-center gap-3">
           <LiveBadge
@@ -405,104 +438,95 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
       }
     >
 
-      {/* 服务状态卡 — 顶部细线 + 健康环 + 状态点 */}
-      <div className="mb-10 border border-line bg-paper">
-        {Object.entries(services).map(([id, health], i) => {
-          const tone = SERVICE_TONE[health] ?? SERVICE_TONE.unknown
-          const meta = serviceMeta[id] ?? { label: id, desc: id }
-          const detail = serviceDetails[id]
-          const badgeText =
-            health === 'ok' ? 'NOMINAL' : health === 'error' ? 'ALERT' : 'UNKNOWN'
-          return (
-            <motion.div
-              key={id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, delay: i * 0.05 }}
-              className={`relative flex items-center gap-5 border-line px-6 py-5 ${tone.glow} ${
-                i < Object.entries(services).length - 1 ? 'border-b' : ''
-              }`}
-            >
-              <span className={`absolute left-0 top-0 bottom-0 w-[3px] ${tone.bar}`} />
-              <div className="relative shrink-0">
-                <HealthGauge health={tone.gauge} />
-                <span
-                  className={`absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 ${tone.dot} ${
-                    health === 'error' ? 'animate-pulse' : ''
-                  }`}
-                  aria-hidden
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
-                  {id}
-                </p>
-                <p className="mt-1 font-serif text-[18px] font-bold text-ink tracking-tight">
-                  {meta.label}
-                </p>
-                <p className="text-xs text-ink-soft mt-0.5">{meta.desc}</p>
-                {/* 探针 detail：让"为什么红"当场可见，而不是只给一个色块 */}
-                {detail && (
-                  <p className="mt-1 font-mono text-[11px] text-ink-faint break-all" title={detail}>
-                    {detail}
-                  </p>
-                )}
-              </div>
-              <span className={`border px-3 py-1 font-mono text-[11px] tracking-[0.18em] uppercase ${tone.badge}`}>
-                {badgeText}
-              </span>
-            </motion.div>
-          )
-        })}
-      </div>
-
-      {/* 指标带 — 待处理 > 0 时是整个视图的裂口（rupture），其余 KPI 静默。无 stats 时仍占位，避免 401 把主次结构吃掉 */}
+      {/* 指标细带 — 一行六格、发丝线分隔，嵌在页头之下作「总读数」；待处理 > 0 是整屏裂口 */}
       <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.15 }}
-        className="mb-10 grid grid-cols-2 md:grid-cols-6 gap-3"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4 }}
+        className="mb-4 grid grid-cols-2 divide-x divide-line-soft border-y border-line-soft md:grid-cols-5"
       >
-        <KpiStat
-          label="待处理"
-          value={securityPending}
-          tone={securityPending > 0 ? 'hero' : 'ok'}
-          spark={pendingSpark}
-          live={securityPending > 0}
-          hint={securityPending > 0 ? '待审查队列 · 优先消化' : '队列已清空'}
-          className="col-span-2"
-        />
-        <KpiStat
-          label="已分析"
-          value={Number(stats?.audit_llm?.completed ?? 0) || 0}
-          tone="ok"
-        />
-        <KpiStat
-          label="安全事件"
-          value={Number(stats?.security_events ?? 0) || 0}
-          tone="neutral"
-        />
-        <KpiStat
-          label="记忆树节点"
-          value={Number(stats?.tree_nodes ?? 0) || 0}
-          tone="neutral"
-          size="sm"
-        />
-        <KpiStat
-          label="Redis Keys"
-          value={Number(stats?.redis_keys ?? 0) || 0}
-          tone="neutral"
-          size="sm"
-        />
+        <div className="px-4 first:pl-0 md:pl-5 md:first:pl-0">
+          <KpiStat
+            label="待处理"
+            value={securityPending}
+            tone={securityPending > 0 ? 'hero' : 'ok'}
+            spark={pendingSpark}
+            live={securityPending > 0}
+            hint={securityPending > 0 ? '待审查队列 · 优先消化' : '队列已清空'}
+            size="sm"
+          />
+        </div>
+        <div className="px-4 md:pl-5">
+          <KpiStat label="已分析" value={Number(stats?.audit_llm?.completed ?? 0) || 0} tone="ok" size="sm" />
+        </div>
+        <div className="px-4 md:pl-5">
+          <KpiStat label="安全事件" value={Number(stats?.security_events ?? 0) || 0} tone="neutral" size="sm" />
+        </div>
+        <div className="px-4 md:pl-5">
+          <KpiStat label="记忆树节点" value={Number(stats?.tree_nodes ?? 0) || 0} tone="neutral" size="sm" />
+        </div>
+        <div className="px-4 md:pl-5">
+          <KpiStat label="Redis Keys" value={Number(stats?.redis_keys ?? 0) || 0} tone="neutral" size="sm" />
+        </div>
       </motion.div>
+
+      {/* 主控制台 — 非对称双列：左轨静态仪表(依赖健康+最近事件)，右宽列活流水(接力→思维链→事件流) */}
+      <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
+        {/* 左轨 */}
+        <aside className="flex flex-col gap-3 xl:sticky xl:top-16">
+          <section className="border border-line bg-paper">
+            <header className="meta-caps border-b border-line px-4 py-2.5">
+              依赖健康 · Services
+            </header>
+            <div>
+              {Object.entries(services).map(([id, health], i) => {
+                const tone = SERVICE_TONE[health] ?? SERVICE_TONE.unknown
+                const meta = serviceMeta[id] ?? { label: id, desc: id }
+                const detail = serviceDetails[id]
+                const badgeText =
+                  health === 'ok' ? 'NOMINAL' : health === 'error' ? 'ALERT' : 'UNKNOWN'
+                return (
+                  <motion.div
+                    key={id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.35, delay: i * 0.05 }}
+                    className={`relative flex items-center gap-3 border-line px-4 py-3 transition-colors duration-200 hover:bg-mist/60 ${
+                      i < Object.entries(services).length - 1 ? 'border-b' : ''
+                    }`}
+                  >
+                    <span className={`absolute left-0 top-0 bottom-0 w-[3px] ${tone.bar}`} />
+                    <HealthGauge health={tone.gauge} size={30} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-semibold text-ink">{meta.label}</p>
+                      <p className="truncate text-[11px] text-ink-soft">{meta.desc}</p>
+                      {detail && (
+                        <p className="truncate font-mono text-[10px] text-ink-faint" title={detail}>
+                          {detail}
+                        </p>
+                      )}
+                    </div>
+                    <span className={`shrink-0 border px-2 py-0.5 font-mono text-[9px] tracking-[0.14em] uppercase ${tone.badge}`}>
+                      {badgeText}
+                    </span>
+                  </motion.div>
+                )
+              })}
+            </div>
+          </section>
+          <EventDeck onSelectEvent={selectEvent} />
+        </aside>
+
+        {/* 右宽列 */}
+        <div className="flex min-w-0 flex-col gap-3">
 
       {/* ── 多 Agent 审查接力 ── */}
       <div className="flex items-center justify-between mb-4 border-b border-ink/80 pb-3">
         <div className="flex items-baseline gap-4">
-          <h2 className="font-serif text-[22px] font-black tracking-tight text-ink">
+          <h2 className="text-[16px] font-semibold tracking-tight text-ink">
             多 Agent 审查接力
           </h2>
-          <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
+          <span className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">
             Decomposer → Builder → Exec → Reviewer
           </span>
         </div>
@@ -511,11 +535,11 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
             type="button"
             onClick={runDemo}
             disabled={demoBusy}
-            className="border border-[#0e1a26] bg-[#0e1a26] px-3 py-1.5 text-[12px] font-mono tracking-[0.16em] uppercase text-[#f1e8d6] hover:bg-[#182838] transition-colors disabled:opacity-50"
+            className="rounded-[3px] border border-accent bg-accent px-3 py-1.5 font-mono text-[12px] tracking-[0.16em] uppercase text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50"
           >
             {demoBusy ? '演示启动中 …' : '跑一条演示'}
           </button>
-          <span className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint tabular-nums">
+          <span className="font-mono text-[11px] tracking-[0.06em] text-ink-faint tabular-nums">
             显示 {shownEvents} / 缓冲 {buffer.length}
           </span>
         </div>
@@ -526,10 +550,14 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
 
       <ToolAnomalyBanner />
 
-      <div className="mb-5 border border-line bg-paper overflow-hidden">
+      <div className="rounded-[6px] border border-line bg-card overflow-hidden">
         <StreamStatusBar paused={paused} onTogglePause={togglePause} />
         <div className="border-t border-line">
-          <AgentRelayStrip />
+          <AgentRelayStrip
+            onFilterStage={(stage) =>
+              setFilters((f) => ({ ...f, stage: f.stage === stage ? 'all' : stage }))
+            }
+          />
         </div>
         <EventToolbar filters={filters} onChange={setFilters} typeCounts={typeCounts} />
       </div>
@@ -550,8 +578,22 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
         idleHint={idleHint}
       />
 
-      {/* 事件列表 */}
-      <div className="relative border border-line bg-paper overflow-hidden">
+      {/* 事件列表 — surge 档顶边扫描线（青蓝信息流通道，红只留给单条 critical） */}
+      <div
+        className={`watch-scan relative overflow-hidden border bg-paper ${
+          burstLevel === 'surge' ? 'border-accent/60' : 'border-line'
+        }`}
+      >
+        {burstLevel === 'surge' && (
+          <span
+            className="surge-sweep pointer-events-none absolute left-0 top-0 z-20 h-[2px] w-1/4"
+            style={{
+              background:
+                'linear-gradient(90deg, transparent, var(--glow-info), transparent)',
+            }}
+            aria-hidden
+          />
+        )}
         {visible.length === 0 ? (
           <div className="p-14 text-center text-sm text-ink-faint">
             {buffer.length === 0
@@ -560,6 +602,7 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
           </div>
         ) : (
           <List
+            listRef={listRef}
             rowComponent={EventRow}
             rowCount={visible.length}
             rowHeight={rowHeight}
@@ -569,6 +612,7 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
               onToggle: toggleExpanded,
               selectedEventId,
               onSelectEvent: selectEvent,
+              pulse,
             }}
             overscanCount={8}
             style={{ height: 520 }}
@@ -578,11 +622,13 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
         {paused && pendingNew > 0 && (
           <button
             onClick={togglePause}
-            className="absolute bottom-4 right-6 flex items-center gap-1.5 border border-[#0e1a26] bg-paper px-3 py-1.5 text-[12px] font-medium text-ink"
+            className="absolute bottom-4 right-6 flex items-center gap-1.5 rounded-[3px] border border-accent/60 bg-paper px-3 py-1.5 text-[12px] font-medium text-ink"
           >
             ↓ {pendingNew} 条新事件 · 点击恢复推送
           </button>
         )}
+      </div>
+        </div>
       </div>
     </PageFrame>
   )

@@ -272,7 +272,7 @@ export default function PhishingDetect() {
       >
         {/* 标题 */}
         <p className="text-[13px] text-ink-faint mb-3">检测</p>
-        <h2 className="text-[22px] font-black text-ink mb-3">
+        <h2 className="text-[22px] font-semibold text-ink mb-3">
           钓鱼检测，三秒识破。
         </h2>
         <p className="text-[13px] font-light text-ink-soft mb-10 max-w-2xl leading-relaxed">

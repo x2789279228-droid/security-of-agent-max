@@ -17,6 +17,7 @@ import {
 } from '../../lib/eventStream'
 import { STAGE_LABELS, fmtMs } from '../../lib/agentPipeline'
 import { isSelfPlayEventType, isThoughtSelectable, thoughtBrief } from '../../lib/thoughtChain'
+import type { FocusPulse } from '../../stores/focusStore'
 
 // 传给 List.rowProps 的数据（index/style 由 react-window 注入，不在此列）
 export interface EventRowData {
@@ -25,6 +26,8 @@ export interface EventRowData {
   onToggle: (id: number) => void
   selectedEventId?: number | null
   onSelectEvent?: (eventId: number) => void
+  /** 跨区联动脉冲（点击严重度塔/Agent 节点/接力卡），命中行播放 row-flash */
+  pulse?: FocusPulse | null
 }
 
 type EventRowProps = RowComponentProps<EventRowData>
@@ -188,12 +191,20 @@ const Inner = memo(function Inner({
   onToggle,
   selected,
   onSelectEvent,
+  flash,
+  flashKey,
+  flashDelay,
+  arriveCls,
 }: {
   evt: StreamEvent
   expanded: boolean
   onToggle: (id: number) => void
   selected?: boolean
   onSelectEvent?: (eventId: number) => void
+  flash?: boolean
+  flashKey?: number
+  flashDelay?: number
+  arriveCls?: string
 }) {
   if (evt.kind !== 'event') {
     const isGap = evt.kind === 'gap'
@@ -221,10 +232,19 @@ const Inner = memo(function Inner({
         onToggle(evt.id)
         if (eid && onSelectEvent) onSelectEvent(eid)
       }}
-      className={`flex h-full cursor-pointer select-none flex-col justify-center border-b border-line transition-colors ${
+      className={`relative flex h-full cursor-pointer select-none flex-col justify-center border-b border-line transition-colors ${arriveCls ?? ''} ${
         selected ? 'bg-mist' : expanded ? 'bg-surface' : 'hover:bg-surface/60'
       }`}
     >
+      {/* 联动闪光 overlay：key 随 nonce 重挂重放（与行内容渲染解耦） */}
+      {flash && (
+        <span
+          key={flashKey}
+          className="row-flash pointer-events-none absolute inset-0"
+          style={{ animationDelay: `${flashDelay ?? 0}ms` }}
+          aria-hidden
+        />
+      )}
       <div className="flex items-stretch">
         {/* severity 分级竖线 */}
         <span className={`${sev.bar} shrink-0 self-stretch`} />
@@ -289,11 +309,31 @@ const Inner = memo(function Inner({
 
 /** react-window 行组件：外壳应用定位 style，内层 memo 化 */
 export default function EventRow({
-  index, events, expandedIds, onToggle, selectedEventId, onSelectEvent, style, ariaAttributes,
+  index, events, expandedIds, onToggle, selectedEventId, onSelectEvent, pulse, style, ariaAttributes,
 }: EventRowProps) {
   const evt = events[index]
   if (!evt) return null
   const eid = evt.kind === 'event' ? Number(evt.data?.event_id) || 0 : 0
+  // 联动脉冲命中：event=event_id / severity=严重度 / stage=处理阶段
+  const flash = (() => {
+    if (!pulse || evt.kind !== 'event') return false
+    if (pulse.kind === 'event') return Number(pulse.value) === eid
+    if (pulse.kind === 'severity') return severityOf(evt.type, evt.data) === pulse.value
+    return String(evt.data?.stage ?? evt.data?.agent_id ?? '') === String(pulse.value)
+  })()
+  // 新到行判定（纯函数，不用时钟）：id 距离列表头 <8 视为"最新一拨"。
+  // 滚动把旧行带入视口时 id 距离大，不误触发到达脉冲。
+  const arriveCls = (() => {
+    if (evt.kind !== 'event' || events.length === 0) return ''
+    const newestId = events[0].id
+    if (newestId - evt.id >= 8) return ''
+    const sevKey = severityOf(evt.type, evt.data)
+    return sevKey === 'critical'
+      ? 'row-arrive-alert'
+      : sevKey === 'high'
+        ? 'row-arrive-warn'
+        : 'row-arrive-info'
+  })()
   return (
     <div style={style as CSSProperties} {...ariaAttributes}>
       <Inner
@@ -302,6 +342,10 @@ export default function EventRow({
         onToggle={onToggle}
         selected={!!eid && eid === selectedEventId}
         onSelectEvent={onSelectEvent}
+        flash={flash}
+        flashKey={pulse?.nonce}
+        flashDelay={(index % 30) * 35}
+        arriveCls={arriveCls}
       />
     </div>
   )

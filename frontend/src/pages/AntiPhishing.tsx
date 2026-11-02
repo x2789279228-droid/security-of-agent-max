@@ -15,10 +15,8 @@ export default function AntiPhishing() {
   return (
     <PageTransition>
       <PageFrame
-        num="Ⅵ"
         title="反钓鱼"
         hint="六通道检测 · BEC 识别 · 演练闭环。"
-        marginalia="——钓的是人,防的也是人。"
         extra={
           <div className="flex items-center gap-4">
             <button onClick={() => setTab('detect')} className={tab === 'detect' ? tabOn : tabOff}>

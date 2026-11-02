@@ -1,4 +1,5 @@
-import type { DependencyHealth } from '../types'
+import type { DependencyHealth, SecurityLog } from '../types'
+import type { StatsResponse } from '../types/stats'
 
 const BASE = '/api'
 
@@ -63,12 +64,12 @@ export const api = {
 
   health: () => fetchJSON<{ status: string }>('/health'),
 
-  stats: () => fetchJSON<any>('/stats'),
+  stats: () => fetchJSON<StatsResponse>('/stats'),
 
   /** 获取安全事件日志（按时间倒序） */
   logsEvents: (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params).toString()
-    return fetchJSON<any[]>(`/logs/events${qs ? `?${qs}` : ''}`)
+    return fetchJSON<SecurityLog[]>(`/logs/events${qs ? `?${qs}` : ''}`)
   },
 
   window: (sessionId: string) =>

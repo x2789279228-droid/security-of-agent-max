@@ -230,15 +230,11 @@ export default function Response() {
       <div className="page-shell pt-4 pb-12">
         <header className="flex flex-col gap-2 border-b border-line pb-3 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0 md:max-w-[44rem]">
-            <h1 className="font-serif text-[28px] font-black tracking-[-0.04em] text-ink leading-[1.1]">
+            <h1 className="text-[20px] font-semibold leading-tight text-ink">
               响应引擎
             </h1>
             <p className="mt-1 text-[13px] leading-snug text-ink-soft">
               自动威胁响应 · 策略管理 · 审批流程 · 回滚。
-            </p>
-            <p className="mt-1 hidden font-serif italic text-[12px] leading-snug text-ink-faint/80 md:block">
-              <span aria-hidden className="mr-1 text-[#c9a574]/70">¶</span>
-              ——封禁要快，回滚要快。
             </p>
           </div>
         </header>
@@ -303,7 +299,7 @@ export default function Response() {
                   const sev = (document.getElementById('threat-severity-select') as HTMLSelectElement)?.value || 'high'
                   requestSimulate({ threat_type: type, confidence: 0.8, severity: sev, src_ip: ip, message: `模拟${type}事件` }, '自定义')
                 }} disabled={loading}
-                  className="border border-[#0e1a26] bg-[#0e1a26] px-5 py-2 font-mono text-[11px] tracking-[0.18em] uppercase text-[#f1e8d6] hover:bg-[#182838] transition-colors disabled:opacity-50">
+                  className="border border-[#0e1a26] bg-[#0e1a26] px-5 py-2 font-mono text-[11px] tracking-[0.06em] text-[#f1e8d6] hover:bg-[#182838] transition-colors disabled:opacity-50">
                   {loading ? '执行中 …' : '模拟威胁'}
                 </button>
               </div>
@@ -311,7 +307,7 @@ export default function Response() {
 
             {/* 手动执行 */}
             <div className="border-t border-line pt-4">
-              <label className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint mb-2 block">手动执行响应动作</label>
+              <label className="font-mono text-[10px] tracking-[0.06em] text-ink-faint mb-2 block">手动执行响应动作</label>
               <div className="flex items-center gap-3">
                 <select value={execAction} onChange={e => setExecAction(e.target.value)}
                   className="px-3 py-2 text-xs font-sans border border-line rounded-none focus:outline-none focus:ring-1 focus:ring-accent">
@@ -322,7 +318,7 @@ export default function Response() {
                 <input type="text" placeholder="目标IP / 主机" value={execTarget} onChange={e => setExecTarget(e.target.value)}
                   className="flex-1 px-3 py-2 text-xs font-sans border border-line rounded-none focus:outline-none focus:ring-1 focus:ring-accent" />
                 <button onClick={requestExecResponse} disabled={loading}
-                  className="border border-alert bg-alert px-4 py-2 font-mono text-[11px] tracking-[0.18em] uppercase text-paper hover:opacity-90 disabled:opacity-50">
+                  className="border border-alert bg-alert px-4 py-2 font-mono text-[11px] tracking-[0.06em] text-paper hover:opacity-90 disabled:opacity-50">
                   执行
                 </button>
               </div>

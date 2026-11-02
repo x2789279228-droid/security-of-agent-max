@@ -1,8 +1,9 @@
+// 走 token 变量：暗色作战肤(data-mode=battle)下自动翻转，不再双套硬编码
 const TONE: Record<string, { stroke: string; track: string; text: string }> = {
-  ok: { stroke: '#3E7A64', track: 'rgba(62,122,100,0.15)', text: '#3E7A64' },
-  warn: { stroke: '#C08A3A', track: 'rgba(192,138,58,0.16)', text: '#C08A3A' },
-  error: { stroke: '#C23A32', track: 'rgba(194,58,50,0.16)', text: '#C23A32' },
-  alert: { stroke: '#C23A32', track: 'rgba(194,58,50,0.16)', text: '#C23A32' },
+  ok: { stroke: 'var(--color-ok)', track: 'color-mix(in srgb, var(--color-ok) 15%, transparent)', text: 'var(--color-ok)' },
+  warn: { stroke: 'var(--color-warn)', track: 'color-mix(in srgb, var(--color-warn) 16%, transparent)', text: 'var(--color-warn)' },
+  error: { stroke: 'var(--color-alert)', track: 'color-mix(in srgb, var(--color-alert) 16%, transparent)', text: 'var(--color-alert)' },
+  alert: { stroke: 'var(--color-alert)', track: 'color-mix(in srgb, var(--color-alert) 16%, transparent)', text: 'var(--color-alert)' },
 }
 
 /**
@@ -46,17 +47,32 @@ export function HealthGauge({
         aria-hidden
         style={{ position: hasText ? 'absolute' : 'static', inset: 0 }}
       >
-        <circle cx="22" cy="22" r={r} fill="none" stroke={t.track} strokeWidth="4" />
+        <circle cx="22" cy="22" r={r} fill="none" strokeWidth="4" style={{ stroke: t.track }} />
         <circle
           cx="22"
           cy="22"
           r={r}
           fill="none"
-          stroke={t.stroke}
           strokeWidth="4"
           strokeDasharray={`${c * filled} ${c}`}
           strokeLinecap="round"
+          className="gauge-settle"
+          style={{ stroke: t.stroke, ['--gauge-c' as string]: String(c) } as React.CSSProperties}
         />
+        {/* ok 态雷达扫尾：短弧沿轨道巡行，表达「探测持续进行」 */}
+        {health === 'ok' && (
+          <circle
+            cx="22"
+            cy="22"
+            r={r}
+            fill="none"
+            strokeWidth="4"
+            strokeLinecap="round"
+            className="hidden"
+            strokeDasharray={`7 ${c - 7}`}
+            style={{ stroke: t.stroke, opacity: 0.4 }}
+          />
+        )}
       </svg>
       {hasText && (
         <span

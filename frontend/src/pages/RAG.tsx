@@ -163,15 +163,11 @@ export default function RAG() {
       <div className="page-shell pt-4 pb-12">
         <header className="flex flex-col gap-2 border-b border-line pb-3 md:flex-row md:items-end md:justify-between md:gap-8">
           <div className="min-w-0 md:max-w-[44rem]">
-            <h1 className="font-serif text-[28px] font-black tracking-[-0.04em] text-ink leading-[1.1]">
+            <h1 className="text-[20px] font-semibold leading-tight text-ink">
               安全知识库
             </h1>
             <p className="mt-1 text-[13px] leading-snug text-ink-soft">
               检索增强生成（RAG）— 用预置安全知识减少 LLM 幻觉。
-            </p>
-            <p className="mt-1 hidden font-serif italic text-[12px] leading-snug text-ink-faint/80 md:block">
-              <span aria-hidden className="mr-1 text-[#c9a574]/70">¶</span>
-              ——给模型一个可以查证的起点。
             </p>
           </div>
           <div className="flex items-center gap-2 text-[13px] shrink-0">

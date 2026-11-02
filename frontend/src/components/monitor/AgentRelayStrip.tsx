@@ -13,10 +13,12 @@ import { motion, useReducedMotion } from 'framer-motion'
 import {
   AGENT_RELAY_STAGES,
   STAGE_LABELS,
-  deriveRelays,
+  deriveRelaysMemo,
   latestThoughtByStage,
 } from '../../lib/agentPipeline'
+import { spring } from '../../lib/constants'
 import { useEventStreamStore } from '../../lib/eventStream'
+import { pulseFocus } from '../../stores/focusStore'
 import RateHistogram from './RateHistogram'
 
 // 节点三态：进行中=松绿柔光；有错误=朱砂；空闲=暗淡卡片（0.1s 可辨）
@@ -39,6 +41,7 @@ function Node({
   runningSince,
   nowMs,
   drip,
+  onClick,
 }: {
   label: string
   running: number
@@ -49,13 +52,17 @@ function Node({
   runningSince?: number
   nowMs: number
   drip?: { title: string; confidence?: number | null }
+  onClick?: () => void
 }) {
   const tone: keyof typeof NODE_TONE =
     running > 0 || active ? 'running' : errors > 0 ? 'error' : 'idle'
   const elapsed = runningSince ? Math.max(0, Math.round((nowMs - runningSince) / 1000)) : 0
   return (
-    <div
-      className={`relative z-10 flex min-w-[78px] flex-col items-center gap-0.5 rounded-lg border px-2.5 py-2 transition-colors ${NODE_TONE[tone]}`}
+    <button
+      type="button"
+      onClick={onClick}
+      title={`点击：筛选 ${label} 阶段相关事件并高亮`}
+      className={`relative z-10 flex min-w-[78px] cursor-pointer flex-col items-center gap-0.5 rounded-lg border px-2.5 py-2 text-center transition-colors ${NODE_TONE[tone]} hover:border-accent/70`}
     >
       <span className={`whitespace-nowrap text-[10px] tracking-wide ${tone === 'idle' ? 'text-ink-faint' : 'text-ink-soft'}`}>{label}</span>
       <motion.span
@@ -94,7 +101,7 @@ function Node({
           className="pointer-events-none absolute inset-0 rounded-lg bg-accent/25"
         />
       )}
-    </div>
+    </button>
   )
 }
 
@@ -105,12 +112,17 @@ interface Packet {
   error: boolean
 }
 
-export default function AgentRelayStrip() {
+export default function AgentRelayStrip({
+  onFilterStage,
+}: {
+  /** 节点点击 → Monitor 写入现有 filters.stage（再次点击同阶段则清除） */
+  onFilterStage?: (stage: string) => void
+}) {
   const buffer = useEventStreamStore((s) => s.buffer)
   const arrivalTick = useEventStreamStore((s) => s.arrivalTick)
   const reduced = useReducedMotion() ?? false
 
-  const { nodeStats, active, stageRunningSince } = useMemo(() => deriveRelays(buffer), [buffer])
+  const { nodeStats, active, stageRunningSince } = useMemo(() => deriveRelaysMemo(buffer), [buffer])
   const drips = useMemo(() => latestThoughtByStage(buffer), [buffer])
 
   const [packet, setPacket] = useState<Packet | null>(null)
@@ -188,6 +200,21 @@ export default function AgentRelayStrip() {
               />
             )
           })}
+          {/* 运作光束：随活动阶段平移的青蓝光条（无 running 时隐没，reduced 退化为丝带） */}
+          {(() => {
+            const beamIdx = AGENT_RELAY_STAGES.findIndex((s) => activeStageSet.has(s))
+            if (beamIdx < 0 || reduced) return null
+            return (
+              <motion.span
+                className="pointer-events-none absolute top-[-1px] h-[3px] w-12 rounded-full"
+                style={{ background: 'linear-gradient(90deg, transparent, var(--glow-info), transparent)' }}
+                initial={false}
+                animate={{ left: `calc(${stageFrac(beamIdx)}% - 24px)`, opacity: 0.9 }}
+                transition={spring.gentle}
+                aria-hidden
+              />
+            )
+          })()}
         </div>
 
         {/* 定向接力包:从上一阶段位置飞向本次事件阶段 */}
@@ -222,6 +249,10 @@ export default function AgentRelayStrip() {
                 runningSince={stageRunningSince[stage]}
                 nowMs={nowMs}
                 drip={drips[stage]}
+                onClick={() => {
+                  pulseFocus('stage', stage)
+                  onFilterStage?.(stage)
+                }}
               />
             )
           })}

@@ -9,6 +9,7 @@ import {
   useEventStreamStore,
   type StreamStatus,
 } from '../../lib/eventStream'
+import { useArrivalBurst } from '../../hooks/useArrivalBurst'
 
 // 0.1s 扫描规则：在线=磷光 LIVE，重连=琥珀脉冲，断开=朱砂；不再用 ink 表示"已连接"
 const STATUS_META: Record<StreamStatus, {
@@ -73,6 +74,9 @@ export default function StreamStatusBar({
   const buffered = useEventStreamStore((s) => s.buffer.length)
   const overflow = useEventStreamStore((s) => s.overflow)
 
+  // 事件涌入（青蓝信息流通道）：surge 档点亮底色，active 只给数字
+  const { rate3s, level: burst } = useArrivalBurst()
+
   // 心跳年龄每秒重算
   const [heartAge, setHeartAge] = useState<number | null>(null)
   useEffect(() => {
@@ -126,6 +130,17 @@ export default function StreamStatusBar({
           title={overflow > 0 ? `已挤出最旧 ${overflow} 条` : undefined}
         />
         {overflow > 0 && <span className="text-[11px] text-ink-faint">溢出 {overflow}</span>}
+        {burst !== 'calm' && (
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[11px] tabular-nums ${
+              burst === 'surge' ? 'border-transparent' : 'border-line text-ink-faint'
+            }`}
+            style={burst === 'surge' ? { background: 'var(--glow-info)', color: 'var(--color-ink)' } : undefined}
+            title="近 3 秒到达的业务事件（不含回放）"
+          >
+            {burst === 'surge' ? '⚡' : '▸'} 涌入 {rate3s} 条/3s{burst === 'surge' ? ' · 高压' : ''}
+          </span>
+        )}
       </div>
 
       <div className="ml-auto flex items-center gap-2">

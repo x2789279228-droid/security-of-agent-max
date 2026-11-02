@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageFrame } from '../components/common/PageFrame'
 import { EventDossier } from '../components/logs/EventDossier'
+import AttackConstellation from '../components/logs/AttackConstellation'
 import { CountUp } from '../motion/primitives'
 import { api } from '../lib/api'
 import { useEventParam, eventHref } from '../lib/entityNav'
@@ -11,6 +12,7 @@ import {
   useEventStreamStore,
   type StreamEvent,
 } from '../lib/eventStream'
+import { pulseFocus, useFocusStore } from '../stores/focusStore'
 import type { SecurityLog, Severity } from '../types'
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
@@ -23,20 +25,21 @@ const severityMeta: Record<Severity, { label: string; badge: string; dot: string
   info: { label: '提示', badge: 'text-ink-faint', dot: 'bg-line', card: 'border-line bg-mist/20', num: 'text-ink-faint' },
 }
 
-/* 新到行动效:入场背景色晕(衰减到透明)+ 左缘severity色条 */
-const SEV_TINT: Record<Severity, string> = {
-  critical: 'rgba(176, 58, 48, 0.13)',
-  high: 'rgba(184, 137, 64, 0.13)',
-  medium: 'rgba(74, 122, 136, 0.11)',
-  low: 'rgba(28, 40, 56, 0.05)',
-  info: 'rgba(28, 40, 56, 0.04)',
+/* 新到行：CSS 一次性脉冲（动效语义层分级，颜色走 glow token 双肤自适应） */
+const SEV_ARRIVE: Record<Severity, string> = {
+  critical: 'row-arrive-alert',
+  high: 'row-arrive-warn',
+  medium: 'row-arrive-info',
+  low: 'row-arrive-info',
+  info: 'row-arrive-info',
 }
-const SEV_BORDER: Record<Severity, string> = {
-  critical: '#b03a30',
-  high: '#b88940',
-  medium: '#4a7a88',
-  low: '#bcc6c0',
-  info: '#cfd6d2',
+/* 深链高亮的左缘条/底色（token 变量，暗色作战肤自动翻转） */
+const SEV_ACCENT: Record<Severity, string> = {
+  critical: 'var(--color-alert)',
+  high: 'var(--color-warn)',
+  medium: 'var(--color-hui)',
+  low: 'var(--color-dan)',
+  info: 'var(--color-accent)',
 }
 
 const PAGE_SIZE = 100
@@ -144,13 +147,14 @@ export default function Logs() {
       setLogs((prev) => {
         const byId = new Map<number, SecurityLog>()
         for (const l of prev) byId.set(l.id, l)
+        // R15(P1-12): 与 SSE/轮询路径同口径 — 缓冲上限 500, "加载更多"不再无界
         const incoming = reset ? data : [...prev, ...data]
         const seen = new Set<number>()
         return incoming.filter((l) => {
           if (seen.has(l.id)) return false
           seen.add(l.id)
           return true
-        }).map((l) => {
+        }).slice(0, 500).map((l) => {
           const local = byId.get(l.id)
           // REST 尚未写完审计时，保留 SSE 已经打上的 analyzed
           if (local?.analyzed && !l.analyzed) {
@@ -183,8 +187,10 @@ export default function Logs() {
     const nowTs = Date.now()
     setRecentIds((prev) => {
       const next = { ...prev }
-      for (const evt of relevant) {
-        if (evt.type !== 'security_event') continue
+    for (const evt of relevant) {
+      // 首连回放的历史事件不算"新到"（否则整页全挂 NEW 标记）
+      if (evt.replay) continue
+      if (evt.type !== 'security_event') continue
         const id = eventIdOf(evt.data)
         if (id && next[id] === undefined) next[id] = nowTs
       }
@@ -208,6 +214,9 @@ export default function Logs() {
     prevAnalyzedRef.current = new Map(logs.map((l) => [l.id, l.analyzed]))
     if (Object.keys(additions).length) setStampedIds((s) => ({ ...s, ...additions }))
   }, [logs])
+
+  // 联动脉冲（FocusLink）：星图图例点击 → 命中行 stagger 闪光
+  const pulse = useFocusStore((s) => s.pulse)
 
   const filtered = useMemo(() => {
     if (!search.trim()) return logs
@@ -233,21 +242,7 @@ export default function Logs() {
     return { bySeverity, reviewed, degraded, pending: logs.length - reviewed - degraded }
   }, [logs])
 
-  // 近 24 小时接入分布(本地聚合,最右=当前小时)
-  const hourly = useMemo(() => {
-    const buckets = new Array(24).fill(0)
-    const now = Date.now()
-    for (const l of logs) {
-      const t = Date.parse(l.created_at)
-      if (!Number.isFinite(t)) continue
-      const ageH = (now - t) / 3_600_000
-      if (ageH < 0 || ageH >= 24) continue
-      buckets[23 - Math.floor(ageH)]++
-    }
-    return buckets
-  }, [logs])
-  const hourlyMax = Math.max(1, ...hourly)
-
+  // 2s 轮询兜底：SSE 为主通道，轮询补齐审计升级与漏网新事件
   const syncLiveAudits = useCallback(async () => {
     if (syncingRef.current) return
     syncingRef.current = true
@@ -304,7 +299,6 @@ export default function Logs() {
     <PageFrame
       title="日志中心"
       hint="已接入安全事件 · 按时间倒序 · 实时推送。"
-      marginalia="——每一条日志都是守望者的一句话。"
       extra={
         <span className="inline-flex items-center gap-2 text-[13px] font-medium tracking-wide">
           <span className="relative flex h-2 w-2">
@@ -326,7 +320,7 @@ export default function Logs() {
       }
     >
 
-        <div className="mb-10 grid grid-cols-2 gap-8 border-b border-line pb-8 md:grid-cols-5">
+        <div className="mb-4 grid grid-cols-2 divide-x divide-line-soft border-y border-line-soft md:grid-cols-5">
           {SEVERITIES.map((s) => {
             const active = severity === s
             const meta = severityMeta[s]
@@ -335,7 +329,7 @@ export default function Logs() {
                 key={s}
                 onClick={() => setSeverity(active ? '' : s)}
                 aria-pressed={active}
-                className={`group relative text-left pl-3 pr-2 py-2 transition-colors ${active ? 'bg-vault' : 'opacity-55 hover:opacity-100'}`}
+                className={`group relative px-4 py-2.5 text-left transition-colors first:pl-0 md:pl-5 ${active ? 'bg-mist/70' : 'opacity-60 hover:opacity-100'}`}
               >
                 <span
                   aria-hidden
@@ -343,10 +337,14 @@ export default function Logs() {
                     active ? 'bg-dusk-soft' : 'bg-transparent'
                   }`}
                 />
-                <p className={`font-mono text-[10px] tracking-[0.22em] uppercase transition-colors ${active ? 'text-dusk-soft' : 'text-ink-faint'}`}>
+                <p className={`font-mono text-[10px] tracking-[0.06em] transition-colors ${active ? 'text-dusk-soft' : 'text-ink-faint'}`}>
                   {meta.label}
                 </p>
-                <p className={`mt-2 font-serif text-[32px] font-black tabular-nums leading-none transition-colors ${active ? 'text-[#f1e8d6]' : meta.num}`}>
+                {/* key 随计数变化重挂 → tick-flash 重放 */}
+                <p
+                  key={stats.bySeverity[s]}
+                  className={`tick-flash mt-1 text-[24px] font-bold tabular-nums leading-none transition-colors ${active ? 'text-ink' : meta.num}`}
+                >
                   <CountUp value={stats.bySeverity[s]} from="previous" duration={500} />
                 </p>
               </button>
@@ -366,7 +364,7 @@ export default function Logs() {
           </div>
           <button
             onClick={() => load(true, 0)}
-            className="border border-[#0e1a26] bg-[#0e1a26] px-4 py-2 font-mono text-[11px] tracking-[0.18em] uppercase text-[#f1e8d6] hover:bg-[#182838] transition-colors"
+            className="rounded-[3px] border border-accent bg-accent px-4 py-2 font-mono text-[11px] tracking-[0.06em] text-on-accent hover:bg-accent-hover transition-colors"
           >
             刷新
           </button>
@@ -380,156 +378,185 @@ export default function Logs() {
           </span>
         </div>
 
-        {/* 近 24 小时接入分布(本地聚合) */}
-        <div className="mb-5 border border-line bg-paper px-4 pb-2 pt-3">
-          <div className="flex items-center justify-between">
-            <p className="meta-caps">近 24 小时接入分布</p>
-            <span className="font-mono text-[10px] tabular-nums text-ink-faint">-24h → 现在 · 每柱 1 小时</span>
-          </div>
-          <div className="mt-2 flex h-10 items-end gap-1">
-            {hourly.map((n, i) => (
-              <div key={i} className="relative h-full flex-1 bg-mist/50" title={`${n} 条`}>
-                <motion.div
-                  className="absolute inset-x-0 bottom-0 bg-accent/70"
-                  initial={{ height: 0 }}
-                  animate={{ height: `${(n / hourlyMax) * 100}%` }}
-                  transition={{ duration: 0.45, delay: i * 0.015, ease: [0.22, 1, 0.36, 1] }}
-                />
-              </div>
-            ))}
-          </div>
+        {/* 非对称双列：左宽列=事件案卷账本，右窄列=态势星图舷窗（不再横幅通栏） */}
+        <div className="grid grid-cols-1 items-stretch gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">
+        {/* 攻击态势星图：来源外环/目标内环，彗星=实时攻击，霜色线=已审计。
+            挂在右轨后改为绝对填充，高度随表格走；签名切角只在此页这一处 */}
+        <div className="relative min-h-[420px] border border-line xl:col-start-2 xl:row-start-1 [&>.star-map]:absolute [&>.star-map]:inset-0 [&>.star-map]:border-0">
+          <AttackConstellation
+            logs={logs}
+            recentIds={recentIds}
+            stampedIds={stampedIds}
+            active={severity}
+            connected={connected}
+            onSelectIp={(ip) => setSearch(ip)}
+            onSelectSeverity={(s) => {
+              setSeverity((cur) => (cur === s ? '' : s))
+              pulseFocus('severity', s)
+            }}
+          />
         </div>
 
-        {/* 日志表格 */}
-        {loading ? (
-          <div className="text-center text-sm text-ink-faint py-20">加载中 …</div>
-        ) : error ? (
-          <div className="text-center text-sm text-alert py-20">{error}</div>
-        ) : filtered.length === 0 ? (
-          <div className="border border-line py-20 text-center text-sm text-ink-faint">
-            {search || severity ? '没有符合筛选条件的日志' : '暂无日志，等待事件接入 …'}
+        {/* 事件案卷面板：宣纸质感恒定（token 于 .dossier-panel 作用域钉为纸面值，亮暗两肤一致） */}
+        <div className="dossier-panel border border-line xl:col-start-1 xl:row-start-1">
+          <span className="dossier-corner tl" aria-hidden />
+          <span className="dossier-corner tr" aria-hidden />
+          <span className="dossier-corner bl" aria-hidden />
+          <span className="dossier-corner br" aria-hidden />
+          <div className="dossier-head">
+            <span>事件列表</span>
+            <span className="live-stamp">
+              <span className="stamp-dot" aria-hidden />
+              {connected ? '实时推送 LIVE' : '链路断开 OFFLINE'}
+            </span>
           </div>
-        ) : (
-          <div className="overflow-hidden border border-line bg-paper">
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="text-left border-b border-line bg-mist">
-                    <th className="px-5 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">级别</th>
-                    <th className="px-5 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">事件类型</th>
-                    <th className="px-5 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">来源 → 目标</th>
-                    <th className="px-5 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal w-2/5">消息</th>
-                    <th className="px-5 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">审计</th>
-                    <th className="px-5 py-3 font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint font-normal">时间</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line">
-                  <AnimatePresence initial={false}>
-                    {filtered.map((log) => {
-                      const meta = severityMeta[log.severity] || severityMeta.info
-                      const isNew = recentIds[log.id] !== undefined
-                      const deepLinked = deepEventId !== null && log.id === deepEventId
-                      const justStamped = stampedIds[log.id] !== undefined && Date.now() - stampedIds[log.id] < 1600
-                      const auditCls = `text-[11px] font-semibold ${
-                        log.audit_quality === 'llm' || !log.audit_quality
-                          ? 'text-accent'
-                          : log.audit_quality === 'tools' || log.audit_quality === 'rule'
-                            ? 'text-hui'
-                            : 'text-alert'
-                      }`
-                      const auditLabel = log.audit_quality === 'llm' || !log.audit_quality
-                        ? 'LLM'
-                        : log.audit_quality === 'tools' || log.audit_quality === 'rule'
-                          ? '规则'
-                          : '降级'
-                      return (
-                        <motion.tr
-                          key={log.id}
-                          data-event-id={log.id}
-                          data-analyzed={log.analyzed ? '1' : '0'}
-                          layout
-                          onClick={() => setDossierId(log.id)}
-                          initial={isNew
-                            ? { opacity: 0, y: -10, backgroundColor: SEV_TINT[log.severity] ?? SEV_TINT.info }
-                            : { opacity: 0, y: -6 }}
-                          animate={isNew
-                            ? { opacity: 1, y: 0, backgroundColor: 'rgba(0,0,0,0)' }
-                            : { opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          transition={isNew ? { duration: 1.5 } : { duration: 0.2 }}
-                          style={{
-                            ...(isNew ? { boxShadow: `inset 3px 0 0 ${SEV_BORDER[log.severity] ?? SEV_BORDER.info}` } : {}),
-                            ...(deepLinked ? { backgroundColor: 'rgba(58, 101, 112, 0.07)', boxShadow: 'inset 3px 0 0 #3a6570' } : {}),
-                          }}
-                          className="group cursor-pointer hover:bg-mist/25 transition-colors align-top"
-                        >
-                          <td className="px-5 py-3">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${meta.badge}`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
-                              {meta.label}
-                              {isNew && <span className="ml-0.5 animate-pulse text-[9px] tracking-[0.14em]">NEW</span>}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 font-medium text-ink whitespace-nowrap">{log.event_type}</td>
-                          <td className="px-5 py-3 text-ink-soft whitespace-nowrap font-mono text-xs">
-                            {log.src_ip || '—'} <span className="text-ink-faint">→</span> {log.dst_ip || '—'}
-                          </td>
-                          <td className="px-5 py-3 text-ink-soft leading-relaxed">
-                            <span className="line-clamp-2">{log.message}</span>
-                            {log.is_anomaly && (
-                              <span className="text-alert text-[11px] font-semibold ml-1.5">
-                                ⚠ 异常 {log.anomaly_score?.toFixed(2)}
-                              </span>
-                            )}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                navigate(eventHref.monitor(log.id))
-                              }}
-                              className="mt-1 block text-[11px] font-medium text-accent opacity-0 transition-opacity group-hover:opacity-100"
-                            >
-                              思维链 →
-                            </button>
-                          </td>
-                          <td className="px-5 py-3 whitespace-nowrap">
-                            {log.analyzed ? (
-                              justStamped ? (
-                                <motion.span
-                                  initial={{ scale: 1.4, opacity: 0.4 }}
-                                  animate={{ scale: 1, opacity: 1 }}
-                                  transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                                  className={`inline-block ${auditCls}`}
-                                >
-                                  {auditLabel}
-                                </motion.span>
-                              ) : (
-                                <span className={auditCls}>{auditLabel}</span>
-                              )
-                            ) : (
-                              <span className="text-ink-faint text-[11px] font-semibold">审核中</span>
-                            )}
-                          </td>
-                          <td className="px-5 py-3 text-ink-faint whitespace-nowrap tabular-nums text-xs">
-                            {formatTime(log.created_at)}
-                          </td>
-                        </motion.tr>
-                      )
-                    })}
-                  </AnimatePresence>
-                </tbody>
-              </table>
+          {loading ? (
+            <div className="text-center text-sm text-ink-faint py-20">加载中 …</div>
+          ) : error ? (
+            <div className="text-center text-sm text-alert py-20">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="py-20 text-center text-sm text-ink-faint">
+              {search || severity ? '没有符合筛选条件的日志' : '暂无日志，等待事件接入 …'}
             </div>
-            {filtered.length >= PAGE_SIZE && (
-              <button
-                onClick={() => load(false, offsetRef.current)}
-                disabled={loadingMore}
-                className="w-full border-t border-line py-3.5 text-sm text-link transition-colors hover:bg-mist/25"
-              >
-                {loadingMore ? '加载中…' : '加载更多'}
-              </button>
-            )}
-          </div>
-        )}
+          ) : (
+            <div className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="text-left border-b border-line bg-mist">
+                      <th className="px-5 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">级别</th>
+                      <th className="px-5 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">事件类型</th>
+                      <th className="px-5 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">来源 → 目标</th>
+                      <th className="px-5 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal w-2/5">消息</th>
+                      <th className="px-5 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">审计</th>
+                      <th className="px-5 py-3 font-mono text-[10px] tracking-[0.06em] text-ink-faint font-normal">时间</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    <AnimatePresence initial={false}>
+                      {filtered.map((log, idx) => {
+                        const meta = severityMeta[log.severity] || severityMeta.info
+                        const isNew = recentIds[log.id] !== undefined
+                        const deepLinked = deepEventId !== null && log.id === deepEventId
+                        const justStamped = stampedIds[log.id] !== undefined && Date.now() - stampedIds[log.id] < 1600
+                        // 联动脉冲命中（星图图例/深链点击）→ overlay 闪光，nonce 重挂重放
+                        const pulseHit =
+                          !!pulse && pulse.kind === 'severity' && pulse.value === log.severity
+                        const auditCls = `text-[11px] font-semibold ${
+                          log.audit_quality === 'llm' || !log.audit_quality
+                            ? 'text-accent'
+                            : log.audit_quality === 'tools' || log.audit_quality === 'rule'
+                              ? 'text-hui'
+                              : 'text-alert'
+                        }`
+                        const auditLabel = log.audit_quality === 'llm' || !log.audit_quality
+                          ? 'LLM'
+                          : log.audit_quality === 'tools' || log.audit_quality === 'rule'
+                            ? '规则'
+                            : '降级'
+                        return (
+                          <motion.tr
+                            key={log.id}
+                            data-event-id={log.id}
+                            data-analyzed={log.analyzed ? '1' : '0'}
+                            // R15(P1-12): 移除逐行 layout(FLIP 全表位置跟踪是
+                            // 长列表掉帧主因) — 保留挂载入场动画, 500 行上限下
+                            // 重排由浏览器原生布局承担
+                            onClick={() => setDossierId(log.id)}
+                            initial={isNew ? { opacity: 0, y: -10 } : { opacity: 0, y: -6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            transition={isNew ? { duration: 0.8 } : { duration: 0.2 }}
+                            style={{
+                              ...(deepLinked
+                                ? { backgroundColor: 'color-mix(in srgb, var(--color-accent) 7%, transparent)', boxShadow: `inset 3px 0 0 ${SEV_ACCENT[log.severity] ?? SEV_ACCENT.info}` }
+                                : {}),
+                            }}
+                            className={`group relative cursor-pointer hover:bg-mist/25 transition-colors align-top ${isNew ? SEV_ARRIVE[log.severity] ?? SEV_ARRIVE.info : ''}`}
+                          >
+                            {pulseHit && (
+                              <span
+                                key={pulse!.nonce}
+                                className="row-flash pointer-events-none absolute inset-0"
+                                style={{ animationDelay: `${(idx % 30) * 35}ms` }}
+                                aria-hidden
+                              />
+                            )}
+                            <td className="px-5 py-3">
+                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1 rounded-full text-[11px] font-semibold ${meta.badge}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+                                {meta.label}
+                                {isNew && <span className="ml-0.5 animate-pulse text-[9px] tracking-[0.14em]">NEW</span>}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 font-medium text-ink whitespace-nowrap">{log.event_type}</td>
+                            <td className="px-5 py-3 text-ink-soft whitespace-nowrap font-mono text-xs">
+                              {log.src_ip || '—'} <span className="text-ink-faint">→</span> {log.dst_ip || '—'}
+                            </td>
+                            <td className="px-5 py-3 text-ink-soft leading-relaxed">
+                              <span className="line-clamp-2">{log.message}</span>
+                              {log.is_anomaly && (
+                                <span className="text-alert text-[11px] font-semibold ml-1.5">
+                                  ⚠ 异常 {log.anomaly_score?.toFixed(2)}
+                                </span>
+                              )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  navigate(eventHref.monitor(log.id))
+                                }}
+                                className="mt-1 block text-[11px] font-medium text-accent opacity-0 transition-opacity group-hover:opacity-100"
+                              >
+                                思维链 →
+                              </button>
+                            </td>
+                            <td className="px-5 py-3 whitespace-nowrap">
+                              {log.analyzed ? (
+                                justStamped ? (
+                                  <motion.span
+                                    initial={{ scale: 1.4, opacity: 0.4 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                                    className={`inline-block ${auditCls}`}
+                                  >
+                                    {auditLabel}
+                                  </motion.span>
+                                ) : (
+                                  <span className={auditCls}>{auditLabel}</span>
+                                )
+                              ) : (
+                                <span className="text-ink-faint text-[11px] font-semibold">审核中</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3 text-ink-faint whitespace-nowrap tabular-nums text-xs">
+                              {formatTime(log.created_at)}
+                            </td>
+                          </motion.tr>
+                        )
+                      })}
+                    </AnimatePresence>
+                  </tbody>
+                </table>
+              </div>
+              {filtered.length >= PAGE_SIZE && (
+                logs.length >= 500 ? (
+                  <div className="w-full border-t border-line py-3.5 text-center text-sm text-ink-faint">
+                    已达缓冲上限 500 条 — 缩小筛选范围或用搜索定位更早事件
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => load(false, offsetRef.current)}
+                    disabled={loadingMore}
+                    className="w-full border-t border-line py-3.5 text-sm text-link transition-colors hover:bg-mist/25"
+                  >
+                    {loadingMore ? '加载中…' : '加载更多'}
+                  </button>
+                )
+              )}
+            </div>
+          )}
+        </div>
+        </div>
 
         {/* 事件案卷抽屉(案卷链) */}
         <EventDossier eventId={dossierId} onClose={() => setDossierId(null)} />

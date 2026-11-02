@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom'
 import {
   AGENT_RELAY_STAGES,
   STAGE_LABELS,
-  deriveRelays,
+  deriveRelaysMemo,
   runningLabel,
   type RelayState,
   type StageCellStatus,
@@ -179,9 +179,38 @@ export default function ActiveRelayCards({
 }) {
   const buffer = useEventStreamStore((s) => s.buffer)
   const { active: fromStream, recent: recentFromStream } = useMemo(
-    () => deriveRelays(buffer),
+    () => deriveRelaysMemo(buffer),
     [buffer],
   )
+
+  // ── 死态回放（PipelineAlive）：无进行中接力时，把最近一次成功管线
+  //    按 600ms/阶段在本地重演两轮 —— 纯前端动画，不调后端、不注入事件。
+  //    消灭评委走近时的"死屏时刻"。真实接力到达时本组件切出空态分支，回放自然让位。
+  const [replay, setReplay] = useState<{
+    relay: RelayState
+    step: number
+    round: number
+    finishing: boolean
+    t0: number
+  } | null>(null)
+
+  useEffect(() => {
+    if (!replay) return
+    const last = AGENT_RELAY_STAGES.length - 1
+    const t = setTimeout(
+      () => {
+        setReplay((r) => {
+          if (!r) return r
+          if (r.finishing) return null
+          if (r.step < last) return { ...r, step: r.step + 1 }
+          if (r.round > 1) return { ...r, step: 0, round: r.round - 1 }
+          return { ...r, finishing: true }
+        })
+      },
+      replay.finishing ? 900 : 600,
+    )
+    return () => clearTimeout(t)
+  }, [replay])
 
   const active = useMemo(() => {
     if (fromStream.length > 0) return fromStream
@@ -214,13 +243,81 @@ export default function ActiveRelayCards({
   }, [active.length])
 
   if (active.length === 0 && recent.length === 0) {
+    const replayable = hydratedRecent.find((p) => Number(p?.event_id) > 0)
     return (
       <div className="mb-5 rounded-xl border border-dashed border-line bg-card/50 px-5 py-4">
-        <p className="text-[13px] font-semibold text-ink">当前没有进行中的审查接力</p>
-        <p className="mt-1 text-[12px] text-ink-faint">
-          自博弈默认不注入 ingest，监控页不会出现 Audit-LLM 接力。可在本页跑一条演示审查，或到安全审计注入事件。
-        </p>
+        {replay ? (
+          <div className="mb-3">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-[13px] font-semibold text-ink">
+                最近一次接力 · 重演
+                <span className="ml-2 border border-dan px-1.5 py-px font-mono text-[9px] tracking-[0.06em] text-ink-faint">
+                  回放中 · 非实时
+                </span>
+              </h3>
+              <span className="font-mono text-[11px] text-ink-faint tabular-nums">
+                第 {replay.round}/2 轮
+              </span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              <Card
+                relay={{
+                  ...replay.relay,
+                  // 回放的"活秒表"按阶段步进合成，不用真实历史时刻
+                  startedAt: replay.t0,
+                  currentStage: replay.finishing
+                    ? 'response'
+                    : AGENT_RELAY_STAGES[replay.step],
+                  stages: (() => {
+                    const m = emptyStages()
+                    AGENT_RELAY_STAGES.forEach((s, i) => {
+                      m[s] =
+                        replay.finishing || i < replay.step
+                          ? 'success'
+                          : i === replay.step
+                            ? 'running'
+                            : 'idle'
+                    })
+                    return m
+                  })(),
+                }}
+                now={replay.t0 + (replay.step + 1) * 600}
+                completed={false}
+              />
+            </div>
+            {replay.finishing && (
+              <p className="mt-2 ok-flash inline-block rounded-lg px-2 py-1 text-[12px] text-ok">
+                ✓ 接力完成 · 已归档
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-[13px] font-semibold text-ink">当前没有进行中的审查接力</p>
+        )}
+        {!replay && (
+          <p className="mt-1 text-[12px] text-ink-faint">
+            自博弈默认不注入 ingest，监控页不会出现 Audit-LLM 接力。可在本页跑一条演示审查，或到安全审计注入事件。
+          </p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
+          {replayable && (
+            <button
+              type="button"
+              onClick={() =>
+                setReplay({
+                  relay: relayFromHydration(replayable),
+                  step: 0,
+                  round: 2,
+                  finishing: false,
+                  t0: Date.now(),
+                })
+              }
+              className="rounded-lg border border-accent/60 px-3 py-1.5 text-[12px] text-accent transition-colors hover:bg-accent/10"
+              title="把最近一次成功管线在本地按阶段重演两轮（纯前端动画，不调后端）"
+            >
+              ▶ 回放最近一次接力
+            </button>
+          )}
           {onDemo && (
             <button
               type="button"

@@ -25,7 +25,7 @@ interface EdrEvent {
 }
 
 const sevColor: Record<string, string> = {
-  critical: 'border-[#b03a30] bg-[#b03a30] text-paper',
+  critical: 'border-alert bg-alert text-paper',
   high: 'border-[#b88940] bg-[#b88940] text-paper',
   medium: 'border-[#7ba9b5] bg-[#7ba9b5] text-[#0e1a26]',
   info: 'border-line text-ink-faint',
@@ -61,7 +61,6 @@ export default function EDR() {
     <PageFrame
       title="终端检测"
       hint="Sysmon · Windows Event Log · 跨源关联。在主机里看见行为。"
-      marginalia="——再聪明的攻击，在主机上也要落地。"
       extra={
         <nav className="flex gap-5 border-b border-line">
           {['all', 'sysmon', 'winevent'].map((s) => (
@@ -95,11 +94,11 @@ export default function EDR() {
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <span
-                  className={`border px-2 py-0.5 font-mono text-[10px] tracking-[0.22em] uppercase ${sevColor[e.severity] || sevColor.info}`}
+                  className={`border px-2 py-0.5 font-mono text-[10px] tracking-[0.06em] ${sevColor[e.severity] || sevColor.info}`}
                 >
                   {e.severity}
                 </span>
-                <span className="font-serif text-[18px] font-bold tracking-tight text-ink">
+                <span className="text-[18px] font-bold tracking-tight text-ink">
                   {e.event_name || `Event ${e.event_id}`}
                 </span>
                 <span className="border border-line px-2 py-0.5 font-mono text-[11px] text-ink-faint">
@@ -115,19 +114,19 @@ export default function EDR() {
               <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1.5 text-[13px] text-ink-soft sm:grid-cols-2">
                 {e.computer_name && (
                   <div className="flex gap-2">
-                    <dt className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint w-12">主机</dt>
+                    <dt className="font-mono text-[11px] tracking-[0.06em] text-ink-faint w-12">主机</dt>
                     <dd className="font-mono text-ink">{e.computer_name}</dd>
                   </div>
                 )}
                 {e.process_name && (
                   <div className="flex gap-2">
-                    <dt className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint w-12">进程</dt>
+                    <dt className="font-mono text-[11px] tracking-[0.06em] text-ink-faint w-12">进程</dt>
                     <dd className="font-mono text-ink">{e.process_name}</dd>
                   </div>
                 )}
                 {e.src_ip && (
                   <div className="flex gap-2">
-                    <dt className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint w-12">网络</dt>
+                    <dt className="font-mono text-[11px] tracking-[0.06em] text-ink-faint w-12">网络</dt>
                     <dd className="font-mono text-ink">
                       {e.src_ip} → {e.dst_ip}:{e.dst_port}
                     </dd>
@@ -135,7 +134,7 @@ export default function EDR() {
                 )}
                 {e.user_name && (
                   <div className="flex gap-2">
-                    <dt className="font-mono text-[11px] tracking-[0.18em] uppercase text-ink-faint w-12">用户</dt>
+                    <dt className="font-mono text-[11px] tracking-[0.06em] text-ink-faint w-12">用户</dt>
                     <dd className="font-mono text-ink">{e.user_name}</dd>
                   </div>
                 )}
@@ -172,7 +171,7 @@ export default function EDR() {
                       name: e.process_name,
                     })
                   }
-                  className="border border-ink px-3 py-1.5 font-mono text-[11px] tracking-[0.18em] uppercase text-ink hover:bg-[#0e1a26] hover:text-[#f1e8d6] transition-colors"
+                  className="border border-ink px-3 py-1.5 font-mono text-[11px] tracking-[0.06em] text-ink hover:bg-[#0e1a26] hover:text-[#f1e8d6] transition-colors"
                 >
                   终止进程
                 </button>
@@ -186,12 +185,12 @@ export default function EDR() {
                       host_ip: e.src_ip,
                     })
                   }
-                  className="border border-[#b03a30] px-3 py-1.5 font-mono text-[11px] tracking-[0.18em] uppercase text-[#b03a30] hover:bg-[#b03a30] hover:text-paper transition-colors"
+                  className="border border-alert px-3 py-1.5 font-mono text-[11px] tracking-[0.06em] text-alert hover:bg-alert hover:text-paper transition-colors"
                 >
                   隔离文件
                 </button>
               )}
-              <span className="font-mono text-[10px] tracking-[0.22em] uppercase text-ink-faint">
+              <span className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">
                 {new Date(e.created_at).toLocaleString('zh-CN', {
                   month: '2-digit',
                   day: '2-digit',
@@ -203,7 +202,7 @@ export default function EDR() {
           </article>
         ))}
         {actionMsg && (
-          <div className="border-t border-line px-6 py-3 font-mono text-[11px] tracking-[0.18em] uppercase text-ink-soft">
+          <div className="border-t border-line px-6 py-3 font-mono text-[11px] tracking-[0.06em] text-ink-soft">
             {actionMsg}
           </div>
         )}

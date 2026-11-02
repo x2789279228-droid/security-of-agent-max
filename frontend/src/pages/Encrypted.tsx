@@ -20,7 +20,7 @@ interface TlsSession {
 
 const riskTone = (score: number) =>
   score >= 0.7
-    ? 'border-[#b03a30] text-[#b03a30]'
+    ? 'border-alert text-alert'
     : score >= 0.4
       ? 'border-[#b88940] text-[#b88940]'
       : 'border-ok text-ok'
@@ -41,7 +41,6 @@ export default function Encrypted() {
     <PageFrame
       title="加密流量"
       hint="TLS 指纹 · 证书分析 · 风险评估。看不见内容，看得见形状。"
-      marginalia="——加密保护的也是形状。"
     >
       <StatBand
         items={[
@@ -64,7 +63,7 @@ export default function Encrypted() {
                 <span className="font-mono text-[13px] text-ink">
                   {s.src_ip} → {s.dst_ip}
                 </span>
-                <span className="font-serif text-[16px] font-bold text-ink">
+                <span className="text-[16px] font-bold text-ink">
                   {s.sni || '（无 SNI）'}
                 </span>
               </div>
@@ -81,7 +80,7 @@ export default function Encrypted() {
                   </span>
                 )}
                 {s.cert_is_self_signed && (
-                  <span className="border border-[#b03a30] px-2 py-0.5 text-[#b03a30]">
+                  <span className="border border-alert px-2 py-0.5 text-alert">
                     自签名
                   </span>
                 )}
@@ -106,12 +105,12 @@ export default function Encrypted() {
             </div>
             <div className="flex flex-col items-start gap-1 md:items-end">
               <span
-                className={`inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-[10px] tracking-[0.22em] uppercase ${riskTone(s.risk_score)}`}
+                className={`inline-flex items-center gap-2 border px-3 py-1.5 font-mono text-[10px] tracking-[0.06em] ${riskTone(s.risk_score)}`}
               >
                 <span
                   className={`h-1.5 w-1.5 ${
                     s.risk_score >= 0.7
-                      ? 'bg-[#b03a30]'
+                      ? 'bg-alert'
                       : s.risk_score >= 0.4
                         ? 'bg-[#b88940]'
                         : 'bg-ok'
@@ -120,9 +119,9 @@ export default function Encrypted() {
                 />
                 {riskLabel(s.risk_score)}
               </span>
-              <span className="font-serif text-[28px] font-black tabular-nums leading-none text-ink">
+              <span className="text-[28px] font-semibold tabular-nums leading-none text-ink">
                 {(s.risk_score * 100).toFixed(0)}
-                <span className="font-mono text-[11px] tracking-[0.22em] uppercase text-ink-faint">
+                <span className="font-mono text-[11px] tracking-[0.06em] text-ink-faint">
                   {' '}/ 100
                 </span>
               </span>

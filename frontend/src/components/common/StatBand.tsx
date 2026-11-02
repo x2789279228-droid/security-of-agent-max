@@ -26,8 +26,8 @@ export function StatBand({ items }: { items: StatBandItem[] }) {
     <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
       {items.map((it) => (
         <div key={it.label} className="border border-line bg-paper-warm px-4 py-2.5">
-          <p className="font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">{it.label}</p>
-          <p className={`mt-1 font-serif text-[20px] font-black leading-none tabular-nums ${TONE_CLS[it.tone ?? 'ink']}`}>
+          <p className="font-mono text-[10px] tracking-[0.06em] text-ink-faint">{it.label}</p>
+          <p className={`mt-1 text-[20px] font-semibold leading-none tabular-nums ${TONE_CLS[it.tone ?? 'ink']}`}>
             {typeof it.value === 'number' ? (
               <CountUp value={it.value} decimals={it.decimals ?? 0} from="previous" duration={500} />
             ) : (

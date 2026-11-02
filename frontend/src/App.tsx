@@ -1,9 +1,10 @@
-import { lazy, Suspense, type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { lazy, Suspense, useEffect, type ReactNode } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { RootLayout } from './layouts/RootLayout'
 import { ROUTES } from './lib/constants'
 import { PageTransition } from './components/common/PageTransition'
 import { useAuthStore } from './stores/authStore'
+import { applyThemeMode } from './lib/themeMode'
 
 
 const Login = lazy(() => import('./pages/Login'))
@@ -27,7 +28,7 @@ function PageLoader() {
   return (
     <PageTransition>
       <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
-        <p className="font-serif text-[28px] font-black text-ink">守望</p>
+        <p className="text-[24px] font-semibold text-ink">守望</p>
         <p className="text-sm text-ink-faint">加载中</p>
       </div>
     </PageTransition>
@@ -59,9 +60,22 @@ function page(el: ReactNode) {
   )
 }
 
+/** 主题同步：挂路由层 —— 覆盖 login/register 等不套 RootLayout 的路由（默认暗色，舞台页强制） */
+function ThemeSync() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    applyThemeMode(pathname)
+    const onThemeChange = () => applyThemeMode(pathname)
+    window.addEventListener('soc:theme-change', onThemeChange)
+    return () => window.removeEventListener('soc:theme-change', onThemeChange)
+  }, [pathname])
+  return null
+}
+
 export default function App() {
   return (
     <BrowserRouter>
+      <ThemeSync />
       <Routes>
         <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
         <Route path="/register" element={<Suspense fallback={<PageLoader />}><Register /></Suspense>} />

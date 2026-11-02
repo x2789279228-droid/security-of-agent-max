@@ -54,15 +54,15 @@ export function KpiStat({
   return (
     <div className={`relative min-w-0 ${hero ? 'pl-5 py-1' : ''} ${className}`}>
       {hero && (
-        <span className="absolute left-0 top-1 bottom-1 w-px bg-[#0e1a26]" aria-hidden />
+        <span className="absolute left-0 top-1 bottom-1 w-px bg-accent" aria-hidden />
       )}
       <div className="flex items-center justify-between gap-3">
-        <p className={`font-mono tracking-[0.22em] uppercase text-ink-faint ${labelSize}`}>
+        <p className={`font-mono tracking-[0.06em] text-ink-faint ${labelSize}`}>
           {label}
         </p>
         {live ? <LiveBadge live /> : null}
       </div>
-      <p className={`mt-2 font-serif font-black tabular-nums tracking-[-0.04em] ${t.value} ${valueSize}`}>
+      <p className={`mt-2 font-semibold tabular-nums tracking-[-0.01em] ${t.value} ${valueSize}`}>
         {typeof value === 'number' ? <Tally value={value} /> : value}
       </p>
       <div className="mt-2 flex items-end justify-between gap-3">

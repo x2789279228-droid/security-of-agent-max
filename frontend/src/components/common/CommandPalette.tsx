@@ -149,7 +149,7 @@ export function CommandPalette() {
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={onKeyDown}
                 placeholder="跳往…（页面 / 演示 / 评测）"
-                className="w-full bg-transparent font-serif text-[17px] text-ink outline-none placeholder:text-ink-faint"
+                className="w-full bg-transparent text-[17px] text-ink outline-none placeholder:text-ink-faint"
                 aria-label="检索页面"
               />
             </div>
@@ -173,7 +173,7 @@ export function CommandPalette() {
                         activeRow ? 'bg-mist' : ''
                       }`}
                     >
-                      <span className="w-14 shrink-0 font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">
+                      <span className="w-14 shrink-0 font-mono text-[10px] tracking-[0.06em] text-ink-faint">
                         {item.group}
                       </span>
                       <span className={`text-[14px] ${activeRow ? 'text-ink' : 'text-ink-soft'}`}>
@@ -191,11 +191,11 @@ export function CommandPalette() {
             </div>
 
             {/* 键位提示 */}
-            <div className="flex items-center gap-4 border-t border-line px-5 py-2 font-mono text-[10px] tracking-[0.18em] uppercase text-ink-faint">
+            <div className="flex items-center gap-4 border-t border-line px-5 py-2 font-mono text-[10px] tracking-[0.06em] text-ink-faint">
               <span>↑↓ 选择</span>
               <span>↵ 跳转</span>
               <span>esc 关闭</span>
-              <span className="ml-auto">守望 · 案卷检索</span>
+              <span className="ml-auto">守望 · 全局检索</span>
             </div>
           </motion.div>
         </motion.div>

@@ -76,9 +76,19 @@ export default function ThoughtDag({
             // 0.1s 扫描规则：否决=朱砂虚线；检索/证据=信号青；主链=暮青
             const stroke =
               e.rel === 'vetoed' ? '#C23A32' : e.rel === 'retrieved' || e.rel === 'evidences' ? '#4A7A88' : '#3A6570'
+            // 边动画（v6）：选中路径重挂 → 实线边 edge-draw 绘入；
+            // 连向 running 节点的边 edge-march 虚线行进（reduced-motion 由 CSS 关停）
+            const toRunning = byId.get(e.to)?.status === 'running'
+            const solid = e.rel !== 'vetoed' && e.rel !== 'evidences'
+            const willDraw = onPath && solid
+            const edgeCls = toRunning
+              ? 'edge-march'
+              : willDraw
+                ? 'edge-draw'
+                : undefined
             return (
               <line
-                key={`${e.from}-${e.to}-${e.rel}`}
+                key={`${e.from}-${e.to}-${e.rel}-${selectedId ?? ''}`}
                 x1={a.x}
                 y1={a.y}
                 x2={b.x}
@@ -87,6 +97,8 @@ export default function ThoughtDag({
                 strokeWidth={onPath ? 1.8 : 0.7 + w}
                 strokeOpacity={onPath ? 0.9 : selectedId ? 0.18 : 0.32}
                 strokeDasharray={e.rel === 'vetoed' ? '4 3' : e.rel === 'evidences' ? '2 3' : undefined}
+                pathLength={willDraw ? 1 : undefined}
+                className={edgeCls}
               />
             )
           })}
