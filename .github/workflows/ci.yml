@@ -490,7 +490,6 @@ jobs:
           format: table
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          trivyignores: .trivyignore
           exit-code: '0'
       - name: 留存全量结果
         if: always()
