@@ -14,6 +14,7 @@ stix_taxii.py — TAXII 2.1 客户端与 STIX Bundle 解析
 """
 import json
 import logging
+import os
 from typing import Optional
 
 from config import settings
@@ -22,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 # feed 文本软上限: 免费源最大也就几百 KB, 10MB 足够容纳任何直出列表
 _MAX_FEED_BYTES = 10_000_000
+
+# 支持的 feed_type 全集 — 与 poll_feed 的分支一一对应，是唯一真相源；
+# API 注册白名单(routers/edr_intel.py)从这里引用，防止解析侧与注册侧漂移。
+ALLOWED_FEED_TYPES = ("taxii", "misp", "misp_feed", "csv", "csv_http", "kev_json", "json_api", "stix_bundle")
 
 # STIX 2.1 IOC 类型映射
 _STIX_IOC_MAP = {
@@ -64,6 +69,10 @@ class TaxiiClient:
             iocs = await self._import_csv_http(feed_config)
         elif feed_type == "kev_json":
             iocs = await self._import_kev_json(feed_config)
+        elif feed_type == "json_api":
+            iocs = await self._import_json_api(feed_config)
+        elif feed_type == "misp_feed":
+            iocs = await self._import_misp_feed(feed_config)
         elif feed_type == "stix_bundle":
             iocs = await self._import_stix_bundle(feed_config)
         else:
@@ -96,6 +105,13 @@ class TaxiiClient:
         since = config.get("since", "")
 
         if not url:
+            return []
+        # R14: TAXII 目标同样过 SSRF 校验(禁内网/云元数据)
+        from net_guard import UrlRejected, validate_submittable_url
+        try:
+            validate_submittable_url(url)
+        except UrlRejected as e:
+            logger.warning("TAXII url 被拒: %s (%s)", str(url)[:100], e)
             return []
 
         headers = {"Accept": "application/taxii+json;version=2.1"}
@@ -144,6 +160,13 @@ class TaxiiClient:
         api_key = config.get("api_key", self.misp_api_key)
         if not url or not api_key:
             return []
+        # R14: MISP 目标同样过 SSRF 校验
+        from net_guard import UrlRejected, validate_submittable_url
+        try:
+            validate_submittable_url(url)
+        except UrlRejected as e:
+            logger.warning("MISP url 被拒: %s (%s)", str(url)[:100], e)
+            return []
 
         headers = {
             "Authorization": api_key,
@@ -188,45 +211,109 @@ class TaxiiClient:
         return iocs
 
     async def _import_csv(self, config: dict) -> list[dict]:
-        """CSV 文件导入 (每行一个 IOC)"""
+        """CSV 本地文件导入 (每行一个 IOC)
+
+        R14(复审 P1-2): 本地路径必须落在 settings.intel_local_feed_dir 白名单
+        目录内(resolve 后前缀校验) —— 修复前 url 可为 `../../.env`、`/etc/passwd`
+        等任意路径, 文件内容落库为 IOC 后可经 /api/intel/iocs 回显(任意文件读)。
+        """
         from pathlib import Path
 
-        file_path = config.get("url", "")
-        if not file_path or not Path(file_path).exists():
+        from config import settings
+
+        file_path = str(config.get("url", "")).strip()
+        allow_dir = str(getattr(settings, "intel_local_feed_dir", "") or "").strip()
+        if not allow_dir:
+            logger.warning("本地 csv 导入被拒: 未配置 intel_local_feed_dir 白名单目录 "
+                           "(如需本地导入请在 .env 配置, 或改用 csv_http)")
+            return []
+        try:
+            p = Path(file_path).resolve()
+            root = Path(allow_dir).resolve()
+            if not str(p).startswith(str(root) + os.sep) and p != root:
+                logger.warning("本地 csv 导入被拒: %s 不在白名单目录 %s 内", file_path[:120], allow_dir)
+                return []
+        except (OSError, ValueError) as e:
+            logger.warning("本地 csv 路径解析失败: %s (%s)", file_path[:120], e)
+            return []
+        if not p.is_file():
             return []
 
         iocs = []
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(p, "r", encoding="utf-8") as f:
                 iocs = self._parse_csv_text(f.read(), config)
         except Exception as e:
             logger.error("CSV 导入失败: %s", e)
 
         return iocs
 
-    async def _fetch_text(self, url: str, api_key: str = "") -> str:
+    async def _fetch_text(self, url: str, api_key: str = "",
+                          extra_headers: dict | None = None) -> str:
         """拉取远程情报文本 (免费 feed 直接给匿名 CSV / 纯文本)。
 
+        R14(复审 P1-2) 出网安全语义:
+          - 首跳与每个重定向跳都过 net_guard.validate_submittable_url
+            (禁 loopback/私网/云元数据, 域名解析后复检);
+          - follow_redirects=False + 手动逐跳: 跨 host 跳转剥离 Authorization
+            (修复凭证随 30x 发给任意第三方), 最多 5 跳;
+          - 流式读取, 累计超 _MAX_FEED_BYTES 即中止(修复"先整包入内存再限长")。
         独立成方法供测试 monkeypatch —— 解析逻辑与传输解耦。
+
+        extra_headers (2026-10-30 D 第二批): 源特定 header（如 OTX 的
+        `X-OTX-API-KEY`）；跨 host 重定向时与 Authorization 一起剥离。
         """
         import httpx
 
-        headers = {
+        from net_guard import UrlRejected, validate_submittable_url
+
+        current = url
+        headers_base = {
             "User-Agent": "SOC-Platform/1.0 (threat-intel feed poller)",
         }
-        if api_key:
-            headers["Authorization"] = f"Token {api_key}"
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            text = resp.text
-        if len(text) > _MAX_FEED_BYTES:
-            logger.warning(
-                "feed 响应超大(%d chars, url=%s), 截断到 %d",
-                len(text), url[:100], _MAX_FEED_BYTES,
-            )
-            text = text[:_MAX_FEED_BYTES]
-        return text
+        headers_base.update({str(k): str(v) for k, v in (extra_headers or {}).items()})
+        # 域名形式的 feed host 本跳也先解析复检一次
+        try:
+            current = validate_submittable_url(current)
+        except UrlRejected as e:
+            raise ValueError(f"feed url rejected: {e}") from e
+
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            for _hop in range(5):
+                headers = dict(headers_base)
+                if api_key:
+                    headers["Authorization"] = f"Token {api_key}"
+                resp = await client.get(current, headers=headers)
+                if resp.is_redirect:
+                    loc = resp.headers.get("location", "")
+                    if not loc:
+                        break
+                    import httpx as _hx
+                    next_url = str(_hx.URL(current).join(loc))
+                    try:
+                        validate_submittable_url(next_url)
+                    except UrlRejected as e:
+                        raise ValueError(f"redirect target rejected: {e}") from e
+                    # 跨 host 跳转不带凭证（含源特定 header —— 与 Authorization 同规）
+                    if _hx.URL(next_url).host != _hx.URL(current).host:
+                        api_key = ""
+                        headers_base = {
+                            "User-Agent": "SOC-Platform/1.0 (threat-intel feed poller)",
+                        }
+                    current = next_url
+                    continue
+                resp.raise_for_status()
+                buf = bytearray()
+                async for chunk in resp.aiter_bytes(64 * 1024):
+                    buf.extend(chunk)
+                    if len(buf) > _MAX_FEED_BYTES:
+                        logger.warning(
+                            "feed 响应超限(> %d bytes, url=%s), 提前中止",
+                            _MAX_FEED_BYTES, url[:100],
+                        )
+                        break
+                return bytes(buf).decode("utf-8", errors="replace")
+        raise ValueError(f"feed 重定向跳数超限(>5): {url[:100]}")
 
     def _parse_csv_text(self, text: str, config: dict) -> list[dict]:
         """把 feed 文本解析为规范 IOC 列表。
@@ -262,10 +349,17 @@ class TaxiiClient:
 
         iocs: list[dict] = []
         if fmt == "plain":
+            # 行内取首字段的分隔符（Spamhaus DROP: "1.2.4.0/22 ; SBL233779"）
+            split_delim = str(cfg.get("split_delimiter", "")).strip()
             for ln in lines:
+                value = ln.strip()
+                if split_delim:
+                    value = value.split(split_delim)[0].strip()
+                if not value:
+                    continue
                 iocs.append({
                     "ioc_type": fixed_type,
-                    "ioc_value": ln.strip(),
+                    "ioc_value": value,
                     "threat_type": fixed_threat,
                     "severity": severity,
                     "source": source,
@@ -306,8 +400,12 @@ class TaxiiClient:
         → scheduler 轮询 → store_iocs 落库 → ioc_matcher 命中富化。
         """
         url = str(config.get("url", "")).strip()
-        if not url.lower().startswith(("http://", "https://")):
-            logger.warning("csv_http 源 url 非法: %s", url[:100])
+        # R14: 仅 scheme 前缀检查 → 完整 SSRF 校验(禁私网/元数据/DNS 解析复检)
+        from net_guard import UrlRejected, validate_submittable_url
+        try:
+            validate_submittable_url(url)
+        except UrlRejected as e:
+            logger.warning("csv_http 源 url 非法: %s (%s)", url[:100], e)
             return []
         try:
             text = await self._fetch_text(url, api_key=str(config.get("api_key", "")))
@@ -315,6 +413,267 @@ class TaxiiClient:
             logger.warning("feed 拉取失败 url=%s: %s", url[:100], e)
             return []
         return self._parse_csv_text(text, config)
+
+    # ── json_api 通用 JSON 情报源（REMEDIATION-PLAN-2026-10-30 路线 D）──
+    #
+    # 覆盖无标准格式的免费源（abuse.ch ThreatFox / MalwareBazaar、
+    # ransomware.live 等）：dotted-path 取数 + 类型别名映射，全部配置化。
+    #
+    # config 示例（ThreatFox）:
+    #   {"method": "POST", "body": {"query": "get_iocs", "days": 1},
+    #    "items_path": "data", "value_path": "ioc", "type_path": "ioc_type",
+    #    "type_map": {"ip:port": "ip", "domain": "domain", "url": "url"},
+    #    "strip_port": true}
+    # MalwareBazaar: {"method": "POST", "body": {"query": "get_taginfo", "tag": "..." },
+    #    "items_path": "data", "value_path": "sha256_hash", "fixed_type": "file_hash"}
+    _JSON_TYPE_ALIASES = {
+        "ip": "ip", "ip:port": "ip", "ipv4": "ip", "ipv6": "ip",
+        "domain": "domain", "hostname": "domain", "host": "domain",
+        "url": "url", "uri": "url",
+        "md5": "file_hash", "sha1": "file_hash", "sha256": "file_hash",
+        "hash": "file_hash",
+        "ja3": "ja3", "ja3_hash": "ja3", "ja3_digest": "ja3",
+        "email": "email",
+        "cidr": "cidr", "network": "cidr", "netmask": "cidr",
+        "cve": "cve",
+    }
+
+    @staticmethod
+    def _dig(obj, dotted: str):
+        """按 'a.b.0.c' 点路径取值（支持列表下标）；取不到返回 None。"""
+        cur = obj
+        for part in str(dotted or "").split("."):
+            if not part:
+                continue
+            if isinstance(cur, list):
+                try:
+                    cur = cur[int(part)]
+                except (ValueError, IndexError):
+                    return None
+            elif isinstance(cur, dict):
+                cur = cur.get(part)
+            else:
+                return None
+            if cur is None:
+                return None
+        return cur
+
+    def _parse_json_api(self, text: str, config: dict) -> list[dict]:
+        cfg = config.get("config") or {}
+        source = str(config.get("name", "json_api"))
+        try:
+            import json as _json
+            payload = _json.loads(text)
+        except Exception as e:
+            logger.warning("json_api 响应不是合法 JSON (source=%s): %s", source, e)
+            return []
+
+        items = self._dig(payload, str(cfg.get("items_path", ""))) if cfg.get("items_path") else payload
+        if not isinstance(items, list):
+            logger.warning("json_api items_path 取到的不是列表 (source=%s)", source)
+            return []
+
+        value_path = str(cfg.get("value_path", "")).strip()
+        if not value_path:
+            logger.warning("json_api 缺 value_path (source=%s)", source)
+            return []
+        type_path = str(cfg.get("type_path", "")).strip()
+        fixed_type = str(cfg.get("fixed_type", "")).strip().lower()
+        type_map = dict(self._JSON_TYPE_ALIASES)
+        type_map.update({str(k).lower(): str(v).lower()
+                         for k, v in (cfg.get("type_map") or {}).items()})
+        threat_path = str(cfg.get("threat_path", "")).strip()
+        fixed_threat = str(cfg.get("fixed_threat", ""))
+        severity = str(cfg.get("severity", "medium"))
+        strip_port = bool(cfg.get("strip_port", False))
+
+        iocs: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            value = str(self._dig(item, value_path) or "").strip()
+            if not value:
+                continue
+            ioc_type = ""
+            if type_path:
+                raw_type = str(self._dig(item, type_path) or "").strip().lower()
+                ioc_type = type_map.get(raw_type, "")
+            if not ioc_type:
+                ioc_type = fixed_type
+            if not ioc_type:
+                continue
+            # ThreatFox 的 "ip:port" 形态：剥端口取 host（仅当恰好一个冒号，
+            # IPv6 字面量含多冒号不受影响；剥完由 ioc_ingest 归一化复验）
+            if strip_port and ioc_type == "ip" and value.count(":") == 1:
+                value = value.rsplit(":", 1)[0]
+            threat = str(self._dig(item, threat_path) or "").strip() if threat_path else ""
+            iocs.append({
+                "ioc_type": ioc_type,
+                "ioc_value": value,
+                "threat_type": threat or fixed_threat,
+                "severity": severity,
+                "source": source,
+            })
+        return iocs
+
+    async def _post_json_text(self, url: str, body: dict, headers: dict | None = None) -> str:
+        """POST JSON 拉取（ThreatFox / MalwareBazaar 类 API）。
+
+        与 _fetch_text 同一套出网安全语义：首跳+重定向逐跳过
+        net_guard、跨 host 剥凭证、流式读取限 _MAX_FEED_BYTES。
+        30x 目标降级为 GET（HTTP 语义），不复带请求体。
+        """
+        import httpx
+
+        from net_guard import UrlRejected, validate_submittable_url
+
+        try:
+            current = validate_submittable_url(url)
+        except UrlRejected as e:
+            raise ValueError(f"feed url rejected: {e}") from e
+
+        base_headers = {"User-Agent": "SOC-Platform/1.0 (threat-intel feed poller)"}
+        base_headers.update({str(k): str(v) for k, v in (headers or {}).items()})
+
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            for _hop in range(5):
+                resp = await client.post(current, json=dict(body or {}), headers=dict(base_headers))
+                if resp.is_redirect:
+                    loc = resp.headers.get("location", "")
+                    if not loc:
+                        break
+                    next_url = str(httpx.URL(current).join(loc))
+                    try:
+                        validate_submittable_url(next_url)
+                    except UrlRejected as e:
+                        raise ValueError(f"redirect target rejected: {e}") from e
+                    current = next_url
+                    # 重定向目标走 GET（不复带请求体），语义与 _fetch_text 对齐
+                    return await self._fetch_text(current)
+                resp.raise_for_status()
+                buf = bytearray()
+                async for chunk in resp.aiter_bytes(64 * 1024):
+                    buf.extend(chunk)
+                    if len(buf) > _MAX_FEED_BYTES:
+                        logger.warning(
+                            "json_api 响应超限(> %d bytes, url=%s), 提前中止",
+                            _MAX_FEED_BYTES, url[:100],
+                        )
+                        break
+                return bytes(buf).decode("utf-8", errors="replace")
+        raise ValueError(f"json_api 重定向跳数超限(>5): {url[:100]}")
+
+    # MISP 属性类型 → 平台 IOC 类型(botvrij OSINT feed 实测普查)
+    _MISP_TYPE_MAP = {
+        "ip-src": "ip", "ip-dst": "ip", "ip-src|port": "ip", "ip-dst|port": "ip",
+        "domain": "domain", "hostname": "domain", "domain|ip": "domain",
+        "url": "url",
+        "md5": "file_hash", "sha1": "file_hash", "sha256": "file_hash",
+        "filename|md5": "file_hash", "filename|sha1": "file_hash",
+        "filename|sha256": "file_hash",
+        "ja3": "ja3",
+    }
+
+    async def _import_misp_feed(self, config: dict) -> list[dict]:
+        """MISP feed 静态目录导入（D 第二批实拉通道，2026-10-30）。
+
+        botvrij.eu OSINT feed 等以 **MISP feed 标准格式**（manifest.json +
+        事件UUID.json）静态发布, 无需 MISP 服务器/API key —— 这是与
+        feed_type=misp(REST API, 需 key)互补的免凭据真拉取通道。
+        config: {"url": ".../feed-osint/", "config": {"max_events": 20}}
+        """
+        url = str(config.get("url", "")).strip().rstrip("/")
+        cfg = config.get("config") or {}
+        max_events = max(1, int(cfg.get("max_events", 20)))
+        source = str(config.get("name", "misp_feed"))
+
+        from net_guard import UrlRejected, validate_submittable_url
+        try:
+            validate_submittable_url(url)
+        except UrlRejected as e:
+            logger.warning("misp_feed 源 url 非法: %s (%s)", url[:100], e)
+            return []
+
+        try:
+            manifest_raw = await self._fetch_text(f"{url}/manifest.json",
+                                                  api_key=str(config.get("api_key", "")))
+            manifest = json.loads(manifest_raw)
+        except Exception as e:
+            logger.warning("misp_feed manifest 拉取失败 url=%s: %s", url[:80], e)
+            return []
+        if not isinstance(manifest, dict) or not manifest:
+            return []
+
+        # manifest: uuid -> {timestamp, ...}; 取最新 max_events 个事件
+        def _ts(entry):
+            try:
+                return int(entry.get("timestamp") or 0)
+            except (TypeError, ValueError):
+                return 0
+        ordered = sorted(manifest.items(), key=lambda kv: _ts(kv[1]), reverse=True)
+
+        iocs: list[dict] = []
+        for uuid_, _meta in ordered[:max_events]:
+            try:
+                ev_raw = await self._fetch_text(f"{url}/{uuid_}.json",
+                                                api_key=str(config.get("api_key", "")))
+                ev = json.loads(ev_raw)
+            except Exception as e:
+                logger.debug("misp_feed event %s skipped: %s", uuid_, e)
+                continue
+            attrs = ((ev.get("Event") or {}).get("Attribute")) or []
+            for a in attrs:
+                ioc_type = self._MISP_TYPE_MAP.get(str(a.get("type") or ""))
+                value = str(a.get("value") or "").strip()
+                if not ioc_type or not value:
+                    continue
+                # 复合值取 IOC 部分(domain|ip → domain; ip|port 剥端口由归一化处理)
+                if "|" in value and ioc_type in ("domain",):
+                    value = value.split("|")[0]
+                tags = []
+                gal = (ev.get("Event") or {}).get("Galaxy") or []
+                try:
+                    tags.append(str((ev.get("Event") or {}).get("threat_actor_id") or ""))
+                except Exception:
+                    pass
+                iocs.append({
+                    "ioc_type": ioc_type,
+                    "ioc_value": value,
+                    "threat_type": str(a.get("category") or ""),
+                    "severity": "medium",
+                    "source": source,
+                    "stix_id": uuid_,
+                    "tags": [t for t in tags if t],
+                })
+        logger.info("misp_feed %s: %d events → %d IOCs", source, min(len(ordered), max_events), len(iocs))
+        return iocs
+
+    async def _import_json_api(self, config: dict) -> list[dict]:
+        """通用 JSON API 情报源导入（REMEDIATION-PLAN 路线 D：免费源最大化）。"""
+        url = str(config.get("url", "")).strip()
+        from net_guard import UrlRejected, validate_submittable_url
+        try:
+            validate_submittable_url(url)
+        except UrlRejected as e:
+            logger.warning("json_api 源 url 非法: %s (%s)", url[:100], e)
+            return []
+        cfg = config.get("config") or {}
+        try:
+            if str(cfg.get("method", "GET")).upper() == "POST":
+                text = await self._post_json_text(
+                    url, dict(cfg.get("body") or {}),
+                    headers=dict(cfg.get("headers") or {}),
+                )
+            else:
+                # GET + 源特定 header（OTX 的 X-OTX-API-KEY 等，D 第二批）
+                text = await self._fetch_text(
+                    url, api_key=str(config.get("api_key", "")),
+                    extra_headers=dict(cfg.get("headers") or {}),
+                )
+        except Exception as e:
+            logger.warning("json_api 拉取失败 url=%s: %s", url[:100], e)
+            return []
+        return self._parse_json_api(text, config)
 
     async def _import_kev_json(self, config: dict) -> list[dict]:
         """CISA KEV(已知被利用漏洞目录)JSON 拉取与解析。
@@ -333,8 +692,12 @@ class TaxiiClient:
                                   "cwes": ["CWE-502", ...], ...}]}
         """
         url = str(config.get("url", "")).strip()
-        if not url.lower().startswith(("http://", "https://")):
-            logger.warning("kev_json 源 url 非法: %s", url[:100])
+        # R14: 完整 SSRF 校验(与 csv_http 同规)
+        from net_guard import UrlRejected, validate_submittable_url
+        try:
+            validate_submittable_url(url)
+        except UrlRejected as e:
+            logger.warning("kev_json 源 url 非法: %s (%s)", url[:100], e)
             return []
         try:
             text = await self._fetch_text(url, api_key=str(config.get("api_key", "")))
@@ -382,15 +745,30 @@ class TaxiiClient:
         return iocs
 
     async def _import_stix_bundle(self, config: dict) -> list[dict]:
-        """STIX Bundle JSON 文件导入"""
+        """STIX Bundle JSON 文件导入 — 本地路径受 intel_local_feed_dir 白名单约束(R14)"""
         from pathlib import Path
 
-        file_path = config.get("url", "")
-        if not file_path or not Path(file_path).exists():
+        from config import settings
+
+        file_path = str(config.get("url", "")).strip()
+        allow_dir = str(getattr(settings, "intel_local_feed_dir", "") or "").strip()
+        if not allow_dir:
+            logger.warning("本地 stix_bundle 导入被拒: 未配置 intel_local_feed_dir 白名单目录")
+            return []
+        try:
+            p = Path(file_path).resolve()
+            root = Path(allow_dir).resolve()
+            if not str(p).startswith(str(root) + os.sep) and p != root:
+                logger.warning("本地 stix_bundle 导入被拒: %s 不在白名单目录内", file_path[:120])
+                return []
+        except (OSError, ValueError) as e:
+            logger.warning("stix_bundle 路径解析失败: %s (%s)", file_path[:120], e)
+            return []
+        if not p.is_file():
             return []
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(p, "r", encoding="utf-8") as f:
                 bundle = json.load(f)
 
             iocs = []

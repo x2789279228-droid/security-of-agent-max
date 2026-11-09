@@ -67,7 +67,10 @@ class AuditPipelineWorkflow:
             rd = await workflow.execute_activity(
                 "audit_round",
                 args=[round_input],
-                start_to_close_timeout=timedelta(seconds=60),
+                # 2026-10-29: MiniMax-M3 为推理模型,单轮(分解+执行+复核)可达数分钟,
+                # 60s 会把每个 attempt 都掐死在半路(实测 60s×2 retry = 整轮失败)。
+                # 放宽到 10 分钟,预算闸门仍由 BudgetExhaustedError 不可重试兜底。
+                start_to_close_timeout=timedelta(seconds=600),
                 retry_policy=retry_round,
             )
             all_rounds.append(rd)

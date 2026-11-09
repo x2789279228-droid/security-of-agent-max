@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from config import settings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -298,7 +299,7 @@ async def observability_trace_list(
         start = int((now - timedelta(hours=24)).timestamp())
         async with httpx.AsyncClient(timeout=5) as client:
             r = await client.get(
-                "http://tempo:3200/api/search",
+                f"{settings.tempo_url}/api/search",
                 params={"start": start, "end": end, "limit": limit},
             )
             if r.status_code == 200:
@@ -352,7 +353,7 @@ async def observability_trace_detail(
     tempo_spans: list[dict] = []
     try:
         async with httpx.AsyncClient(timeout=8) as client:
-            r = await client.get(f"http://tempo:3200/api/traces/{trace_id}")
+            r = await client.get(f"{settings.tempo_url}/api/traces/{trace_id}")
             if r.status_code == 200:
                 for b in r.json().get("batches", []):
                     svc = "?"

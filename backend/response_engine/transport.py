@@ -110,7 +110,9 @@ class SSHTransport:
         if getattr(self, "_retry_task", None) is not None and not self._retry_task.done():
             return
         try:
-            loop = asyncio.get_event_loop()
+            # 事件循环治理: 只认运行中的循环(隐式 get_event_loop 是测试
+            # 字母序地雷的污染源, 3.14 起无条件报错)
+            loop = asyncio.get_running_loop()
         except RuntimeError:
             return  # 没 event loop, 跳过
         async def _retry():

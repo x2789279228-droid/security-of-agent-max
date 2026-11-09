@@ -36,6 +36,9 @@ class StorageBackend(ABC):
     async def lpop(self, key: str) -> str | None: ...
     @abstractmethod
     async def llen(self, key: str) -> int: ...
+
+    async def expire(self, key: str, ttl_seconds: int) -> None:
+        """R20: 窗口键 TTL — 默认 no-op(deque 内存后端无需)。"""
     @abstractmethod
     async def lrange(self, key: str, start: int, stop: int) -> list[str]: ...
     @abstractmethod
@@ -55,7 +58,16 @@ class RedisBackend(StorageBackend):
     async def connect(self):
         import redis.asyncio as aioredis
         # from_url 是同步工厂函数, 返回 Redis 客户端 (不可 await)
-        self.redis = aioredis.from_url(self.url, decode_responses=True)
+        # redis-py 8 起默认 socket_timeout=5s —— 本客户端被 event_bus/event_store
+        # 的 pubsub.listen() 长期共享监听, 空闲 5s 就会抛 TimeoutError
+        # (redis-py#2807); 显式 None 恢复 v8 之前的"无套接字超时"语义。
+        self.redis = aioredis.from_url(
+            self.url, decode_responses=True, socket_timeout=None,
+            # W31 P1(2026-10-30): 默认池 100 在消费突发下击穿
+            # (MaxConnectionsError → enriched 消费停摆, WAVE3-1 实测)。
+            # 显式扩容, 上限走 settings(部署可调)。
+            max_connections=int(getattr(settings, "redis_pool_max_connections", 500)),
+        )
         await self.redis.ping()
         logger.info("RedisBackend connected")
 
@@ -73,6 +85,9 @@ class RedisBackend(StorageBackend):
 
     async def llen(self, key):
         return await self.redis.llen(key)
+
+    async def expire(self, key, ttl_seconds):
+        await self.redis.expire(key, ttl_seconds)
 
     async def lrange(self, key, start, stop):
         return await self.redis.lrange(key, start, stop)
@@ -201,6 +216,9 @@ class SlidingWindow:
             "timestamp": now.isoformat(),
         }
         await self.backend.rpush(key, json.dumps(msg, ensure_ascii=False))
+        # R20(复审 P2): 每历史 session 的窗口键此前永不过期 — Redis 内存随
+        # session 数单调增长。TTL = 4 倍窗口(活跃会话持续续期, 静默会话到期回收)。
+        await self.backend.expire(key, self.window_minutes * 60 * 4)
 
         # 1. Time-based eviction
         await self._evict_by_time(session_id, key)
@@ -252,7 +270,8 @@ class SlidingWindow:
             msg["_evicted"] = True
             msg["_evicted_at"] = datetime.now(timezone.utc).isoformat()
             await self.backend.rpush(key, json.dumps(msg, ensure_ascii=False))
-        # 保留最多 10000 条被淘汰记录
+        # 保留最多 10000 条被淘汰记录; 键本身挂 24h TTL(R20: 此前永久滞留)
+        await self.backend.expire(key, 24 * 3600)
         length = await self.backend.llen(key)
         if length > 10000:
             for _ in range(length - 10000):

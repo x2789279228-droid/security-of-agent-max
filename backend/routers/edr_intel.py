@@ -200,8 +200,9 @@ async def intel_create_feed(
     except Exception:
         raise HTTPException(400, "请求体必须是 JSON")
     feed_type = str(body.get("feed_type") or "").strip().lower()
-    if feed_type not in ("taxii", "misp", "csv", "csv_http", "stix_bundle"):
-        raise HTTPException(400, "feed_type 必须是 taxii|misp|csv|csv_http|stix_bundle")
+    from threat_intel.stix_taxii import ALLOWED_FEED_TYPES
+    if feed_type not in ALLOWED_FEED_TYPES:
+        raise HTTPException(400, f"feed_type 必须是 {'|'.join(ALLOWED_FEED_TYPES)}")
     from models import ThreatIntelFeed
 
     feed = ThreatIntelFeed(

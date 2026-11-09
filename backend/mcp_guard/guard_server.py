@@ -324,6 +324,15 @@ class McpGuardServer:
         except Exception as e:
             logger.warning("behavior_signature pre_exec failed: %s", e)
             self._emit_degraded()
+            # R20(复审 P2): 与审计侧(tool_registry)对齐 fail-closed —— 修复前
+            # 检测器故障时 decision 保持 allow 照常 execute, tool_signature_mode=deny
+            # 的强信号在故障窗口形同虚设(Q69 当时只修了 audit 侧一半)。
+            from config import settings as _s
+            if getattr(_s, "tool_signature_mode", "") == "deny" and decision.status == "allow":
+                decision.status = "deny"
+                decision.reason = "behavior_signature detector unavailable (fail-closed: mode=deny)"
+                rec.decision = decision.status
+                rec.reason = decision.reason
         self._attach_signature_check(decision, rec, report)
         self._apply_enforcement(request, decision, rec, report)
 

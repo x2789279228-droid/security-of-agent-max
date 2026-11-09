@@ -119,6 +119,37 @@ class IntelEnricher:
                     event.get("event_type", ""), max_score,
                 )
 
+            # H-①(2026-10-30 REMEDIATION-PLAN 路线 H): IOC 命中后的 LLM 威胁上下文
+            # —— threat_intel/llm_context.py 从休眠接入生产。fail-open + 开关 +
+            # 成本护栏(内部走 llm_enhancer → llm_limiter)。默认关闭。
+            try:
+                from config import settings as _cfg
+                if getattr(_cfg, "intel_llm_context_enabled", False):
+                    from threat_intel.llm_context import (
+                        llm_summarize_threat_context,
+                        should_trigger_llm,
+                    )
+                    _ioc_hits = []
+                    for _k in ("src_ip_ioc", "dst_ip_ioc",
+                               "domain_ioc", "hash_ioc", "cve_ioc"):
+                        _ioc_hits.extend(enrichment.get(_k) or [])
+                    if should_trigger_llm(_ioc_hits):
+                        _ctx = await llm_summarize_threat_context(
+                            event_type=str(event.get("event_type", "")
+                                           or event.get("event", "")),
+                            src_ip=str(src_ip or ""),
+                            dst_ip=str(dst_ip or ""),
+                            ioc_hits=_ioc_hits,
+                            reputation_scores={
+                                "src": enrichment.get("src_ip_reputation", {}),
+                                "dst": enrichment.get("dst_ip_reputation", {}),
+                            },
+                        )
+                        if _ctx:
+                            event["raw_data"]["threat_intel"]["llm_context"] = _ctx
+            except Exception as _e:
+                logger.debug("llm_context wiring skipped: %s", _e)
+
         return event
 
     async def enrich_flow(self, session, flow: dict) -> dict:
@@ -177,9 +208,18 @@ async def enrich_event_if_enabled(event: dict, *, session=None) -> dict:
             pass
         return event
 
+    async def _enrich_isolated():
+        # W1-4: wait_for 超时会 cancel 内层协程 — 若共享调用方 session, cancel
+        # 瞬间该 session 可能正处于 execute 中而被驱动标记失效, 调用方后续
+        # 落库连环失败。富化强制独立短生命周期 session(缓存温时从不真正连接,
+        # 仅缓存过期刷新时用一次), 与调用方数据面结构性解耦。
+        from models import async_session as _as
+        async with _as() as s:
+            return await intel_enricher.enrich_event(s, event)
+
     try:
         enriched = await asyncio.wait_for(
-            intel_enricher.enrich_event(session, event),
+            _enrich_isolated(),
             timeout=max(settings.intel_enrich_timeout_ms, 1) / 1000,
         )
     except asyncio.TimeoutError:

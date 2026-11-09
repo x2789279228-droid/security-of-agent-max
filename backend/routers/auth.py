@@ -122,10 +122,17 @@ async def login(req: LoginRequest, request: Request):
 
     # 2) 注册用户
     try:
-        from user_store import get_by_username, verify_password
+        from user_store import get_by_username, verify_password_async
         async with async_session() as session:
             user = await get_by_username(session, req.username)
-            if user and user.is_active and verify_password(req.password, user.password_hash):
+            if not user or not user.is_active:
+                # W1-6(复审 P3-4): 抹平时序侧信道 — 用户不存在时跳过 bcrypt,
+                # 响应耗时与存在用户可测差异(枚举面)。对固定哑哈希跑一次同 cost
+                # 校验, 两分支耗时一致; 结果丢弃。
+                from user_store import verify_password_async as _vpa
+                import bcrypt as _bc
+                await _vpa(req.password or "", _bc.hashpw(b"timing-equalizer", _bc.gensalt()).decode())
+            if user and user.is_active and await verify_password_async(req.password, user.password_hash):
                 user.last_login_at = datetime.now(timezone.utc)
                 await session.commit()
                 await _clear_bruteforce(request, req.username)

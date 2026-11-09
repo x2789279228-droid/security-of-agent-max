@@ -176,7 +176,13 @@ class ResponseRegistry:
         try:
             result = await fn(**kwargs)
             logger.info(f"Rollback {name}: {str(result)[:100]}")
-            return {"success": True, "result": result}
+            # F2 live 演练 (2026-10-30): 与 execute 的 P0-2 语义对齐 ——
+            # 回滚函数自报 success=False(如 unblock deleted_count=0, 规则仍在)
+            # 不得被包装成成功; 否则 rollback_batch 把"没删掉"计成 succeeded。
+            inner_ok = True
+            if isinstance(result, dict) and result.get("success") is False:
+                inner_ok = False
+            return {"success": inner_ok, "result": result}
         except Exception as e:
             logger.error(f"Rollback {name} failed: {e}")
             return {"success": False, "error": str(e)}
@@ -466,6 +472,14 @@ async def ttl_rollback(rule_id: str, action_name: str, params: dict) -> dict:
     进程重启后仍会被 `ttl_manager` 扫描到并执行。
     """
     from .ssh_firewall import ssh_firewall
+    # F2 live (2026-10-30): 与 _unblock_ip 同源 —— 扫描器可能在任何时刻
+    # 触发(app 启动即有到期条目, 懒连接从未建立), 不自足连接则逐表
+    # "SSH 未连接" → 自动解封 FAILED → 进退避重试(F2 演练 B1 实测形态)。
+    conn_err = await _ensure_firewall_connected()
+    if conn_err:
+        logger.error(f"[ttl-rollback] {rule_id} connect failed: {conn_err}")
+        return {"success": False, "rule_id": rule_id, "action": action_name,
+                "error": f"ssh_firewall 连接失败: {conn_err}"}
     try:
         rb = await asyncio.to_thread(ssh_firewall.rollback, rule_id)
         if rb.get("status") == "success":
@@ -764,6 +778,14 @@ async def _unblock_ip(src_ip: str = "", reason: str = "", **kwargs) -> dict:
                 "src_ip": src_ip, "deleted_count": 0,
                 "message": f"[{exec_mode.upper()}] unblock_ip 模拟"}
     from .ssh_firewall import ssh_firewall
+    # F2 live 演练 (2026-10-30): 解封与封禁同源自足 —— 封禁路径经
+    # _ensure_firewall_connected 配置+连接后再执行; 解封此前不做, 任何
+    # 非 app 进程(重启后的 worker / 运维脚本)里直连回滚都会卡在
+    # 主机密钥 fail-closed, deleted_count=0 且规则残留。
+    conn_err = await _ensure_firewall_connected()
+    if conn_err:
+        return {"action": "unblock_ip", "success": False, "mode": "ssh_firewall_paramiko",
+                "error": f"ssh_firewall 连接失败: {conn_err}", "src_ip": src_ip}
     rule_id_direct = str(kwargs.get("rule_id") or "")
     if not src_ip and rule_id_direct:
         try:
@@ -804,6 +826,13 @@ async def _unblock_ip(src_ip: str = "", reason: str = "", **kwargs) -> dict:
                 rb = await asyncio.to_thread(ssh_firewall.rollback, r.get("rule_id", ""))
                 if rb.get("status") == "success":
                     deleted += int(rb.get("deleted", 1))
+        if not deleted and rule_id_direct:
+            # F2 live 演练 (2026-10-30) 实测形态: 封禁进程退出/重启后, 合并视图
+            # (内存台账 + 本进程 TTL 索引) 可能缺这条记录, 但回滚记录里冗余的
+            # rule_id 直指远端 iptables 注释 —— 直连扫描删除, 不依赖任何进程状态。
+            rb = await asyncio.to_thread(ssh_firewall.rollback, rule_id_direct)
+            if rb.get("status") == "success":
+                deleted = int(rb.get("deleted", 1))
         if deleted:
             # 手动解封后清除幂等完成标记，允许下一次真实再封禁。
             from .safe_executor import safe_executor

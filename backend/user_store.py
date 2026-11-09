@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Optional
@@ -39,14 +40,26 @@ def validate_password(password: str) -> Optional[str]:
 
 
 def hash_password(password: str) -> str:
+    """同步版 — 仅供线程池/CLI 使用; 事件循环内请用 hash_password_async。"""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    """同步版 — 仅供线程池/CLI 使用; 事件循环内请用 verify_password_async。"""
     try:
         return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
     except Exception:
         return False
+
+
+async def hash_password_async(password: str) -> str:
+    # R7(P2): bcrypt cost≈12 单次 ~150-300ms 纯 CPU, 事件循环内直跑会把
+    # 全部在途请求(含 Kafka 消费循环/SSE)一起卡住 — 与全项目 to_thread 纪律对齐。
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password: str, password_hash: str) -> bool:
+    return await asyncio.to_thread(verify_password, password, password_hash)
 
 
 async def get_by_username(session: AsyncSession, username: str) -> Optional[AppUser]:
@@ -63,7 +76,7 @@ async def create_user(
 ) -> AppUser:
     user = AppUser(
         username=username.strip(),
-        password_hash=hash_password(password),
+        password_hash=await hash_password_async(password),
         role=role or "viewer",
         is_active=True,
     )

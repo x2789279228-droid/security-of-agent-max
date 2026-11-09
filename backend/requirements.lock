@@ -6,30 +6,28 @@
 #
 aiohappyeyeballs==2.7.1
     # via aiohttp
-alembic==1.13.2
-    # via -r requirements.txt
-aiohttp==3.14.3
+aiohttp==3.14.5
     # via
     #   -r requirements.txt
     #   geoip2
-aiokafka==0.14.0
+aiokafka==0.15.0
     # via -r requirements.txt
 aiosignal==1.4.0
     # via aiohttp
 aiosqlite==0.22.1
     # via -r requirements.txt
+alembic==1.20.1
+    # via -r requirements.txt
 annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
-anyio==4.14.2
+anyio==4.15.1
     # via
     #   httpx
     #   sse-starlette
     #   starlette
-async-timeout==5.0.1
-    # via aiokafka
-asyncpg==0.31.0
+asyncpg==0.32.0
     # via -r requirements.txt
 attrs==26.1.0
     # via
@@ -38,7 +36,7 @@ attrs==26.1.0
     #   referencing
 bcrypt==5.0.0
     # via paramiko
-certifi==2026.7.22
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
@@ -47,13 +45,15 @@ cffi==2.1.1
     # via
     #   cryptography
     #   pynacl
-charset-normalizer==3.5.1
+charset-normalizer==3.5.2
     # via requests
-click==8.4.2
+click==8.5.0
     # via uvicorn
 colorama==0.4.6
-    # via click
-cryptography==43.0.3
+    # via pytest
+coverage[toml]==7.17.0
+    # via pytest-cov
+cryptography==50.0.2
     # via
     #   -r requirements.txt
     #   paramiko
@@ -63,21 +63,23 @@ diskcache==5.6.3
     # via pysigma
 diskcache-stubs==5.6.3.6.20240818
     # via pysigma
-fastapi==0.141.1
+fastapi==0.162.0
     # via -r requirements.txt
 frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
-geoip2==4.8.1
+geoip2==5.3.0
     # via -r requirements.txt
-googleapis-common-protos==1.75.1
+google-re2==1.1.20251105
+    # via pysigma
+googleapis-common-protos==1.76.0
     # via
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
-greenlet==3.5.5
+greenlet==3.5.6
     # via sqlalchemy
-grpcio==1.83.0
+grpcio==1.85.0
     # via
     #   opentelemetry-exporter-otlp-proto-grpc
     #   qdrant-client
@@ -97,145 +99,165 @@ httpx[http2]==0.28.1
     #   qdrant-client
 hyperframe==6.1.0
     # via h2
-idna==3.19
+idna==3.20
     # via
     #   anyio
     #   httpx
     #   requests
     #   yarl
+iniconfig==2.3.1
+    # via pytest
+invoke==3.0.3
+    # via paramiko
 jinja2==3.1.6
     # via
     #   -r requirements.txt
     #   pysigma
-jq==1.12.0
+jq==1.13.0
     # via pysigma
 jsonschema==4.26.0
     # via -r requirements.txt
 jsonschema-specifications==2025.9.1
     # via jsonschema
-mako==1.3.12
+mako==1.4.3
     # via alembic
-markupsafe==3.0.3
-    # via jinja2
-maxminddb==2.8.2
+markupsafe==3.0.4
+    # via
+    #   jinja2
+    #   mako
+maxminddb==3.2.0
     # via geoip2
-multidict==6.7.1
+multidict==7.2.1
     # via
     #   aiohttp
     #   yarl
-nexus-rpc==1.4.0
-    # via temporalio
 networkx==3.6.1
     # via -r requirements.txt
+nexus-rpc==1.4.0
+    # via temporalio
 numpy==2.4.6
     # via
     #   -r requirements.txt
     #   qdrant-client
     #   scipy
-opentelemetry-api==1.44.0
+opentelemetry-api==1.45.1
     # via
     #   -r requirements.txt
+    #   fastapi
+    #   opentelemetry-exporter-http-transport
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-httpx
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-exporter-otlp==1.44.0
+opentelemetry-exporter-http-transport[requests]==0.66b1
+    # via opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp==1.45.1
     # via -r requirements.txt
-opentelemetry-exporter-otlp-proto-common==1.44.0
+opentelemetry-exporter-otlp-common==0.66b1
     # via
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
-opentelemetry-exporter-otlp-proto-grpc==1.44.0
+opentelemetry-exporter-otlp-proto-common==1.45.1
+    # via
+    #   opentelemetry-exporter-otlp-proto-grpc
+    #   opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-grpc==1.45.1
     # via opentelemetry-exporter-otlp
-opentelemetry-exporter-otlp-proto-http==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.45.1
     # via opentelemetry-exporter-otlp
-opentelemetry-instrumentation==0.65b0
+opentelemetry-instrumentation==0.66b1
     # via opentelemetry-instrumentation-httpx
-opentelemetry-instrumentation-httpx==0.65b0
+opentelemetry-instrumentation-httpx==0.66b1
     # via -r requirements.txt
-opentelemetry-proto==1.44.0
+opentelemetry-proto==1.45.1
     # via
     #   opentelemetry-exporter-otlp-proto-common
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
-opentelemetry-sdk==1.44.0
+opentelemetry-sdk==1.45.1
     # via
     #   -r requirements.txt
+    #   opentelemetry-exporter-otlp-common
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
-opentelemetry-semantic-conventions==0.65b0
+opentelemetry-semantic-conventions==0.66b1
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-httpx
     #   opentelemetry-sdk
-opentelemetry-util-http==0.65b0
+opentelemetry-util-http==0.66b1
     # via opentelemetry-instrumentation-httpx
 packaging==26.3
     # via
-    #   aiokafka
     #   opentelemetry-instrumentation
     #   pysigma
-paramiko==3.5.1
+    #   pytest
+paramiko==5.1.0
     # via -r requirements.txt
-pgvector==0.5.0
+pgvector==0.5.1
     # via -r requirements.txt
-portalocker==3.2.0
+pluggy==1.7.0
+    # via
+    #   pytest
+    #   pytest-cov
+portalocker==4.4.2
     # via qdrant-client
 prometheus-client==0.26.0
     # via -r requirements.txt
-propcache==0.5.2
+propcache==0.5.4
     # via
     #   aiohttp
     #   yarl
-protobuf==7.36.0
+protobuf==7.36.2
     # via
     #   googleapis-common-protos
     #   opentelemetry-proto
     #   qdrant-client
     #   temporalio
-pycparser==3.0
+pycparser==3.12
     # via cffi
-pydantic==2.13.4
+pydantic==2.14.2
     # via
     #   -r requirements.txt
     #   fastapi
     #   pydantic-settings
     #   qdrant-client
-pydantic-core==2.46.4
+pydantic-core==2.50.2
     # via pydantic
-pydantic-settings==2.15.0
+pydantic-settings==2.16.2
     # via -r requirements.txt
-pyjwt==2.13.0
-    # via
-    #   -r requirements.txt
-    #   redis
-pytest==8.4.2
-    # via -r requirements.txt
-pytest-asyncio==1.4.0
-    # via -r requirements.txt
-pytest-cov==7.1.0
+pygments==2.21.0
+    # via pytest
+pyjwt==2.15.1
     # via -r requirements.txt
 pynacl==1.6.2
     # via paramiko
-pyparsing==3.3.2
+pyparsing==3.3.3
     # via pysigma
-pysigma==1.5.0
+pysigma==2.0.1
     # via
     #   -r requirements.txt
     #   pysigma-backend-sqlite
-pysigma-backend-sqlite==1.2.4
+pysigma-backend-sqlite==2.1.1
     # via -r requirements.txt
-python-dotenv==1.2.3
+pytest==9.2.0
+    # via
+    #   -r requirements.txt
+    #   pytest-asyncio
+    #   pytest-cov
+pytest-asyncio==1.4.1
+    # via -r requirements.txt
+pytest-cov==7.1.0
+    # via -r requirements.txt
+python-dotenv==1.2.4
     # via pydantic-settings
-pywin32==312; sys_platform == 'win32'
-    # via portalocker  (仅 Windows; portalocker 依赖 marker platform_system=="Windows", Linux 跳过)
 pyyaml==6.0.3
     # via pysigma
-qdrant-client==1.19.0
+qdrant-client==1.20.0
     # via -r requirements.txt
-redis==5.3.1
+redis==8.1.0
     # via -r requirements.txt
 referencing==0.37.0
     # via
@@ -244,33 +266,39 @@ referencing==0.37.0
 requests==2.34.2
     # via
     #   geoip2
+    #   opentelemetry-exporter-http-transport
     #   opentelemetry-exporter-otlp-proto-http
     #   pysigma
-rpds-py==2026.6.3
+rpds-py==2026.9.1
     # via
     #   jsonschema
     #   referencing
-scapy==2.7.0
+scapy==2.8.0
     # via -r requirements.txt
 scipy==1.17.1
     # via -r requirements.txt
-sqlalchemy==2.0.52
+sqlalchemy[asyncio]==2.1.6
+    # via
+    #   -r requirements.txt
+    #   alembic
+sse-starlette==3.6.0
     # via -r requirements.txt
-sse-starlette==2.4.1
+starlette==1.10.0
+    # via
+    #   fastapi
+    #   sse-starlette
+temporalio==1.35.0
     # via -r requirements.txt
-starlette==1.6.0
-    # via fastapi
-temporalio==1.32.0
-    # via -r requirements.txt
-types-protobuf==7.35.1.20260825
+types-protobuf==7.35.1.20260906
     # via temporalio
-types-pyyaml==6.0.12.20260815
+types-pyyaml==6.0.12.20260906
     # via pysigma
 typing-extensions==4.16.0
     # via
     #   aiohttp
     #   aiokafka
     #   aiosignal
+    #   alembic
     #   anyio
     #   diskcache-stubs
     #   fastapi
@@ -283,7 +311,8 @@ typing-extensions==4.16.0
     #   opentelemetry-semantic-conventions
     #   pydantic
     #   pydantic-core
-    #   pysigma
+    #   pydantic-settings
+    #   pytest-asyncio
     #   referencing
     #   sqlalchemy
     #   starlette
@@ -294,15 +323,15 @@ typing-inspection==0.4.4
     #   fastapi
     #   pydantic
     #   pydantic-settings
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   qdrant-client
     #   requests
-uvicorn==0.52.4
+uvicorn==0.54.0
     # via -r requirements.txt
-wrapt==2.3.0
+wrapt==2.5.1
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-httpx
-yarl==1.24.5
+yarl==1.25.1
     # via aiohttp

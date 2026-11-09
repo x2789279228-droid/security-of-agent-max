@@ -167,6 +167,34 @@ def score_event(
     elif anomaly_score >= 0.3:
         priority += 8
 
+    # ── H-④(2026-10-30 REMEDIATION-PLAN 路线 H): 沙箱行为面进分诊 ──
+    # zeroday_detect/behavior_analyzer 从休眠接入生产：事件携带沙箱报告
+    # (log_data["_sandbox"], 沙箱提交回执/回放载荷) 时, 行为分析器给出
+    # 恶意性判定并参与 priority 升级。fail-open; 开关默认开;
+    # LLM 深度解读(zeroday_detect/llm_behavior)在审计管线异步侧, 不在此。
+    _sandbox = log_data.get("_sandbox")
+    if isinstance(_sandbox, dict) and _sandbox:
+        try:
+            from config import settings as _cfg
+            if getattr(_cfg, "zeroday_lane_enabled", True):
+                from zeroday_detect.behavior_analyzer import BehaviorAnalyzer
+                _bd = BehaviorAnalyzer().analyze(_sandbox).to_dict()
+                log_data["_sandbox"]["analysis"] = _bd
+                if _bd.get("verdict") == "malicious":
+                    priority += 30
+                    reasons.append(
+                        "sandbox:malicious:score=%.2f" % float(_bd.get("score") or 0))
+                elif _bd.get("verdict") == "suspicious":
+                    priority += 15
+                    reasons.append("sandbox:suspicious")
+                _techs = _bd.get("mitre_techniques") or []
+                if _techs:
+                    priority += min(10, 5 * len(_techs))
+                    reasons.append(
+                        "sandbox:mitre:" + ",".join(str(t) for t in _techs[:3]))
+        except Exception:
+            pass
+
     if signals.has_signal:
         priority += 15
         reasons.append("non_llm_signal")

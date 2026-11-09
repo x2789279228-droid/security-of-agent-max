@@ -1,5 +1,8 @@
 """优雅停机顺序。
 
+0. 停采集入口(NDR/EDR/IDS 五引擎)，并 flush 存储(PCAP 轮转落库 / 在途 flow 落库)
+   —— 必须先于数据库 dispose，否则尾部包丢、pcap_files 缺最后一条记录、
+   在途流丢弃(2026-10-29 复审 P1-9 修复)。
 1. draining：不再接受新任务。
 2. Kafka 停止拉取。已经进处理函数的这批允许收尾，不确认未完成的位点。
 3. 审计 worker 等待在途任务，超时后把内存里剩下的任务写入 Kafka 或 spill 日志。
@@ -18,9 +21,38 @@ from drain import drain
 logger = logging.getLogger(__name__)
 
 
+async def _stop_capture_engines() -> None:
+    """停 5 个采集/接入引擎并刷存储。各自独立 try/except: 一个失败不停别的。"""
+    # 1) 先停"入口"(不再产生新事件): capture → suricata → edr
+    for name, mod, attr in (
+        ("capture_engine", "traffic_capture.capture_engine", "capture_engine"),
+        ("suricata_connector", "ids_connector.suricata_connector", "suricata_connector"),
+        ("edr_adapter", "edr_fusion.edr_adapter", "edr_adapter"),
+    ):
+        try:
+            module = __import__(mod, fromlist=[attr])
+            engine = getattr(module, attr)
+            await engine.stop()
+        except Exception as exc:
+            logger.error("Shutdown: %s stop failed: %s", name, exc)
+    # 2) 再刷存储(pcap 轮转关闭当前文件+落元数据; flow 落在途流) — 需 DB 仍可用
+    for name, mod, attr in (
+        ("pcap_store", "traffic_capture.pcap_store", "pcap_store"),
+        ("flow_aggregator", "traffic_capture.flow_aggregator", "flow_aggregator"),
+    ):
+        try:
+            module = __import__(mod, fromlist=[attr])
+            engine = getattr(module, attr)
+            await engine.stop()
+        except Exception as exc:
+            logger.error("Shutdown: %s flush failed: %s", name, exc)
+
+
 async def shutdown_platform() -> None:
     drain.begin()
     logger.info("Shutdown: draining, new work is rejected")
+
+    await _stop_capture_engines()
 
     from kafka_consumer import kafka_consumer_manager
     from kafka_producer import kafka_producer

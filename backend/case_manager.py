@@ -44,6 +44,10 @@ VALID_TRANSITIONS = {
 AGGREGATION_WINDOW_MINUTES = 30
 # 同 threat_type + dst_ip 的吸收窗口（防止跨日旧案吞噬新攻击）
 TYPE_TARGET_WINDOW_HOURS = 6
+# R16(P1-10): 单案例关联事件数上限 + 同 session 聚合窗口(超窗新开案例,
+# 防长生命周期 session 把无限事件吸进同一案例)
+_MAX_EVENTS_PER_CASE = 500
+SESSION_CASE_WINDOW_MINUTES = 30
 
 # 杀伤链阶段：用于升级案例标题 / threat_type（数值越大越靠后）
 KILLCHAIN_RANK = {
@@ -279,17 +283,18 @@ class CaseManager:
         session.add(case)
         await session.flush()
 
-        # 关联事件
+        # 关联事件 — R16(P1-10): 批量 in_() 查询(修复逐 id session.get 的 N+1)
         if event_ids:
-            for eid in event_ids:
-                evt = await session.get(SecurityEvent, eid)
-                if evt:
-                    evt.case_id = case.id
-                    evt.status = "acknowledged"
-                    if evt.src_ip and evt.src_ip not in (case.src_ips or []):
-                        case.src_ips = [*(case.src_ips or []), evt.src_ip]
-                    if evt.dst_ip and evt.dst_ip not in (case.dst_ips or []):
-                        case.dst_ips = [*(case.dst_ips or []), evt.dst_ip]
+            result = await session.execute(
+                select(SecurityEvent).where(SecurityEvent.id.in_(event_ids))
+            )
+            for evt in result.scalars().all():
+                evt.case_id = case.id
+                evt.status = "acknowledged"
+                if evt.src_ip and evt.src_ip not in (case.src_ips or []):
+                    case.src_ips = [*(case.src_ips or []), evt.src_ip]
+                if evt.dst_ip and evt.dst_ip not in (case.dst_ips or []):
+                    case.dst_ips = [*(case.dst_ips or []), evt.dst_ip]
 
         await session.commit()
         logger.info(f"[Case] Created: {case.case_number} '{title}' (events={len(event_ids or [])})")
@@ -318,11 +323,14 @@ class CaseManager:
         if new_status == "closed":
             case.closed_at = datetime.now(timezone.utc)
         if new_status == "false_positive":
-            # 同步更新关联事件状态
-            for eid in (case.event_ids or []):
-                evt = await session.get(SecurityEvent, eid)
-                if evt:
-                    evt.status = "false_positive"
+            # 同步更新关联事件状态 — R16: 批量 UPDATE(修复逐 id get 的 N+1)
+            if case.event_ids:
+                from sqlalchemy import update
+                await session.execute(
+                    update(SecurityEvent)
+                    .where(SecurityEvent.id.in_(case.event_ids))
+                    .values(status="false_positive")
+                )
 
         await session.commit()
 
@@ -629,7 +637,20 @@ class CaseManager:
             if case and case.status in (
                 "open", "investigating", "responding", "pending_approval"
             ):
-                return case
+                # R16(P1-10): 同 session 聚合加时间窗 — 修复前只看活跃状态,
+                # 长生命周期 session(如扫描器长跑)会把无限事件吸进同一案例。
+                # 超窗(SESSION_CASE_WINDOW_MINUTES 无更新)视为新攻击轮次, 新开案例。
+                case_updated = case.updated_at or case.created_at
+                if case_updated is None:
+                    return case
+                if case_updated.tzinfo is None:
+                    # SQLite/部分驱动返回 naive — 视为 UTC(与全项目口径一致)
+                    case_updated = case_updated.replace(tzinfo=timezone.utc)
+                window_start = datetime.now(timezone.utc) - timedelta(
+                    minutes=SESSION_CASE_WINDOW_MINUTES
+                )
+                if case_updated >= window_start:
+                    return case
         return None
 
     async def _find_active_case_by_ip(
@@ -808,11 +829,23 @@ class CaseManager:
     async def _add_event_to_case(
         self, session: AsyncSession, case: SecurityCase, event: SecurityEvent
     ):
+        # R16(P1-10): 单案例事件数封顶 — 修复前无上限 append, 扫描型攻击源
+        # 30 分钟可并入数千事件, MutableListJSON 列每次 append 整列重写
+        # (O(n) 写放大 + 单行数十 KB)。超限后停止记录 id(事件仍落库/入档),
+        # 并打 metadata 标记供前端展示"已截断"。
         event_ids = list(case.event_ids or [])
         if event.id not in event_ids:
-            event_ids.append(event.id)
-            case.event_ids = event_ids
-            case.event_count = len(event_ids)
+            if len(event_ids) < _MAX_EVENTS_PER_CASE:
+                event_ids.append(event.id)
+                case.event_ids = event_ids
+            elif not (case.metadata_ or {}).get("events_capped"):
+                case.metadata_ = {**(case.metadata_ or {}), "events_capped": True}
+                logger.warning(
+                    "[Case] %s 事件数达上限 %d — 后续事件不再计入 event_ids "
+                    "(事件仍落库/入档, 仅截断关联清单)",
+                    case.case_number, _MAX_EVENTS_PER_CASE,
+                )
+            case.event_count = (case.event_count or 0) + 1
 
         if event.src_ip and event.src_ip not in (case.src_ips or []):
             case.src_ips = [*(case.src_ips or []), event.src_ip]

@@ -249,6 +249,42 @@ async def run_cycle(
         partial_errors.append(f"sequences:{e}")
         sequences = {}
 
+    # ── 4.5 恶意样本变体聚类（H-⑤, 2026-10-30 REMEDIATION-PLAN 路线 H）──
+    # zeroday_detect/variant_cluster 的聚类能力从休眠接入学习闭环收割面：
+    # 窗口内 malware 事件的哈希/沙箱分析喂 VariantCluster, 家族聚类进
+    # harvest 统计(供 propose 与自博弈导出联动)。本地计算, fail-open。
+    try:
+        from config import settings as _vcfg
+        if getattr(_vcfg, "learn_variant_cluster_enabled", True):
+            from sqlalchemy import select as _select
+            from models import SecurityEvent
+            from zeroday_detect.variant_cluster import VariantCluster
+            _vc = VariantCluster()
+            _rows = (await session.execute(
+                _select(SecurityEvent)
+                .where(SecurityEvent.created_at >= ws,
+                       SecurityEvent.created_at < we,
+                       SecurityEvent.threat_type == "malware")
+                .order_by(SecurityEvent.id.desc())
+                .limit(2000)
+            )).scalars().all()
+            for _r in _rows:
+                _rd = _r.raw_data if isinstance(_r.raw_data, dict) else {}
+                _analysis = (_rd.get("_sandbox") or {}).get("analysis") or _rd
+                _h = str(getattr(_r, "image_hash", "")
+                         or getattr(_r, "file_hash", "")
+                         or (_rd.get("image_hash") or ""))
+                if not _h and not _analysis:
+                    continue
+                _vc.add_sample(_analysis if isinstance(_analysis, dict) else {},
+                               sample_hash=_h)
+            _vstats = _vc.stats()
+            if _vstats.get("clusters"):
+                harvest_data = {**harvest_data,
+                                "variant_clusters": _vstats}
+    except Exception as e:
+        partial_errors.append(f"variant_clusters:{e}")
+
     actions_proposed = 0
     actions_auto_applied = 0
     actions_failed = 0

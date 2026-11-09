@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -156,7 +157,10 @@ async def _seed_ioc(session: AsyncSession) -> int:
 
 
 def _sandbox(task_id: str, name: str, typ: str, verdict: str, score: float, status: str, mitre: list, hours: int) -> SandboxTask:
-    return SandboxTask(task_id=task_id, sample_hash=f"demo{abs(hash(name)) % 10**12:012d}",
+    # R12(P3): Python hash() 进程级加盐 — 重启后值变化, 与"确定性演示"矛盾;
+    # md5(name) 跨重启稳定。
+    sample_hash = "demo" + hashlib.md5(name.encode("utf-8")).hexdigest()[:12]
+    return SandboxTask(task_id=task_id, sample_hash=sample_hash,
                        sample_name=name, sample_type=typ, source=MARKER, sandbox_type="cape",
                        status=status, verdict=verdict, score=score,
                        behavior_summary="演示种子:行为摘要由种子端点生成,非真实沙箱报告",
@@ -306,18 +310,56 @@ async def _seed_ops(session: AsyncSession) -> int:
     return seeded_cases
 
 
+_KPI_DEMO_TAG = "demo_seed"
+
+
 async def _seed_kpi(session: AsyncSession) -> int:
+    """KPI 快照隔离(R12, 复审 P1-7)。
+
+    修复前: 对过去 14 天无条件 upsert —— 真实库的 MTTR/MTTD/fp_rate 日快照
+    被"真实+演示混合数据"重算覆盖, 且 clear 无法回滚(无标记、无清理路径)。
+
+    现在的语义:
+      - 只对**当前没有任何快照行**的日期做快照(已存在行 = 真实数据, 绝不覆盖);
+      - demo 产出的行打 dimensions["demo_seed"]=True 持久标记;
+      - clear 按标记删除 —— 污染可完全回滚。
+    """
     from ops_metrics.kpi_calculator import kpi_calculator
+    from models import KpiSnapshot
     from datetime import date as date_cls
+    from sqlalchemy import func
     seeded = 0
     for i in range(14, 0, -1):
         d = (_now() - timedelta(days=i)).date()
+        existing = (await session.execute(
+            select(func.count()).select_from(KpiSnapshot)
+            .where(KpiSnapshot.snapshot_date == d)
+        )).scalar() or 0
+        if existing > 0:
+            continue  # 该日期已有快照(真实数据) — 不触碰
         try:
             await kpi_calculator.snapshot_daily(session, snapshot_date=d)
-            seeded += 1
         except Exception as e:  # 快照依赖真实事件统计,空库日期允许失败
             logger.debug("[demo-seed] kpi snapshot %s skipped: %s", d, e)
+            continue
+        # 给本次产生的行打 demo 标记(该日期此前无行, 本次行全部为 demo 产出)
+        rows = (await session.execute(
+            select(KpiSnapshot).where(KpiSnapshot.snapshot_date == d)
+        )).scalars().all()
+        for r in rows:
+            r.dimensions = {**(r.dimensions or {}), _KPI_DEMO_TAG: True}
+        seeded += 1
     return seeded
+
+
+async def _clear_kpi(session: AsyncSession) -> int:
+    """删除带 demo 标记的 KPI 快照行(R12 配套) — 方言安全: 取回后 Python 过滤。"""
+    from models import KpiSnapshot
+    rows = (await session.execute(select(KpiSnapshot))).scalars().all()
+    doomed = [r for r in rows if (r.dimensions or {}).get(_KPI_DEMO_TAG)]
+    for r in doomed:
+        await session.delete(r)
+    return len(doomed)
 
 
 SCENES = {
@@ -400,6 +442,10 @@ async def demo_seed_clear(
     ]:
         r = await session.execute(delete(model).where(filter_fn()))
         deleted[name] = r.rowcount or 0
+
+    # R12: KPI 快照同步回滚 — 只删带 demo_seed 标记的行(此前 clear 不触碰
+    # kpi_snapshots, 污染不可回滚)。
+    deleted["kpi_snapshots"] = await _clear_kpi(session)
 
     await session.commit()
     return {"deleted": deleted, "marker": MARKER}

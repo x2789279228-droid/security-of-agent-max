@@ -427,11 +427,23 @@ class SigmaDetector:
         return result
 
     def _check_aggregation(self, rule: SigmaRule, event: dict) -> bool:
-        """聚合条件检查（内存滑动窗口）"""
+        """聚合条件检查（内存滑动窗口）。
+
+        跨语言 op 语义对齐（J 清零, 2026-10-30）：本函数是 Flink
+        ``SigmaThresholdAggregationJob.ThresholdWindowFunction.thresholdMet``
+        的 Python 对应物 —— 两边必须**同一份比较契约**：
+          '>' → 严格大于；'>=' → 大于等于；'=='/'=' → 等于；
+          认不出的 op → 一律回退 '>='（与 Flink 侧 default 分支一致，
+          保持旧 Flink 硬编码 ``count >= threshold`` 的兼容语义）。
+        修复前 Python 侧 default 回退 '>'（更难告警）而 Flink 回退 '>='
+        （较易告警）—— 同一条未知 op 规则在 HTTP 直连路径与 Kafka/Flink
+        路径产生**不同告警时点**，这正是 capabilities 注记的「跨语言 op
+        语义」缺口。
+        """
         agg = rule.aggregation
         func = agg.get("func", "count")
         group_field = agg.get("field", "src_ip")
-        op = agg.get("op", ">")
+        op = str(agg.get("op") or "").strip()
         threshold = agg.get("threshold", 5)
         timeframe_str = agg.get("timeframe", "5m")
 
@@ -458,14 +470,14 @@ class SigmaDetector:
         else:
             agg_value = len(window)
 
-        # 比较
+        # 比较 —— 与 Flink thresholdMet 同一契约（见 docstring）
         if op == ">":
             return agg_value > threshold
         elif op == ">=":
             return agg_value >= threshold
-        elif op == "==":
+        elif op in ("==", "="):
             return agg_value == threshold
-        return agg_value > threshold
+        return agg_value >= threshold
 
     @staticmethod
     def _parse_timeframe(tf: str) -> int:

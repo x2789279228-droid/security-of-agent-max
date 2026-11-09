@@ -21,13 +21,13 @@ capabilities:
 
   - id: flink_validation
     name: Flink 校验 / Sigma 聚合
-    status: experimental
+    status: verified
     runtime_setting: kafka_enabled
     metric_prefix: ""
-    evidence: docs/AUDIT-2026-10-21-全量代码审计报告.md
-    last_verified: "2026-10-21"
-    demo: ""
-    notes: "跨语言 op 语义与 AT_LEAST_ONCE 告警 Sink 待修。"
+    evidence: backend/tests/test_sigma_aggregation_action_chain.py
+    last_verified: "2026-10-30"
+    demo: "PATH=tools-maven/apache-maven-3.9.9/bin:$PATH python -m pytest tests/test_sigma_aggregation_action_chain.py -q"
+    notes: "2026-10-30 J 清零两项：①跨语言 op 语义对齐（Python _check_aggregation default 由 '>' 改 '>=' 与 Flink thresholdMet 同契约，含 '=' 分支；契约钉 test_op_semantics_contract.py 双侧静态核对）②BehaviorAnomalyJob Sink AT_LEAST_ONCE→EXACTLY_ONCE（6 作业全 EXACTLY_ONCE；消费端 read_committed + 无幂等下游的重复告警面消除）。窗口层真执行 95 项全绿（含修后 Java 重编译）。2026-10-30 W31：Flink 直灌剖面完成（6000 条直灌 raw，三 Flink 消费组 lag≈0 全程跟上，报告 WAVE3-1-FLINK-DIRECT）；新发现 Python enriched 消费者 Redis 池耗尽停摆（P1 登记）。剩余 full-broker kill 留部署环境。"
 
   - id: audit_pipeline
     name: 多智能体审计
@@ -37,17 +37,17 @@ capabilities:
     evidence: docs/upgrade/UPGRADE-PLAN-2026-10-21.md
     last_verified: "2026-10-21"
     demo: ""
-    notes: "4 阶段链路已跑通；缺少 50 条人工标注审计基准。"
+    notes: "2026-10-30 E4：46 条标注基准已建（AUDIT-BENCH 43/43 acc=1.0，含 4 FAIL 裁决记录）；4 阶段链路标注面已覆盖。"
 
   - id: response_engine
     name: 响应处置（审批/封禁/隔离）
-    status: experimental
+    status: verified
     runtime_setting: ""
     metric_prefix: soc_response_
     evidence: docs/upgrade/evidence/M1-response-safety.md
-    last_verified: "2026-10-21"
+    last_verified: "2026-10-30"
     demo: ""
-    notes: "已统一经 SafeExecutor；待真机 SSH + Redis TTL 演练后升 verified。"
+    notes: "2026-10-30 F2 live 演练通过（真实 SSH 靶机 + 真实 Redis，M1 §6）：block→真实 iptables DROP(verified=true)→跨进程回滚零残留；TTL 跨进程回收 + 重启自动解封。演练发现并修复 3 缺陷（rule_id 兜底/回滚虚报/解封自足连接）。遗留：Windows 真机遏制、审批工单全量持久化。"
 
   - id: case_workorder
     name: 案例 / 工单 / 复盘
@@ -61,13 +61,13 @@ capabilities:
 
   - id: rag
     name: RAG 知识检索
-    status: experimental
+    status: verified
     runtime_setting: ""
     metric_prefix: ""
-    evidence: docs/rag-eval-2026-09-05.md
-    last_verified: "2026-10-21"
-    demo: ""
-    notes: "混合检索链路完整；缺版本化检索质量评估。"
+    evidence: docs/benchmark/RAG-EVAL.md
+    last_verified: "2026-10-30"
+    demo: "python -m eval_datasets.evaluate_rag --out ../docs/benchmark"
+    notes: "2026-10-30 E5：版本化评估已关（语料/黄金集/评估器三重 sha256 指纹入结果 JSON；MRR=0.9917 recall@10=1.0）。hybrid 模式仍为预留（R11，退出码 3 如实报）。"
 
   - id: self_play
     name: 红蓝自博弈
@@ -77,7 +77,7 @@ capabilities:
     evidence: docs/architecture/self-play-architecture.md
     last_verified: "2026-10-21"
     demo: ""
-    notes: "样本注入生产隔离待修；缺一次完整对局指标导出。"
+    notes: "2026-10-30 J 清零：完整对局指标已导出（SELF-PLAY-RUN 4 轮 completed/blue 胜）。样本注入生产隔离待修（本局 --no-persist 规避）。"
 
   - id: ingest_normalization
     name: 检测输入规范化（反规避）
@@ -120,13 +120,13 @@ capabilities:
 
   - id: threat_intel
     name: 威胁情报（IOC / MISP / TAXII / 免费源 / 富化）
-    status: experimental
+    status: verified
     runtime_setting: intel_enabled
     metric_prefix: soc_intel_ioc_
-    evidence: backend/tests/test_ioc_ingest.py; backend/tests/test_intel_enrichment.py
-    last_verified: "2026-10-27"
-    demo: "bash tools/seed-free-intel-feeds.sh（4 免费源一键接线: Feodo/OpenPhish/URLhaus/CISA KEV）"
-    notes: "免费源 csv_http/kev_json 已真通；富化旁路已接线(intel_enrich_enabled, KEV 命中自动提级)。缺真实 MISP/TAXII 拉取演练；生产开箱需跑 seed 脚本拉一次真实源。"
+    evidence: docs/upgrade/INTEL-FEEDS.md
+    last_verified: "2026-10-30"
+    demo: "curl -X POST .../api/intel/feeds/1/poll  # botvrij misp_feed 真拉取"
+    notes: "2026-10-30 D 第二批实拉达成：**真实 MISP feed 拉取演练完成**——botvrij.eu OSINT feed（misp_feed 新通道, manifest.json+事件JSON, 免 key）25 事件 → 884 条真实 IOC 落库（file_hash 358/domain 284/ip 183/url 59, 零错误）。免费源 4 源真通在案 + 富化旁路 + KEV 提级。TAXII(ET Open)与 OTX 仍待部署环境网络/key（通道就绪）。"
 
   - id: ndr
     name: NDR 流量分析（含 Suricata IDS 接入）
@@ -146,17 +146,17 @@ capabilities:
     evidence: backend/tests/test_active_module_coverage_gap.py
     last_verified: "2026-10-21"
     demo: ""
-    notes: "point_formats 硬编码待修；已知指纹库需随演示提供。"
+    notes: "2026-10-30 J 清零：point_formats 待修已关（tls_parser 真实提取 ec_point_formats+curves 入 ja3_fields）。已知指纹库需随演示提供（D2#7 SSLBL 即该库，出口待核）。"
 
   - id: edr
     name: EDR 融合（Sysmon / Windows 事件）
-    status: experimental
+    status: verified
     runtime_setting: edr_enabled
     metric_prefix: soc_edr_events_
-    evidence: backend/tests/test_inc_edr.py
-    last_verified: "2026-10-21"
-    demo: ""
-    notes: "保留；事件时间提取与跨源关联键待修，作为 lab profile 展示。"
+    evidence: backend/tests/test_sysmon_parser_e1_fixes.py
+    last_verified: "2026-10-30"
+    demo: "python -m eval_datasets.replay_edr_public --root ../tools/datasets-cache/evtx-attack-samples/EVTX-ATTACK-SAMPLES-master"
+    notes: "2026-10-30 E1：两个待修已关（事件时间提取 TimeCreated@SystemTime/SystemTime；跨源关联键改 ProcessGuid，修复前 event_id 形态误关联同机同类型事件）。真实数据回放：EVTX-ATTACK-SAMPLES 270 文件 36,564 条记录解析率 100%，268 命中事件/135 规则（EDR-REPLAY 报告）。边界：WinEvent 专用字段深校验仍浅；良性 Sysmon 基线未采集（B3 进程规则转正的 FP 门禁待此）。"
 
   - id: zeroday
     name: 0day 沙箱
@@ -170,13 +170,13 @@ capabilities:
 
   - id: phishing
     name: 反钓鱼
-    status: experimental
+    status: verified
     runtime_setting: ""
     metric_prefix: soc_phishing_detections_
-    evidence: backend/tests/test_inc_phishing.py
-    last_verified: "2026-10-21"
-    demo: ""
-    notes: "7 个检测器；缺标定集与跨检测器融合。"
+    evidence: docs/benchmark/PHISH-CALIB-2026-10-30.md
+    last_verified: "2026-10-30"
+    demo: "python -m eval_datasets.eval_phish_calibration"
+    notes: "2026-10-30 E3：标定集缺口已关（SpamAssassin 3,049 封全量：P=0.4956/R=0.2827，垃圾超集口径下界；top 指标 IP 直连链接×843；畸形 msg-id 零崩溃）。LLM 融合维度（aggregate_with_llm）仍待 key。"
 
   - id: observability
     name: 可观测性 / Trace
@@ -186,7 +186,7 @@ capabilities:
     evidence: backend/tests/test_trace_otel.py
     last_verified: "2026-10-21"
     demo: ""
-    notes: "OTel + Prometheus + 10 条告警规则；缺 Alertmanager 与 SLO。"
+    notes: "2026-10-30 J 清零：Alertmanager 已接入（compose 9093+alerting 段+路由骨架）+ SLO 三条；现 4 组 22 规则。"
 
   - id: temporal
     name: Temporal 编排
@@ -197,3 +197,13 @@ capabilities:
     last_verified: "2026-10-21"
     demo: ""
     notes: "进程内路径为权威；Temporal 作为可选加速器，忠实度闸已 fail-closed。"
+
+  - id: copilot
+    name: Copilot 对话式安全分析（流式 + 图像理解）
+    status: experimental
+    runtime_setting: llm_vision_model
+    metric_prefix: ""
+    evidence: backend/tests/test_copilot_stream.py
+    last_verified: "2026-11-07"
+    demo: "POST /api/copilot/stream — stage(context→rag→answer) 分帧；reasoning/token 增量；RAG 引用；视觉模型未配置时诚实降级"
+    notes: "2026-11-07 新增：LLMClient.chat_stream 流式（OpenAI 兼容 SSE，reasoning_content 兼容三种口径）；只读工具白名单（事件上下文/RAG 检索）；视觉模型走 SHARED_MEMORY_LLM_VISION_MODEL，未配置发 vision_note 降级帧。前端 /copilot 页。"

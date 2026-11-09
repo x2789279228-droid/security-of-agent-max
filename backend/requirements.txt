@@ -1,13 +1,15 @@
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
-sqlalchemy>=2.0,<3
+sqlalchemy[asyncio]>=2.0,<3   # 2.1: greenlet 不再默认安装, async 引擎必须带 asyncio extra;
+                              # 异步池 checkout 锁绑定事件循环 —— 测试侧已由 conftest
+                              # 改造为会话级文件库 + NullPool 适配(生产 PG 单循环不受影响)
 alembic>=1.13,<2             # 数据库迁移 (schema 演进唯一权威路径, 2026-10-23)
 aiosqlite>=0.20,<1        # 测试/本地模式 (sqlite+aiosqlite)
 asyncpg>=0.30,<1
 pgvector>=0.3,<1
 qdrant-client>=1.9,<2      # Qdrant 向量数据库 (RAG 检索)
 # fastembed>=0.4,<0.6        # 可选: SHARED_MEMORY_RAG_BM25_BACKEND=fastembed 时用 Qdrant/bm25
-redis>=5.2,<6
+redis>=5.2,<9                # 升 8.x: 默认 RESP3/5s socket_timeout/连接池重试 —— 见 config.py 显式参数
 PyJWT>=2.8,<3
 pydantic>=2.10,<3
 pydantic-settings>=2.7,<3
@@ -15,7 +17,7 @@ httpx>=0.28,<1
 numpy>=2.0,<3
 scipy>=1.11,<2             # 因果链 PC: G² / chi2 条件独立
 networkx>=3.2,<4           # 因果 DAG 工具(路径/可选可视化)
-sse-starlette>=2.2,<3
+sse-starlette>=2.2,<4      # 3.x: 官方声明无 breaking; EventSourceResponse API 未变
 aiokafka>=0.12,<1
 jsonschema>=4.23,<5         # Flink↔Python 跨运行时 Schema 校验
 prometheus-client>=0.21,<1  # /metrics 指标出口 (轻量, 兼容 FastAPI 0.14x)
@@ -30,20 +32,21 @@ temporalio>=1.24,<2
 Jinja2>=3.1,<4
 # Sigma 检测引擎 (pySigma 单事件匹配; 规则从 backend/sigma/rules/*.yml 加载)
 # 注: pySigma 主包已含规则解析/匹配与 sigmac 转换; 字段映射 pipelines 留后续按需接入
-pySigma>=0.11,<2
-pySigma-backend-sqlite>=1.0,<2   # SQLite backend: 把 Sigma 规则编译为可对事件求值的谓词
-paramiko>=3.4,<4
-cryptography>=42.0,<44
+# 2.x: SigmaPolicy 收口安全配置, 默认 RE2 正则引擎 (防 ReDoS); backend 2.x 需重建 ruleset
+pySigma>=2.0.1,<3
+pySigma-backend-sqlite>=2.1.1,<3   # SQLite backend: 把 Sigma 规则编译为可对事件求值的谓词
+paramiko>=3.4,<6             # 5.x: CVE-2026-44405; 移除 DSA/SHA-1/GSSAPI —— SSH 设备连通性需实测
+cryptography>=42.0,<51       # 50.x: CVE-2026-39892/34073 等 5+ 条; wheel 平台收缩 (win32/arm64-mac 移除)
 defusedxml>=0.7,<1         # EDR 事件 XML 解析 XXE 防护 (bandit B314)
 # ── NDR 扩展依赖 ──
 scapy>=2.5,<3              # 网络流量采集与协议解析
 aiohttp>=3.9,<4            # 异步 HTTP 客户端（TAXII/MISP/CAPE API）
-geoip2>=4.8,<5             # GeoIP 地理位置查询（可选，需 MaxMind 数据库）
+geoip2>=4.8,<6             # GeoIP 地理位置查询（可选，需 MaxMind 数据库）; 5.x: .raw→to_dict()
 # ── 可选: TLS 解密代理 (encrypted_traffic/mitm_proxy.py, 默认关闭) ──
 # mitmproxy>=10,<12
 
 # ── 测试依赖 (2026-10-23 起显式声明: 此前 CI 从未安装 pytest-asyncio,
 #    全量跑时所有 @pytest.mark.asyncio 用例在 CI 必挂; 本地与 CI 共用此清单) ──
-pytest>=8.3,<9
+pytest>=8.3,<10              # 9.x: CVE-2025-71176; PytestRemovedIn9Warning 默认变错误
 pytest-asyncio>=1.0,<2
 pytest-cov>=6,<8

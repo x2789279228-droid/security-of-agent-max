@@ -21,6 +21,10 @@ security_scheme = HTTPBearer(auto_error=False)
 
 _blocked_jti: dict[str, float] = {}
 _user_jtis: dict[str, set[str]] = {}
+# W1-5(复审 P3): 每用户 jti 集合上限 — 修复前每次登录累加且从不清理,
+# 长运行进程内存缓慢增长(每登录一条 jti 字符串)。超限丢最旧的,
+# Redis 侧(jwt:user:*)本就有 TTL, 内存表只是无 Redis 时的兜底。
+_MAX_JTIS_PER_USER = 64
 
 
 class TokenPayload(BaseModel):
@@ -46,7 +50,10 @@ def _redis():
 async def remember_jti(username: str, jti: str, ttl_sec: int) -> None:
     if not jti:
         return
-    _user_jtis.setdefault(username, set()).add(jti)
+    bucket = _user_jtis.setdefault(username, set())
+    bucket.add(jti)
+    while len(bucket) > _MAX_JTIS_PER_USER:
+        bucket.pop()  # set 无序 — 超限丢任一旧 jti, 语义: 兜底撤销面有限
     r = _redis()
     if r is None:
         return
@@ -117,7 +124,10 @@ def create_access_token(username: str, role: str = "admin") -> str:
         ttl = int((expire - datetime.now(timezone.utc)).total_seconds())
         loop.create_task(remember_jti(username, jti, ttl))
     except Exception:
-        _user_jtis.setdefault(username, set()).add(jti)
+        bucket = _user_jtis.setdefault(username, set())
+        bucket.add(jti)
+        while len(bucket) > _MAX_JTIS_PER_USER:
+            bucket.pop()
     return token
 
 

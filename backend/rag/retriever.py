@@ -233,7 +233,7 @@ class Retriever:
         conditions = [or_(*ors)]
         if threat_type:
             conditions.append(
-                text("threat_types @> CAST(:threat_type AS jsonb)").bindparams(
+                text("threat_types::jsonb @> CAST(:threat_type AS jsonb)").bindparams(
                     threat_type=json.dumps([threat_type])
                 )
             )
@@ -371,7 +371,7 @@ class Retriever:
                 clauses = ["search_tsv @@ plainto_tsquery('simple', :q)"]
                 params: dict = {"q": query, "limit": top_k}
                 if threat_type:
-                    clauses.append("threat_types @> CAST(:threat_type AS jsonb)")
+                    clauses.append("threat_types::jsonb @> CAST(:threat_type AS jsonb)")
                     params["threat_type"] = json.dumps([threat_type])
                 if severity:
                     clauses.append("severity = :severity")
@@ -407,7 +407,7 @@ class Retriever:
         conditions = []
         if threat_type:
             conditions.append(
-                text("threat_types @> CAST(:threat_type AS jsonb)").bindparams(
+                text("threat_types::jsonb @> CAST(:threat_type AS jsonb)").bindparams(
                     threat_type=json.dumps([threat_type])
                 )
             )
@@ -549,7 +549,7 @@ class Retriever:
         filter_clauses = ["TRUE"]
         bind_params: dict = {}
         if threat_type:
-            filter_clauses.append("threat_types @> CAST(:threat_type AS jsonb)")
+            filter_clauses.append("threat_types::jsonb @> CAST(:threat_type AS jsonb)")
             bind_params["threat_type"] = json.dumps([threat_type])
         if severity:
             filter_clauses.append("severity = :severity")
@@ -628,7 +628,7 @@ class Retriever:
         if threat_type:
             # jsonb 列必须用 @> 运算符（JSON.contains() 会生成不支持的 LIKE）
             conditions.append(
-                text("threat_types @> CAST(:threat_type AS jsonb)").bindparams(
+                text("threat_types::jsonb @> CAST(:threat_type AS jsonb)").bindparams(
                     threat_type=json.dumps([threat_type])
                 )
             )

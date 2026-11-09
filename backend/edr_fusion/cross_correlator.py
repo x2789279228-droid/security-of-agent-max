@@ -135,6 +135,32 @@ class CrossCorrelator:
         except Exception as e:
             logger.error("跨源关联异常: %s", e, exc_info=True)
 
+        # H-②(2026-10-30 REMEDIATION-PLAN 路线 H): 关联结果 LLM 叙事
+        # —— edr_fusion/llm_correlation.py 从休眠接入生产。fail-open + 开关 +
+        # 成本护栏；只叙述置信度最高的一条(should_trigger 内含阈值)。
+        try:
+            from config import settings as _cfg
+            if results and getattr(_cfg, "edr_llm_correlation_enabled", False):
+                from edr_fusion.llm_correlation import (
+                    llm_narrate_correlation,
+                    should_trigger_llm,
+                )
+                _top = max(results, key=lambda r: getattr(r, "confidence", 0))
+                if should_trigger_llm(_top):
+                    _d = _top.to_dict()
+                    _nar = await llm_narrate_correlation(
+                        correlation_type=str(_d.get("correlation_type", "")),
+                        confidence=float(_d.get("confidence", 0)),
+                        network_event=_d.get("network_event", {}) or {},
+                        edr_event=_d.get("edr_event", {}) or {},
+                        mitre_technique=str(_d.get("mitre_technique", "")),
+                        indicators=list(_d.get("indicators", []) or []),
+                    )
+                    if _nar:
+                        _top.narrative = _nar
+        except Exception as _e:
+            logger.debug("llm_correlation wiring skipped: %s", _e)
+
         return results
 
     def _match_process_network(self, edr_events, flows) -> list[CorrelationResult]:

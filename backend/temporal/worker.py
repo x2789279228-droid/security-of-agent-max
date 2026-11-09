@@ -42,7 +42,13 @@ async def run_worker():
         from event_bus import event_bus
         from temporal import client as temporal_client
         from audit_pq import audit_pq
-        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+        # socket_timeout=None: event_bus/event_store 用此客户端 pubsub.listen()
+        # 长期阻塞监听; redis-py 8 默认 5s 超时会把空闲连接打断(redis-py#2807)
+        r = aioredis.from_url(
+            settings.redis_url, decode_responses=True, socket_timeout=None,
+            # W31 P1(2026-10-30): 与 sliding_window 同口径显式扩容(默认 100 击穿)
+            max_connections=int(getattr(settings, "redis_pool_max_connections", 500)),
+        )
         await r.ping()
         event_store.set_redis(r)
         event_bus.set_redis(r)

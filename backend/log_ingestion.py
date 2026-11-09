@@ -138,7 +138,9 @@ class LogIngestor:
             "url": ["url", "http_url", "requestUrl", "request_uri", "cs-uri-query", "uri"],
             # 2026-10-27 路线 4: DNS 查询域 / 文件哈希 —— 释放 SigmaHQ dns 类别
             # 规则(query 字段实测 14/14), 并为第二批 Sysmon hash 字段预铺链路。
-            "dns_query": ["dns_query", "dnsQuery", "dns_query_name", "queryName", "rrname", "query"],
+            # W1-6(复审 P2): 泛化别名 "query" 仅在 DNS 语境归一(见下方门禁) —
+            # SQL 审计/HTTP 参数日志的 query 会被误判成 DNS 查询产生跨源误报。
+            "dns_query": ["dns_query", "dnsQuery", "dns_query_name", "queryName", "rrname"],
             "file_hash": ["file_hash", "fileHash", "sha256", "sha1", "md5", "imageHash"],
         }
         normalized = dict(log_data)
@@ -154,13 +156,27 @@ class LogIngestor:
                     if val is not None and val != "":
                         normalized[target] = val
                         break
+        # W1-6: 泛化 "query" 的 DNS 语境门禁 — 满足任一才归一为 dns_query:
+        #   1) 事件类型明示 dns;  2) 已有 DNS 专属键(rrname/queryName...);
+        #   3) 值形如域名(含点、非 URL/路径)。SQL/HTTP 参数日志的 query 不再误入。
+        if "query" in log_data and not normalized.get("dns_query"):
+            v = log_data.get("query")
+            if isinstance(v, list):
+                v = v[0] if v else None
+            etype = str(log_data.get("event") or log_data.get("type") or "").lower()
+            has_dns_key = any(k in log_data for k in
+                              ("dns_query", "dnsQuery", "rrname", "queryName", "dns_query_name"))
+            looks_domain = isinstance(v, str) and "." in v and not v.startswith(("http://", "https://", "/"))
+            if (("dns" in etype) or has_dns_key or looks_domain) and v:
+                normalized["dns_query"] = v
+
         # rawData 兜底: web 日志的 HTTP 元数据常透传在 rawData 子对象中, 从其中提取 method/status/url。
         raw = log_data.get("rawData") or log_data.get("raw_data") or {}
         if isinstance(raw, dict) and raw:
             for target, keys in (("method", ["method", "requestMethod", "httpMethod"]),
                                  ("status", ["status", "statusCode", "httpStatus"]),
                                  ("url", ["url", "requestUrl", "request_uri", "path"]),
-                                 ("dns_query", ["query", "rrname", "dnsQuery", "queryName"]),
+                                 ("dns_query", ["rrname", "dnsQuery", "queryName"]),
                                  ("file_hash", ["sha256", "md5", "sha1", "fileHash", "imageHash"])):
                 if target in normalized and normalized.get(target):
                     continue
@@ -310,7 +326,33 @@ class LogIngestor:
                 AUDIT_CLAIM.labels(result="claimed").inc()
             except Exception:
                 pass
-        # _claimed is None → Redis 不可用, fail-open 继续(与旧行为一致)
+        # A3-⑤(2026-10-30) 认领仲裁：Redis 不可用不再裸 fail-open ——
+        # PG 会话级咨询锁做第二级互斥（True=拿到/False=他人持有/None=PG 也不可用）。
+        # PG 也不可用才退回旧行为（fail-open + 日志可见）。
+        if _claimed is None:
+            from distributed_lock import pg_advisory_claim
+            _arb = await pg_advisory_claim(int(event_id), claim_ttl)
+            if _arb is False:
+                try:
+                    from metrics import AUDIT_CLAIM
+                    AUDIT_CLAIM.labels(result="contended").inc()
+                except Exception:
+                    pass
+                logger.info(
+                    "[Audit-LLM] event #%s contended (pg advisory lock), skip",
+                    event_id,
+                )
+                return
+            if _arb is True:
+                logger.info(
+                    "[Audit-LLM] event #%s claimed via PG advisory lock (Redis 不可用)",
+                    event_id,
+                )
+            else:
+                logger.warning(
+                    "[Audit-LLM] Redis/PG 认领均不可用 event #%s —— fail-open（互斥退化）",
+                    event_id,
+                )
         try:
             from models import SecurityEvent, async_session as db_session
             async with db_session() as session:
@@ -370,6 +412,49 @@ class LogIngestor:
             inc_audit_lane_admit(triage.lane, triage.tier)
         except Exception:
             pass
+
+        # H-④(2026-10-30 REMEDIATION-PLAN 路线 H): 沙箱行为 LLM 深度解读
+        # —— zeroday_detect/llm_behavior 从休眠接入生产(异步旁路, 有界后台
+        # 任务, fail-open; 成本护栏在 llm_enhancer→llm_limiter 内)。
+        # 分诊的同步行为分析器已在 score_event 写入 _sandbox.analysis。
+        _sb = log_data.get("_sandbox")
+        if (isinstance(_sb, dict) and _sb.get("analysis")
+                and triage.lane in ("llm_single", "llm_agent")):
+            try:
+                from config import settings as _zcfg
+                if getattr(_zcfg, "zeroday_lane_enabled", True):
+                    from zeroday_detect.llm_behavior import (
+                        llm_interpret_behavior, should_trigger_llm,
+                    )
+
+                    async def _narrate_sandbox(_ld: dict) -> None:
+                        try:
+                            _a = _ld["_sandbox"]["analysis"]
+                            if not should_trigger_llm(_a):
+                                return
+                            _res = await llm_interpret_behavior(
+                                sample_hash=str(_a.get("sample_hash", "")),
+                                verdict=str(_a.get("verdict", "")),
+                                score=float(_a.get("score") or 0),
+                                behavior_summary=str(_a.get("behavior_summary", "")),
+                                mitre_techniques=list(_a.get("mitre_techniques") or []),
+                                network_iocs=list(_a.get("network_iocs") or []),
+                                process_tree=list(_a.get("process_tree") or []),
+                                signatures=list(_a.get("signatures") or []),
+                            )
+                            if _res:
+                                _ld["_sandbox"]["llm_interpretation"] = _res
+                        except Exception:
+                            pass
+
+                    from capacity import background_task_gate, schedule_bounded
+                    await schedule_bounded(
+                        _narrate_sandbox(log_data),
+                        gate=background_task_gate(),
+                        label=f"sandbox-llm-{event_id}",
+                    )
+            except Exception:
+                pass
         logger.info(
             f"[Audit-Triage] event #{event_id} tier={triage.tier} "
             f"lane={triage.lane} pri={triage.priority} "
@@ -1295,7 +1380,14 @@ class LogIngestor:
                         except Exception as resp_err:
                             logger.warning(f"[Response] Trigger failed for event #{evt_id}: {resp_err}")
 
-                asyncio.create_task(_audit_response(threat_info, event_id, session_id))
+                # R20(复审 P2): 裸 create_task 绕过背压闸且无 GC 引用登记 —
+                # 告警风暴时响应编排无并发上限(各开一个 DB session)。改走有界闸。
+                from capacity import background_task_gate, schedule_bounded
+                await schedule_bounded(
+                    _audit_response(threat_info, event_id, session_id),
+                    gate=background_task_gate(),
+                    label=f"audit-response-{event_id}",
+                )
                 logger.info(f"[Response] Triggered for event #{event_id}: {threat_info['threat_type']}")
                 event_bus.publish("response_action", {
                     "event_id": event_id,

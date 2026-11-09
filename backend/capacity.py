@@ -267,14 +267,20 @@ def chunk_list(items: list, size: int) -> list[list]:
 
 
 _GATES: dict[str, BoundedGate] = {}
+# 处理队列（审计内存队列）单信号闩 —— kafka_fetch_paused 专用
+_queue_pressure = False
+# 复合背压信号闩（HTTP 准入用）+ 最近一次触发原因
 _pressure = False
+_pressure_reasons: tuple[str, ...] = ()
 
 
 def reset_gates() -> None:
     """测试或配置切换时丢掉旧闸。Condition 绑在创建它的事件循环上。"""
-    global _pressure
+    global _pressure, _queue_pressure, _pressure_reasons
     _GATES.clear()
     _pressure = False
+    _queue_pressure = False
+    _pressure_reasons = ()
 
 
 def _gate(name: str, limit_getter: Callable[[], int], timeout_getter: Callable[[], float]) -> BoundedGate:
@@ -361,23 +367,163 @@ def audit_queue_ratio() -> float:
         return 0.0
 
 
-def note_pressure() -> bool:
-    """高水位闩上，低水位才打开。中间地带保持原状态，避免拉取抖动。"""
-    global _pressure
-    ratio = audit_queue_ratio()
+def _latch(current: bool, ratio: float, high: float, low: float) -> bool:
+    """高水位闩上，低水位才打开。中间地带保持原状态，避免抖动。"""
+    if ratio >= high:
+        return True
+    if ratio <= low:
+        return False
+    return current
+
+
+def _watermarks() -> tuple[float, float]:
     high = _float_setting("audit_queue_high_watermark", 0.8)
     low = _float_setting("audit_queue_low_watermark", 0.5)
-    if low > high:
-        low = high
-    if ratio >= high:
-        _pressure = True
-    elif ratio <= low:
-        _pressure = False
+    return high, min(low, high)
+
+
+def kafka_lag_ratio() -> float:
+    """Kafka lag 比信号：total_lag / (实测消费容量 × 允许积压秒数)。
+
+    容量未标定（kafka_consumption_eps=0）时恒 0 —— 不许用拍脑袋阈值
+    触发过载拒绝。PERF-2026-10-26 实测：lag 峰值 12216 全程无任何闸门
+    读它（当时唯一背压信号审计队列比峰值仅 27%）—— 本函数就是缺的那条线；
+    标定数字以 PERF-2 复测回填 config。
+    """
+    capacity_eps = _float_setting("kafka_consumption_eps", 0)
+    if capacity_eps <= 0:
+        return 0.0
+    backlog_s = max(1.0, _float_setting("kafka_lag_allowed_backlog_s", 60))
+    try:
+        from core_metrics import total_kafka_lag
+        lag = max(0, int(_cluster_max("kafka_lag", float(total_kafka_lag()))))
+    except Exception:
+        return 0.0
+    return lag / (capacity_eps * backlog_s)
+
+
+def pq_depth_ratio() -> float:
+    """PQ（P0/P1 LLM 溢出池）深度比：同步快照 / audit_pq_capacity。
+
+    快照允许陈旧（enqueue/depth 成功路径刷新）—— 背压带滞回，不要求会计
+    级精确；Redis 未接线时恒 0，信号自然失效而非误报。
+    """
+    cap = strict_int_setting("audit_pq_capacity", 2000)
+    if cap <= 0:
+        return 0.0
+    try:
+        from audit_pq import pq_depth_snapshot
+        local = float(pq_depth_snapshot())
+    except Exception:
+        local = 0.0
+    # A3-③: 集群内最深 worker 的 PQ 计入本进程准入信号
+    worst = _cluster_max("pq_depth", local)
+    return min(1.0, worst / float(cap))
+
+
+# ── A3-③ 共享压力 Gauge（REMEDIATION-PLAN-2026-10-30 路线 A3）──
+# 多 worker 时各进程只看得见自己的 lag/队列深度；准入闸门若只读本进程读数，
+# 另一 worker 的积压会被无视。每 worker 把本地读数发布到 Redis Hash
+# （soc:gauge:<kind>，field=worker_id，EX 90s），合并取**全集群 max** ——
+# 闸门语义从"本进程没压"升级为"集群里最紧的 worker 没压才放行"。
+
+_WORKER_ID = (__import__("os").environ.get("SHARED_MEMORY_WORKER_ID")
+              or f"{__import__('socket').gethostname()}-{__import__('os').getpid()}")
+
+_GAUGE_KINDS = ("kafka_lag", "audit_queue_ratio", "pq_depth")
+
+#: 其它 worker 的最新读数（kind → max），由 publish_worker_gauges 刷新
+_CLUSTER_GAUGES: dict[str, float] = {}
+
+
+async def publish_worker_gauges(redis_client, interval_s: int = 10) -> None:
+    """常驻任务：发布本 worker 压力读数 + 合并远端（取 max）。
+
+    失败只记 debug —— 共享 Gauge 是增强不是依赖，Redis 抖动时退回单进程
+    读数（语义不劣于修复前）。接线点在 app lifespan（每个 worker 都要发，
+    不能放 leader-only 的 scheduler 循环里）。
+    """
+    import asyncio as _aio
+
+    while True:
+        try:
+            from core_metrics import total_kafka_lag
+            from audit_pq import pq_depth_snapshot
+
+            local = {
+                "kafka_lag": float(total_kafka_lag()),
+                "audit_queue_ratio": round(audit_queue_ratio(), 4),
+                "pq_depth": float(pq_depth_snapshot()),
+            }
+            pipe = redis_client.pipeline()
+            for kind, val in local.items():
+                pipe.hset(f"soc:gauge:{kind}", _WORKER_ID, val)
+                pipe.expire(f"soc:gauge:{kind}", 90)
+            await pipe.execute()
+
+            merged: dict[str, float] = {}
+            for kind in _GAUGE_KINDS:
+                raw = await redis_client.hgetall(f"soc:gauge:{kind}") or {}
+                best = 0.0
+                for wid, val in raw.items():
+                    wid_s = wid.decode() if isinstance(wid, bytes) else str(wid)
+                    if wid_s == _WORKER_ID:
+                        continue
+                    try:
+                        best = max(best, float(val))
+                    except (TypeError, ValueError):
+                        continue
+                merged[kind] = best
+            _CLUSTER_GAUGES.clear()
+            _CLUSTER_GAUGES.update(merged)
+        except Exception as e:
+            logger.debug("publish_worker_gauges skipped: %s", e)
+        await _aio.sleep(max(2, interval_s))
+
+
+def _cluster_max(kind: str, local: float) -> float:
+    """本地读数与集群远端读数取 max（远端缺省 0 = 单进程语义不变）。"""
+    try:
+        return max(float(local), float(_CLUSTER_GAUGES.get(kind, 0.0)))
+    except (TypeError, ValueError):
+        return float(local)
+
+
+def queue_pressure() -> bool:
+    """处理队列（审计内存队列）单信号闩 —— kafka_fetch_paused 专用。
+
+    拉取暂停**不**看 lag：停拉会加深 lag（PERF-OPT-PLAN 2-1 红线），
+    lag 信号只用于 HTTP 准入。
+    """
+    global _queue_pressure
+    high, low = _watermarks()
+    _queue_pressure = _latch(_queue_pressure, audit_queue_ratio(), high, low)
+    return _queue_pressure
+
+
+def note_pressure() -> bool:
+    """复合背压信号闩：max(队列比, Kafka lag 比, PQ 深度比)。
+
+    只用于 HTTP 准入（admit_http）。2026-10-26 前准入只看审计队列深度，
+    压测中它峰值仅 27% 从未触发，而真实背压在 Kafka lag（峰值 12216）上
+    系统不自知 —— 本函数把准入闸门绑到真实瓶颈。
+    """
+    global _pressure, _pressure_reasons
+    high, low = _watermarks()
+    ratios = {
+        # A3-③: 准入信号取集群 max（其它 worker 的积压也是本集群的背压）
+        "audit_queue": _cluster_max("audit_queue_ratio", audit_queue_ratio()),
+        "kafka_lag": kafka_lag_ratio(),
+        "audit_pq": pq_depth_ratio(),
+    }
+    peak = max(ratios.values())
+    _pressure = _latch(_pressure, peak, high, low)
+    _pressure_reasons = tuple(k for k, v in ratios.items() if v >= high) if _pressure else ()
     return _pressure
 
 
 def kafka_fetch_paused() -> bool:
-    return note_pressure()
+    return queue_pressure()
 
 
 def fetch_pause_interval() -> float:
@@ -385,9 +531,12 @@ def fetch_pause_interval() -> float:
 
 
 async def admit_http(*, direct: bool) -> None:
-    """HTTP 入口。队列高水位，或对应下游的闸已经占满，就拒绝这次请求。"""
+    """HTTP 入口。复合背压信号过载，或对应下游的闸已经占满，就拒绝这次请求。"""
     if note_pressure():
-        raise AdmissionDenied("audit_queue_high_watermark")
+        if not _pressure_reasons or _pressure_reasons == ("audit_queue",):
+            # 只有队列信号过载：保留旧 reason 字符串（API 消费方兼容）
+            raise AdmissionDenied("audit_queue_high_watermark")
+        raise AdmissionDenied("backpressure:" + "+".join(_pressure_reasons))
     if direct:
         if db_write_gate().saturated() or batch_fanout_gate().saturated():
             raise AdmissionDenied("downstream_saturated")
@@ -405,7 +554,10 @@ def snapshot() -> dict:
         llm = {}
     return {
         "pressure": note_pressure(),
+        "pressure_reasons": list(_pressure_reasons),
         "audit_queue_ratio": round(audit_queue_ratio(), 4),
+        "kafka_lag_ratio": round(kafka_lag_ratio(), 4),
+        "pq_depth_ratio": round(pq_depth_ratio(), 4),
         "batch": {
             "max_batch": batch_limits()[0],
             "absolute_max": batch_limits()[1],

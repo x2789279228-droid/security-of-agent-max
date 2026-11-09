@@ -70,9 +70,37 @@ class Scheduler:
         self._tasks: list[asyncio.Task] = []
         self._running = False
         self._embed_patrol_task = None
+        # A3-① 多进程选主（2026-10-30）：leader 唯一跑 17 个调度循环
+        self._leader = None
+        self._election_task = None
 
     async def start(self, db_session_factory):
-        """启动所有后台定时任务"""
+        """启动所有后台定时任务。
+
+        A3-①（REMEDIATION-PLAN 路线 A3）：多 worker 部署时 17 个调度循环
+        经 Redis 全局选主只跑一份（否则告警翻倍/KPI 重复聚合/PQ 双消费）；
+        follower 仅服务 HTTP/Kafka 消费/审计执行。Redis 不可用退回单进程
+        语义（与认领锁同约定：缺席时互斥退化为尽力而为，不停摆）。
+        """
+        if self._running:
+            return
+        try:
+            from distributed_lock import _default_client
+            from scheduler_leader import LeaderElection
+            redis = await _default_client()
+            self._leader = LeaderElection(client=redis)
+            self._election_task = asyncio.create_task(
+                self._leader.supervise(
+                    lambda: self._spawn_all(db_session_factory),
+                    self._cancel_all,
+                ))
+            return
+        except Exception as e:
+            logger.warning(
+                "LeaderElection unavailable (%s) — 退回单进程语义直接启动调度循环", e)
+        await self._spawn_all(db_session_factory)
+
+    async def _spawn_all(self, db_session_factory):
         if self._running:
             return
         self._running = True
@@ -147,13 +175,25 @@ class Scheduler:
             except Exception as exc:
                 logger.warning("DLQ retention purge failed: %s", type(exc).__name__)
 
-    async def stop(self):
-        """停止所有后台任务"""
+    async def _cancel_all(self):
+        """停掉调度循环（leader 失联让位 / 正常停机共用；可被 _spawn_all 重启）。"""
         self._running = False
         for task in self._tasks:
             task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+
+    async def stop(self):
+        """停止所有后台任务（含选主任务与 leader 租约释放）"""
+        if self._election_task is not None:
+            self._election_task.cancel()
+            await asyncio.gather(self._election_task, return_exceptions=True)
+            self._election_task = None
+        if self._leader is not None:
+            await self._leader.release()
+            self._leader = None
+        await self._cancel_all()
         logger.info("Scheduler stopped")
 
     # ── 1. 基线快照 ──
@@ -487,9 +527,14 @@ class Scheduler:
         if marked:
             try:
                 await session.commit()
-            except Exception:
-                pass
-            logger.warning(f"[case-sla] {marked} cases breached SLA")
+            except Exception as e:
+                # P0 复审配套(R4): commit 失败必须留痕 — 此前 except: pass 后
+                # 照打"已 breach N 条", KPI 与 DB 状态长期脱节且无任何信号。
+                await session.rollback()
+                logger.error(f"[case-sla] SLA breach 标记 commit 失败({marked} 条未落库): {e}", exc_info=True)
+                marked = 0
+            if marked:
+                logger.warning(f"[case-sla] {marked} cases breached SLA")
 
         await self._close_stale_resolved(session, now)
 
@@ -521,8 +566,11 @@ class Scheduler:
                 await case_manager.update_status(session, c.id, "closed", by="system")
             try:
                 await session.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                # R4 同款: commit 失败留痕 + 回滚, 不再静默假成功。
+                await session.rollback()
+                logger.error(f"[case-sla] 自动关案 commit 失败({len(to_close)} 条未落库): {e}", exc_info=True)
+                return 0
             logger.warning(
                 f"[case-sla] auto-closed {len(to_close)} resolved cases (> {auto_close_hours}h)"
             )
@@ -741,6 +789,14 @@ class Scheduler:
         try:
             from metrics import AUDIT_PQ_DEPTH
             AUDIT_PQ_DEPTH.set(await audit_pq.depth())
+        except Exception:
+            pass
+        # Wave 0-4：三角闭合账目随深度一起刷新 ——
+        # gap = enqueue-dequeue-lost-depth，持续非 0 = 未计数损耗路径。
+        try:
+            from audit_pq import pq_triangulation
+            from metrics import set_audit_pq_accounting_gap
+            set_audit_pq_accounting_gap(pq_triangulation()["gap"])
         except Exception:
             pass
         # D-C: 批量/间隔走 settings(入站 ~12 ev/s 时旧的 5/s 会净堆积)

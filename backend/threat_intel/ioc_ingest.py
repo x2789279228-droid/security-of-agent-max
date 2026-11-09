@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 
 # cve: CISA KEV(已知被利用漏洞目录)以 CVE 编号为 IOC 形态 —— 事件携带
 # cve 字段时精确比对, 命中即触发提级(见 intel_enricher 的 KEV 特权逻辑)。
-_ALLOWED_TYPES = {"ip", "domain", "url", "file_hash", "email", "cidr", "cve"}
+# ja3: TLS 客户端指纹(abuse.ch SSL Blacklist 等免费源) —— 32 位小写 MD5 hex,
+# 与 tls_fingerprint 会话侧精确比对（REMEDIATION-PLAN 路线 D2#7）。
+_ALLOWED_TYPES = {"ip", "domain", "url", "file_hash", "email", "cidr", "cve", "ja3"}
 _ALLOWED_SEVERITY = {"info", "low", "medium", "high", "critical"}
 _DEFAULT_TTL_DAYS = 30
 
@@ -59,6 +61,11 @@ def _normalize(entry: dict, default_source: str) -> dict | None:
         try:
             value = str(ipaddress.ip_network(value, strict=False))
         except ValueError:
+            return None
+    elif ioc_type == "ja3":
+        # JA3 指纹是 32 位 MD5 hex；非此形态直接拒（防脏数据进精确匹配缓存）
+        value = value.lower()
+        if len(value) != 32 or any(c not in "0123456789abcdef" for c in value):
             return None
     else:
         # 匹配器按小写查询，落库也统一小写。

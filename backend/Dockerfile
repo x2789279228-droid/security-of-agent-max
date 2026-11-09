@@ -1,4 +1,5 @@
-# syntax=docker/dockerfile:1.6
+# syntax 行移除: 镜像源 401 拉不到 frontend 镜像, 会令整个 build 静默失败;
+# Docker Desktop 内置 BuildKit frontend 已原生支持 --mount=type=cache, 无需显式 syntax 指令
 # 启用 BuildKit 高级特性 (--mount=type=cache 必须 buildkit)
 # 配合 buildkit cache mount + 清华 pip 源, 第二次 build 依赖项 0 秒命中
 
@@ -39,4 +40,8 @@ EXPOSE 8000
 USER appuser
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# --no-access-log(W1-5, 复审 P2-4): SSE 端点经 ?token= 传 JWT, uvicorn 默认
+# 访问日志会记录含 query string 的完整 URL → 120 分钟有效期的凭证落入容器/
+# 反代日志可被重放。访问日志由自研 RequestContextMiddleware 记录(仅 path,
+# 无 query), 信息量不损失。
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

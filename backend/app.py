@@ -110,8 +110,13 @@ async def lifespan(app: FastAPI):
     await embedder.ensure_client()
     # Connect Redis for context_stream
     redis_client = await sliding_window.get_redis()
+    _gauge_task = None
     if redis_client:
         embedder.set_redis(redis_client)
+        # A3-③(2026-10-30): 多 worker 压力读数共享 —— 每 worker 发布本地
+        # lag/队列比/PQ 深度到 Redis, 准入闸门按集群 max 判断。
+        from capacity import publish_worker_gauges
+        _gauge_task = asyncio.create_task(publish_worker_gauges(redis_client))
         # v6: LLM 响应缓存接入同一 Redis(跨重启/跨容器共享), 替代原纯进程内缓存
         summary.llm.set_redis(redis_client)
         context_stream.set_redis(redis_client)
@@ -499,6 +504,13 @@ async def lifespan(app: FastAPI):
         await ttl_manager.stop_scanner()
     except Exception as e:
         logger.warning(f"[Response] TTL scanner stop failed: {e}")
+    # A3-③: 共享 Gauge 发布任务随进程退出取消
+    try:
+        if _gauge_task is not None:
+            _gauge_task.cancel()
+            await asyncio.gather(_gauge_task, return_exceptions=True)
+    except Exception:
+        pass
     from lifecycle import shutdown_platform
     await shutdown_platform()
 
@@ -705,6 +717,7 @@ from routers.phishing import router as phishing_router
 from routers.ndr import router as ndr_router
 from routers.edr_intel import router as edr_intel_router
 from routers.ops import router as ops_router
+from routers.copilot import router as copilot_router
 from routers.capabilities import router as capabilities_router
 from routers.benchmark import router as benchmark_router
 from routers.demo_seed import router as demo_seed_router
@@ -725,13 +738,19 @@ app.include_router(phishing_router)
 app.include_router(ndr_router)
 app.include_router(capabilities_router)
 app.include_router(benchmark_router)
-app.include_router(demo_seed_router)
+# R12(复审 P1-8): 演示路由仅在显式 SHARED_MEMORY_DEMO_MODE=true 时挂载 —
+# 修复前 /api/demo/seed|clear 无条件进生产路由, 且无任何"退出演示态"的服务端开关。
+if settings.demo_mode:
+    app.include_router(demo_seed_router)
+else:
+    logger.info("Demo mode disabled — /api/demo/* not mounted (set SHARED_MEMORY_DEMO_MODE=true to enable)")
 app.include_router(edr_intel_router)
 app.include_router(ops_router)
 app.include_router(self_play_router)
 app.include_router(causal_router)
+app.include_router(copilot_router)
 
-logger.info(f"Mounted 17 routers — {len(app.routes)} routes total")
+logger.info(f"Mounted 18 routers — {len(app.routes)} routes total")
 
 # ── OpenTelemetry 说明（初始化已移入 lifespan，见下）──
 # 2026-10-03: 原先在本模块 import 期无条件 setup_otel()。OTel 的全局 TracerProvider

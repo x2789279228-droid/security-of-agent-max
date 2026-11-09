@@ -208,6 +208,23 @@ class CommandWhitelist:
                         )
                         return False, rule.rule_id, f"规则 {rule.rule_id} 禁止子串: '{fb}'"
 
+                # R13(P1-1): 编码命令必须过解码模板指纹 — 外形正则对 Base64
+                # 内容零约束, 任意脚本编码后都能通过(修复 Q62 时引入的弱点)。
+                if rule.rule_id == "WIN-004":
+                    from .ps_templates import decode_encoded_command, match_decoded_script
+                    encoded = command.rsplit(" ", 1)[-1]
+                    ok_decode, decode_reason, decoded = decode_encoded_command(encoded)
+                    if not ok_decode:
+                        logger.warning(f"[Whitelist] REJECTED (WIN-004 {decode_reason})")
+                        return False, "WIN-004-DECODED", decode_reason
+                    ok_tpl, tpl_rule, tpl_reason = match_decoded_script(decoded)
+                    if not ok_tpl:
+                        logger.warning(
+                            f"[Whitelist] REJECTED (WIN-004 decoded): {tpl_reason}; "
+                            f"head={decoded[:80]!r}"
+                        )
+                        return False, tpl_rule, tpl_reason
+
                 logger.debug(f"[Whitelist] ALLOWED by {rule.rule_id}: {command[:80]}")
                 return True, rule.rule_id, rule.desc
 

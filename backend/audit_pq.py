@@ -76,6 +76,60 @@ def _payload_is_temporal_agent(payload: dict) -> bool:
         return False
 
 
+#: PQ 深度的同步快照（capacity 背压信号在同步上下文读）。
+#: 真值在 Redis ZSET；只在 enqueue/depth 成功路径刷新，允许轻微陈旧 ——
+#: 背压信号带滞回，不要求会计级精确（PERF-2026-10-26 的 PQ 进出不对称
+#: 是结构性事实，这里不做对称性声明，只提供深度读数）。
+_DEPTH_CACHE: dict = {"v": 0}
+
+
+def pq_depth_snapshot() -> int:
+    """PQ 深度同步快照（可能陈旧；Redis 未接线时恒 0 → 背压信号自然失效）。"""
+    try:
+        return int(_DEPTH_CACHE.get("v") or 0)
+    except Exception:
+        return 0
+
+
+def _counter_total(counter) -> int:
+    """读 prometheus Counter 的全标签累计和（读不到返回 0，不抛）。"""
+    total = 0
+    try:
+        for metric in counter.collect():
+            for sample in metric.samples:
+                if sample.name.endswith("_total"):
+                    total += int(sample.value)
+    except Exception:
+        return 0
+    return total
+
+
+def pq_triangulation() -> dict:
+    """PQ 通道三角闭合计量（Wave 0-4，PERF-OPT-PLAN-2026-10-26）。
+
+    gap = enqueue_total - dequeue_total - lost_total - depth，理想恒 0
+    （容许 pop/enqueue 在途的瞬时抖动）。gap 持续为正 = 存在**未计数的**
+    损耗/绕行路径；持续为负 = 有未经 enqueue 计数的入池。PERF-2026-10-26
+    实测 enqueue 2,242 / dequeue 7 的"不对称"缺的就是这条账 —— 账目闭合后
+    PQ 深度才可作为背压信号使用（capacity.pq_depth_ratio 读同源快照）。
+    """
+    try:
+        from metrics import AUDIT_PQ_DEQUEUE, AUDIT_PQ_ENQUEUE, AUDIT_PQ_LOST
+        enq = _counter_total(AUDIT_PQ_ENQUEUE)
+        deq = _counter_total(AUDIT_PQ_DEQUEUE)
+        lost = _counter_total(AUDIT_PQ_LOST)
+    except Exception:
+        enq = deq = lost = 0
+    depth = pq_depth_snapshot()
+    return {
+        "enqueue": enq,
+        "dequeue": deq,
+        "lost": lost,
+        "depth": depth,
+        "gap": enq - deq - lost - depth,
+    }
+
+
 class AuditPriorityQueue:
     def __init__(self):
         self._redis = None
@@ -140,6 +194,10 @@ class AuditPriorityQueue:
             # 2×TTL 后整队消失(含刚入队、payload 仍存活的任务), 与 never-drop
             # 承诺冲突。ZSET 现在持久, 陈旧任务由 pop 侧显式过期出队。
             await pipe.execute()
+            try:
+                await self.depth()  # 刷新深度快照（capacity 背压信号读）
+            except Exception:
+                pass
             try:
                 from metrics import inc_audit_pq_enqueue
                 inc_audit_pq_enqueue(tier)
@@ -307,11 +365,14 @@ class AuditPriorityQueue:
 
     async def depth(self) -> int:
         if self._redis is None:
+            _DEPTH_CACHE["v"] = 0
             return 0
         try:
-            return int(await self._redis.zcard(PQ_KEY) or 0)
+            n = int(await self._redis.zcard(PQ_KEY) or 0)
         except Exception:
             return 0
+        _DEPTH_CACHE["v"] = n
+        return n
 
     async def peek_highest(self) -> Optional[dict]:
         """窥视最高优任务 (ZRANGE 0 0 + 读 payload), 不弹出; 空队列返回 None。"""
@@ -373,7 +434,21 @@ class AuditPriorityQueue:
                     raw = raw.decode()
                 try:
                     payload = json.loads(raw)
-                except Exception:
+                except Exception as e:
+                    # R8(P2): 与 pop_highest 对齐 — 损坏 payload 必须清理成员
+                    # + 计数 + dead_letter。修复前 `continue` 让该成员永久滞留
+                    # 扫描窗口头部, 任务静默消失且无任何可重放痕迹。
+                    await self._redis.zrem(PQ_KEY, m)
+                    await self._redis.delete(f"{PQ_PAYLOAD_PREFIX}{m}")
+                    logger.error(
+                        f"[AuditPQ] LOST member={m} reason=payload_corrupt (pop_matching): {e}"
+                    )
+                    try:
+                        from metrics import inc_audit_pq_lost
+                        inc_audit_pq_lost("payload_corrupt")
+                    except Exception:
+                        pass
+                    await _dead_letter(m, "payload_corrupt", str(e))
                     continue
                 try:
                     ok = bool(predicate(payload))

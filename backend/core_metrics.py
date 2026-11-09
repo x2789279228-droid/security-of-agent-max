@@ -450,14 +450,26 @@ def record_ingest(source: str, result: str, reason: str = "", n: int = 1) -> Non
     INGEST_REJECTED.labels(source=src, reason=why).inc(count)
 
 
+#: Kafka lag 的进程内可读副本（topic → 最新 lag），供背压信号同步读取。
+#: 消费循环停止刷新后这里会陈旧 —— 背压只做趋势判断（滞回闩）不做会计，
+#: 陈旧偏高只会多拒绝一会儿，不会误放行。
+_KAFKA_LAG_STATE: dict[str, int] = {}
+
+
 @_safe
 def set_kafka_lag(topic: str, lag: int, oldest_age_seconds: float = 0.0) -> None:
     name = clamp_topic(topic)
+    _KAFKA_LAG_STATE[name] = max(0, int(lag))
     KAFKA_LAG.labels(topic=name).set(max(0, int(lag)))
     age = max(0.0, float(oldest_age_seconds or 0.0))
     if int(lag) <= 0:
         age = 0.0
     KAFKA_OLDEST_LAG_SECONDS.labels(topic=name).set(age)
+
+
+def total_kafka_lag() -> int:
+    """全部受监 topic 的 lag 总和（0 当无数据/无消费者；不抛异常）。"""
+    return sum(v for v in _KAFKA_LAG_STATE.values() if isinstance(v, int) and v > 0)
 
 
 @_safe

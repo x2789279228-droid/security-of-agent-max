@@ -110,11 +110,15 @@ class SysmonEvent:
     security_flags: list = field(default_factory=list)
     raw_data: dict = field(default_factory=dict)
     correlation_key: str = ""
+    # E1(2026-10-30): 事件时间提取 —— XML TimeCreated@SystemTime / JSON SystemTime。
+    # 修复前 parser 完全不提取时间, 下游(跨源关联/时间窗聚合)只能拿入库时刻。
+    timestamp: str = ""
 
     def to_dict(self) -> dict:
         return {
             "source_type": "sysmon",
             "event_id": self.event_id,
+            "timestamp": self.timestamp,
             "event_name": self.event_name,
             "computer_name": self.computer,
             "user_name": self.user,
@@ -161,6 +165,15 @@ class SysmonParser:
                     name = d.get("Name", "")
                     data[name] = d.text or ""
 
+            # E1(2026-10-30): TimeCreated@SystemTime(事件真实发生时间)
+            # + System/Computer(主机名在 System 节点, EventData 里没有)
+            time_el = root.find(f".//{ns}TimeCreated")
+            if time_el is not None and time_el.get("SystemTime"):
+                data["_SystemTime"] = time_el.get("SystemTime")
+            comp_el = root.find(f".//{ns}Computer")
+            if comp_el is not None and comp_el.text and not data.get("Computer"):
+                data["Computer"] = comp_el.text.strip()
+
             return self._build_event(event_id, data, root, ns)
         except ET.ParseError as e:
             logger.debug("Sysmon XML 解析失败: %s", e)
@@ -171,7 +184,12 @@ class SysmonParser:
         event_id = d.get("EventID", d.get("event_id", 0))
         if not event_id:
             return None
-        event_data = d.get("EventData", d.get("event_data", d))
+        event_data = dict(d.get("EventData", d.get("event_data", d)) or {})
+        # E1(2026-10-30): 顶层平铺的常见字段(主机名/时间)并入 EventData 视图 —
+        # Windows 事件 JSON 导出常把 Computer/SystemTime 放顶层而非 EventData 内。
+        for k in ("Computer", "computer", "SystemTime", "system_time", "@timestamp"):
+            if k in d and k not in event_data:
+                event_data[k] = d[k]
         return self._build_event(int(event_id), event_data, None, "")
 
     def _build_event(self, event_id: int, data: dict, root, ns: str) -> SysmonEvent:
@@ -194,6 +212,12 @@ class SysmonParser:
             mitre_technique=mitre,
             raw_data=data,
         )
+        # E1(2026-10-30): 事件时间 —— XML 路径由 parse() 注入 _SystemTime,
+        # JSON 路径直接读 SystemTime(顶层或 EventData 内)。
+        evt.timestamp = str(
+            data.get("_SystemTime") or data.get("SystemTime")
+            or data.get("@timestamp") or ""
+        ).strip()
 
         # 端口
         port_str = data.get("DestinationPort", data.get("destination_port", "0"))
@@ -218,8 +242,16 @@ class SysmonParser:
         # 安全检测
         self._detect_threats(evt)
 
-        # 关联键: computer + process + 时间窗口
-        evt.correlation_key = f"{evt.computer}:{evt.process_name}:{evt.event_id}"
+        # E1(2026-10-30): 跨源关联键 —— 修复前 `computer:process_name:event_id`
+        # 把同机**同类型**事件全部关联(EventID 是事件类型不是进程实体:
+        # 所有进程创建的 EventID 都是 1)。改为 Sysmon 的 ProcessGuid
+        # (每进程全局唯一, 跨事件/跨源稳定); 无 Guid 的源降级
+        # computer:pid:process_name。
+        guid = str(data.get("ProcessGuid", data.get("process_guid", "")) or "").strip("{} ")
+        if guid:
+            evt.correlation_key = f"{evt.computer}:{guid.lower()}"
+        else:
+            evt.correlation_key = f"{evt.computer}:{evt.process_id}:{evt.process_name}"
 
         return evt
 

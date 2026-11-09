@@ -304,6 +304,23 @@ class EventStore:
         if broadcast:
             self._publish_invalidate(eid, gen)
 
+    @staticmethod
+    def _on_invalidate_done(task) -> None:
+        """W31 P1: 失效广播的异步结果回收 —— 异常记日志+计数, 不再
+        以 Task exception was never retrieved 裸奔。"""
+        import asyncio as _aio
+        try:
+            task.result()
+        except _aio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"EventStore invalidate broadcast failed: {e}")
+            try:
+                from core_metrics import record_cache_invalidate_failure
+                record_cache_invalidate_failure()
+            except Exception:
+                pass
+
     def _publish_invalidate(self, event_id: int, gen: int) -> None:
         if self._redis is None:
             return
@@ -321,7 +338,11 @@ class EventStore:
             if asyncio.iscoroutine(result):
                 try:
                     loop = asyncio.get_running_loop()
-                    loop.create_task(result)
+                    # W31 P1(2026-10-30): 裸 create_task 的异常无人回收 ——
+                    # Redis 池击穿时刷 "Task exception was never retrieved" 且
+                    # 错误不可见。挂 done 回调: 记日志 + 计数, 永不静默。
+                    task = loop.create_task(result)
+                    task.add_done_callback(self._on_invalidate_done)
                 except RuntimeError:
                     pass
         except Exception as e:

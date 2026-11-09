@@ -141,12 +141,18 @@ async def simulate_threat(
         "message": req.message or f"模拟{req.threat_type}攻击",
         "session_id": req.session_id or str(uuid.uuid4()),
         "event_id": req.event_id,
+        # R19(复审 P2): 人工注入的模拟威胁必须走"无副作用"轨 — 修复前不传
+        # allow_blocking, orchestrator 缺省回落 True, live 模式下 operator 可借
+        # simulate 命中 auto_execute 策略对任意 src_ip 触发真实 iptables DROP,
+        # 绕过 /api/response/execute 的高危审批分级。服务端写死, 不收客户端字段。
+        "allow_blocking": False,
     }
     result = await response_orchestrator.on_threat_detected(
         session=session,
         threat_info=threat_info,
         event_id=req.event_id if req.event_id else None,
         session_id=threat_info["session_id"],
+        allow_blocking=False,
     )
     # 人工注入威胁必须留审计痕迹（执行链路本身带全量守卫与 ResponseLog）
     await _audit(

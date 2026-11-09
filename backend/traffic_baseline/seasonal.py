@@ -65,6 +65,16 @@ class SeasonalDetector:
     def __init__(self):
         # key: "{ip}:{metric}" → TimeSeriesState
         self._series: dict[str, TimeSeriesState] = {}
+        # H-③(2026-10-30 REMEDIATION-PLAN 路线 H): 同侪组基线旁挂
+        # —— traffic_baseline/peer_group.py 从休眠接入生产(纯本地计算, 默认开)。
+        # 观测进组、检测时对照同侪组均值, 落 peer_group 字段(只增强不否决)。
+        self._peer: object = None
+
+    def _peer_analyzer(self):
+        if self._peer is None:
+            from .peer_group import PeerGroupAnalyzer
+            self._peer = PeerGroupAnalyzer()
+        return self._peer
 
     def add_observation(self, ip: str, metric: str, value: float, timestamp: float = 0.0):
         """添加观测值"""
@@ -83,6 +93,14 @@ class SeasonalDetector:
         state.total_sum += value
         state.total_sq_sum += value * value
         state.count += 1
+
+        # H-③: 同步喂给同侪组(开关默认开; fail-open)
+        try:
+            from config import settings as _cfg
+            if getattr(_cfg, "traffic_peer_group_enabled", True):
+                self._peer_analyzer().add_host(ip, {metric: value})
+        except Exception:
+            pass
 
     def detect(self, ip: str, metric: str, current_value: float = None) -> dict:
         """
@@ -145,6 +163,18 @@ class SeasonalDetector:
             "std": round(std, 1),
             "reasons": reasons,
         }
+
+        # H-③: 同侪组对照(只增强不否决 —— 组内同行不异常时给出降权信号)
+        try:
+            from config import settings as _cfg
+            if getattr(_cfg, "traffic_peer_group_enabled", True):
+                devs = self._peer_analyzer().detect_deviations()
+                for d in devs:
+                    if d.get("ip") == ip:
+                        result["peer_group"] = d
+                        break
+        except Exception:
+            pass
 
         # ── P0.S 流量大模型 hook (主路径 0 等待) ──
         # 仅在规则判定异常 + 模块启用时,后台派发 LLM 语义判定

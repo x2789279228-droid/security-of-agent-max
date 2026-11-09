@@ -91,3 +91,52 @@ async def release(key: str, client=None) -> None:
 async def redis_available() -> bool:
     """当前进程是否有可用 Redis 客户端（不 ping，只看装配状态）。"""
     return await _default_client() is not None
+
+
+async def pg_advisory_claim(event_id: int, ttl_s: int) -> Optional[bool]:
+    """PG 会话级咨询锁认领 —— A3-⑤（REMEDIATION-PLAN 2026-10-30）仲裁兜底。
+
+    Redis 不可用时审计认领裸 fail-open（互斥消失：多 worker 同事件双倍
+    LLM 成本/结论互覆）。本函数用 `pg_try_advisory_lock` 做第二级仲裁：
+      True  = 拿到（绑定独立连接，由后台任务 ttl 后自动释放 —— 与 Redis
+              认领 TTL 同语义，防止长审计把池连接占死）
+      False = 他人持有（contended，跳过）
+      None  = PG 也不可用（最后退回 fail-open，指标可见）
+    """
+    import asyncio
+
+    try:
+        from models import engine
+        conn = await engine.connect()
+    except Exception as e:
+        logger.debug("pg_advisory_claim connect failed: %s", e)
+        return None
+    key = int(event_id) & 0x7FFFFFFFFFFFFFFF
+    try:
+        from sqlalchemy import text
+        res = await conn.execute(text("SELECT pg_try_advisory_lock(:k) AS ok"), {"k": key})
+        ok = bool(res.scalar())
+        if not ok:
+            await conn.close()
+            return False
+    except Exception as e:
+        logger.debug("pg_try_advisory_lock failed: %s", e)
+        try:
+            await conn.close()
+        except Exception:
+            pass
+        return None
+
+    async def _release_later() -> None:
+        await asyncio.sleep(max(1, int(ttl_s)))
+        try:
+            await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+        except Exception:
+            pass
+        try:
+            await conn.close()
+        except Exception:
+            pass
+
+    asyncio.create_task(_release_later())
+    return True

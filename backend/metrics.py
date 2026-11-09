@@ -107,6 +107,13 @@ AUDIT_PQ_DRAIN_BLOCKED = Counter(
     "soc_audit_pq_drain_blocked_total",
     "PQ drain 因 Temporal agent 槽满而整轮无法出队的次数（溢出池只进不出的直接信号）",
 )
+# Wave 0-4（PERF-OPT-PLAN-2026-10-26）：PQ 三角闭合账目 ——
+# gap = enqueue_total - dequeue_total - lost_total - depth，理想恒 0。
+# 持续非 0 = 存在未计数的损耗/绕行路径；账目闭合后 PQ 深度才可作背压信号。
+AUDIT_PQ_ACCOUNTING_GAP = Gauge(
+    "soc_audit_pq_accounting_gap",
+    "PQ 三角闭合差额 = enqueue-dequeue-lost-depth；持续非 0 = 存在未计数损耗路径",
+)
 AUDIT_WORKERS = Gauge("soc_audit_worker_busy", "配置的审计 worker 数")
 DB_POOL_CHECKEDOUT = Gauge("soc_db_pool_checkedout", "DB 池已借出连接", ["pool"])
 EVENTBUS_SUBSCRIBERS = Gauge("soc_eventbus_subscribers", "SSE 订阅者数")
@@ -208,6 +215,14 @@ def inc_audit_pq_dequeue(tier: str = "?") -> None:
 def inc_audit_pq_lost(reason: str = "payload_missing") -> None:
     try:
         AUDIT_PQ_LOST.labels(reason=reason or "?").inc()
+    except Exception:
+        pass
+
+
+def set_audit_pq_accounting_gap(gap: float) -> None:
+    """PQ 三角闭合差额 gauge（audit_pq.pq_triangulation 算出后由 drain 刷新）。"""
+    try:
+        AUDIT_PQ_ACCOUNTING_GAP.set(float(gap))
     except Exception:
         pass
 

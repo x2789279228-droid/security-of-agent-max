@@ -448,13 +448,12 @@ def _spawn_background(coro) -> None:
         except Exception as e:
             logger.debug(f"[SourceRegistry] background task failed: {e}")
 
+    # 事件循环治理: 删除隐式 get_event_loop() 回退(跨线程/无循环上下文会
+    # 抓到已关闭或不相关的循环 — 测试字母序地雷的污染源)。无运行循环即跳过。
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            return
+        return
     task = loop.create_task(_bounded())
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)

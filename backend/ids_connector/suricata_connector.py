@@ -220,26 +220,38 @@ class SuricataConnector:
         return alert
 
     async def _consume_loop(self):
-        """Kafka 消费循环 — 消费 Suricata EVE Topic"""
+        """Kafka 消费循环 — 消费 Suricata EVE Topic
+
+        R9(P2): 外层监督重启 + 指数退避(1s→30s 封顶), 对齐 kafka_consumer 的
+        模式。修复前整个循环包在一次性 try/except 里, broker 重启/网络抖动
+        一次消费任务即死亡且 `_running` 仍为 True — 之后所有 EVE 告警静默
+        凭空消失(与本次要修的"告警凭空消失"同构)。
+        """
         try:
             from aiokafka import AIOKafkaConsumer
+        except ImportError:
+            logger.error("aiokafka 未安装")
+            return
 
-            # P2: topic 可配置(注释与实现一致), 缺省保持原值兼容
-            topic = getattr(settings, "suricata_eve_topic", "") or "suricata-eve"
-            # Kafka 安全参数与主链路同源 (见 kafka_security.py 模块说明)
-            from kafka_security import aiokafka_security_kwargs
-            consumer = AIOKafkaConsumer(
-                topic,
-                bootstrap_servers=settings.kafka_bootstrap,
-                group_id="soc-suricata",
-                value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-                auto_offset_reset="latest",
-                **aiokafka_security_kwargs(),
-            )
-            await consumer.start()
-            logger.info("Suricata EVE Kafka 消费者启动: topic=%s", topic)
-
+        topic = getattr(settings, "suricata_eve_topic", "") or "suricata-eve"
+        backoff = 1.0
+        while self._running:
+            consumer = None
             try:
+                # Kafka 安全参数与主链路同源 (见 kafka_security.py 模块说明)
+                from kafka_security import aiokafka_security_kwargs
+                consumer = AIOKafkaConsumer(
+                    topic,
+                    bootstrap_servers=settings.kafka_bootstrap,
+                    group_id="soc-suricata",
+                    value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+                    auto_offset_reset="latest",
+                    **aiokafka_security_kwargs(),
+                )
+                await consumer.start()
+                backoff = 1.0  # 连接成功即复位退避
+                logger.info("Suricata EVE Kafka 消费者启动: topic=%s", topic)
+
                 async for msg in consumer:
                     if not self._running:
                         break
@@ -247,15 +259,20 @@ class SuricataConnector:
                         await self.process_eve(msg.value)
                     except Exception as e:
                         logger.debug("EVE 消息处理失败: %s", e)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("Suricata 消费循环异常(将重试, 退避 %.0fs): %s", backoff, e)
             finally:
-                await consumer.stop()
-
-        except ImportError:
-            logger.error("aiokafka 未安装")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error("Suricata 消费循环异常: %s", e)
+                if consumer is not None:
+                    try:
+                        await consumer.stop()
+                    except Exception:
+                        pass
+            if not self._running:
+                break
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30.0)
 
     def _cleanup_dedup(self):
         """清理过期的去重记录"""

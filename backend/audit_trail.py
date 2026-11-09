@@ -483,11 +483,17 @@ def audited(
         def sync_wrapper(*args, **kwargs):
             result = fn(*args, **kwargs)
             try:
-                asyncio.get_event_loop().create_task(
+                # 事件循环治理: 隐式 get_event_loop() 在无运行循环时会创建/
+                # 复用无关循环(3.12 起弃用, 3.14 报错), 且是测试字母序地雷的
+                # 污染源。只认"当前线程正在运行的循环", 没有就放弃本次审计
+                # (best-effort 语义, 与此前 except 吞掉一致)。
+                asyncio.get_running_loop().create_task(
                     _record_from_kwargs(fn, kwargs, action, target_type,
                                         target_id_kwarg, before_kwarg,
                                         after_kwarg, actor_kwarg, reason_kwarg)
                 )
+            except RuntimeError:
+                pass  # 无运行循环(如 CLI/线程上下文) — 跳过审计留痕
             except Exception as e:
                 logger.debug(f"[audit_trail] sync record failed: {e}")
             return result

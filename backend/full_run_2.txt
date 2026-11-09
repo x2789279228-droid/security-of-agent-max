@@ -1,0 +1,71 @@
+..............................................................x......... [  2%]
+....x..x...............................xxxxx.x...................x....F. [  4%]
+........................................................................ [  6%]
+......................x...x....................F........................ [  9%]
+........................................................................ [ 11%]
+.........................x.............................................. [ 13%]
+........................................................................ [ 15%]
+......................................x.................F.F.xxxxx....... [ 18%]
+........................................................................ [ 20%]
+............................................................FF.F........ [ 22%]
+...........x............................................................ [ 24%]
+....................xxxxxxxxxxxxxxx..x.................................. [ 27%]
+F....................................................................... [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+..........................xx............................................ [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+......................................................................x. [ 81%]
+..............x......................................................... [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 90%]
+.........s.................sssssssssssssssss............sssssss......... [ 92%]
+...........................sssssss...................................... [ 94%]
+..............................................................xxx....... [ 96%]
+........................................................................ [ 99%]
+......................xxxx.                                              [100%]
+============================== warnings summary ===============================
+tests/test_http_guards.py::TestJwtRevoke::test_logout_blocks_jti
+  C:\Users\Admin\AppData\Local\hermes\hermes-agent\venv\Lib\site-packages\jwt\api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_http_guards.py::TestJwtRevoke::test_logout_blocks_jti
+  C:\Users\Admin\AppData\Local\hermes\hermes-agent\venv\Lib\site-packages\jwt\api_jwt.py:368: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_llm_enhancers.py::TestLlmEnhancer::test_safe_dispatch_does_not_throw_without_event_loop
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\backend\tests\test_llm_enhancers.py:145: RuntimeWarning: coroutine 'TestLlmEnhancer.test_safe_dispatch_does_not_throw_without_event_loop.<locals>.noop' was never awaited
+    llm_enhancer.safe_dispatch(noop(), log_label="test")
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_active_module_coverage_gap.py::TestTheZeroCoverageListIsRegistered::test_the_measured_list_equals_the_registry
+FAILED tests/test_assert_weakening_gate_coverage.py::TestTheBaseline::test_the_baseline_covers_the_untracked_test_files
+FAILED tests/test_config_switch_wiring.py::test_settings_field_count_is_unchanged
+FAILED tests/test_config_switch_wiring.py::test_env_example_parses_and_ships_the_keys_we_care_about
+FAILED tests/test_dead_code_remediation.py::test_intel_counter_moves_on_real_poll_feed
+FAILED tests/test_dead_code_remediation.py::test_intel_counter_labels_by_feed_source
+FAILED tests/test_dead_code_remediation.py::test_capabilities_endpoint_count_is_no_longer_structurally_zero
+FAILED tests/test_eval_rag.py::test_hybrid_mode_fails_honestly - AssertionErr...
+8 failed, 3108 passed, 34 skipped, 47 xfailed, 3 warnings in 638.01s (0:10:38)

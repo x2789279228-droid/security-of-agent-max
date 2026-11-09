@@ -131,7 +131,7 @@ class KnowledgeBaseManager:
             # 因此单引号字面量可被闭合 → SQL 注入。
             # 改为 bindparams 参数绑定(与 rag/retriever.py 的既有写法一致)。
             conditions.append(
-                text("threat_types @> CAST(:tt AS jsonb)").bindparams(
+                text("threat_types::jsonb @> CAST(:tt AS jsonb)").bindparams(
                     tt=json.dumps([threat_type])
                 )
             )

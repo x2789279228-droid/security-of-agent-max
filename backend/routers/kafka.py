@@ -131,7 +131,7 @@ async def _trace_backend_health() -> dict:
     result = {"tempo": {"reachable": False}, "otel_collector": {"reachable": False}}
     try:
         async with httpx.AsyncClient(timeout=3) as client:
-            r = await client.get("http://tempo:3200/ready")
+            r = await client.get(f"{settings.tempo_url}/ready")
             result["tempo"] = {"reachable": True, "status_code": r.status_code}
     except Exception as e:
         result["tempo"]["error"] = str(e)

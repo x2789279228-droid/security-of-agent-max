@@ -41,6 +41,9 @@ _EXT_ALPN = 0x0010
 _EXT_SUPPORTED_GROUPS = 0x000A
 _EXT_SIGNATURE_ALGORITHMS = 0x000D
 _EXT_SUPPORTED_VERSIONS = 0x002B
+# J 清零(2026-10-30): ec_point_formats(0x000B) 此前不解析 → ja3_fingerprint
+# 恒用默认 [0]，与参考 JA3 实现(含 point formats)系统性不一致。
+_EXT_EC_POINT_FORMATS = 0x000B
 
 # 密码套件名称（常见子集）
 _CIPHER_MAP = {
@@ -93,6 +96,11 @@ def _parse_extensions(data: bytes) -> dict:
                 for i in range(2, min(2 + glen, len(ext_data)), 2):
                     groups.append(struct.unpack("!H", ext_data[i:i + 2])[0])
                 result["supported_groups"] = groups
+
+        elif ext_type == _EXT_EC_POINT_FORMATS:
+            # J 清零(2026-10-30): list_len(1) → [format(1)]*；0=uncompressed
+            if ext_data and ext_data[0] == len(ext_data) - 1:
+                result["ec_point_formats"] = list(ext_data[1:])
 
         elif ext_type == _EXT_SUPPORTED_VERSIONS:
             versions = []
@@ -204,6 +212,10 @@ class TlsParser:
                     "version": version,
                     "ciphers": ciphers,
                     "extensions": list(extensions.keys()) if isinstance(extensions, dict) else [],
+                    # J 清零(2026-10-30): curves/point_formats 从扩展真实提取,
+                    # 缺扩展时由 ja3_fingerprint 按规范默认(空/0)
+                    "curves": extensions.get("supported_groups", []),
+                    "point_formats": extensions.get("ec_point_formats", []),
                 },
             },
         )

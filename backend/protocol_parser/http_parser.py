@@ -23,7 +23,10 @@ _SQLI_PATTERN = re.compile(
     rb"(?i)(union\s+select|or\s+1\s*=\s*1|'\s*or\s*'|drop\s+table|"
     rb"insert\s+into|select\s+.*\s+from|;\s*--|xp_cmdshell)",
 )
-_PATH_TRAVERSAL = re.compile(rb"(?i)(\.\./|\.\.\\|%2e%2e%2f|%2e%2e/)",)
+# W1-6(复审 P3-8): 补齐编码/混合变体 — %2e%2e%5c(反斜杠)、..%2f、%2e./、
+# %c0%ae 过度编码(主干接入路径有 normalization 兜底, 此处覆盖实时抓包旁路)
+_PATH_TRAVERSAL = re.compile(
+    rb"(?i)(\.\./|\.\.\\|%2e%2e%2f|%2e%2e/|%2e%2e%5c|\.\.%2f|%2e\./|%c0%ae)",)
 _SENSITIVE_PATHS = (
     b"/etc/passwd", b"/etc/shadow", b"wp-admin", b"phpmyadmin",
     b"/.env", b"/.git/config", b"actuator", b"swagger",

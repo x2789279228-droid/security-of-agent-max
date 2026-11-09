@@ -168,9 +168,16 @@ class PostMortemService:
         self, session: AsyncSession, case: SecurityCase
     ) -> list[dict]:
         timeline = []
-        for eid in (case.event_ids or []):
-            evt = await session.get(SecurityEvent, eid)
-            if evt:
+        # R16(P1-10): 复用 case_manager.get_case_timeline 的批查口径 —
+        # 修复前逐 id session.get(N+1), 且此处 except: pass 吞掉响应日志段。
+        if case.event_ids:
+            stmt = (
+                select(SecurityEvent)
+                .where(SecurityEvent.id.in_(case.event_ids))
+                .order_by(SecurityEvent.created_at)
+            )
+            result = await session.execute(stmt)
+            for evt in result.scalars().all():
                 timeline.append({
                     "time": evt.created_at.isoformat() if evt.created_at else "",
                     "event": f"告警: {evt.event_type}",
@@ -190,8 +197,8 @@ class PostMortemService:
                     "event": f"响应: {log.action_name}",
                     "detail": f"策略={log.policy_name} 成功={log.action_success}",
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[PostMortem] 响应日志段时间线查询失败: %s", e)
 
         timeline.sort(key=lambda x: x.get("time", ""))
         return timeline

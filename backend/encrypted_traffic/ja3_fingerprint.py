@@ -79,7 +79,9 @@ class JA3Engine:
         ciphers = _filter_grease(fields.get("ciphers", []))
         extensions = _filter_grease(fields.get("extensions", []))
         curves = _filter_grease(fields.get("curves", fields.get("supported_groups", [])))
-        point_formats = fields.get("point_formats", [0])  # 默认 uncompressed
+        # J 清零(2026-10-30): tls_parser 现已真实提取 ec_point_formats 扩展;
+        # 客户端未发送该扩展时按 RFC 8422 语义默认 uncompressed(0)。
+        point_formats = fields.get("point_formats") or [0]
 
         # JA3 字符串: Version,Ciphers,Extensions,EllipticCurves,EllipticCurvePointFormats
         cipher_str = "-".join(str(c) for c in ciphers)
