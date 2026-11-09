@@ -101,7 +101,7 @@ def test_dig_supports_list_index_and_missing():
 
 
 @pytest.mark.asyncio
-async def test_poll_feed_json_api_dispatch(monkeypatch):
+async def test_poll_feed_json_api_dispatch(monkeypatch, no_dns_url_guard):
     """feed_type=json_api 走 POST 通道并返回解析结果。"""
     seen = {}
 
@@ -126,7 +126,7 @@ async def test_poll_feed_json_api_dispatch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_json_api_get_passes_extra_headers(monkeypatch):
+async def test_json_api_get_passes_extra_headers(monkeypatch, no_dns_url_guard):
     """D 第二批: GET + 源特定 header（OTX X-OTX-API-KEY 形态）透传到传输层。"""
     seen = {}
 

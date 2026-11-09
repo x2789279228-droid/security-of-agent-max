@@ -112,6 +112,17 @@ async def test_kpi_seed_tags_and_clear_rolls_back():
 
 # ── 3. demo_mode 路由开关 ──
 
+def _openapi_paths(app_obj) -> set:
+    """跨 FastAPI 版本的路由路径集合。
+
+    FastAPI ≥0.16x 的 include_router 改为惰性 `_IncludedRouter` 包装,
+    `app.routes` 里的条目**没有** `.path` 属性 —— 直接反射路由对象会
+    两条用例一起失真(mounted 用例假红、gated 用例假绿, 2026-11-09 实测)。
+    通过 openapi() 物化 schema 取 paths, 行为在任何版本都稳定。
+    """
+    return set(app_obj.openapi().get("paths", {}))
+
+
 def test_demo_router_gated_by_config(monkeypatch):
     """demo_mode=False 时 /api/demo 不挂载。"""
     import importlib
@@ -121,7 +132,7 @@ def test_demo_router_gated_by_config(monkeypatch):
     monkeypatch.setattr(config.settings, "demo_mode", False)
     try:
         importlib.reload(app_mod)
-        paths = {getattr(r, "path", "") for r in app_mod.app.routes}
+        paths = _openapi_paths(app_mod.app)
         assert not any(p.startswith("/api/demo") for p in paths), \
             "demo_mode=false 时不得挂载 /api/demo/*"
     finally:
@@ -137,7 +148,7 @@ def test_demo_router_mounted_when_enabled(monkeypatch):
     monkeypatch.setattr(config.settings, "demo_mode", True)
     try:
         importlib.reload(app_mod)
-        paths = {getattr(r, "path", "") for r in app_mod.app.routes}
+        paths = _openapi_paths(app_mod.app)
         assert any(p.startswith("/api/demo") for p in paths)
     finally:
         importlib.reload(app_mod)

@@ -150,6 +150,66 @@ import pytest  # noqa: E402
 # 隐式依赖消失后该 workaround 移除(若复发, 先查新引入的 get_event_loop)。
 
 
+# 5. autouse fixture —— 清掉开发机代理环境变量(2026-11-09)
+# ══════════════════════════════════════════════════════════════════
+# httpx.AsyncClient() 默认 trust_env=True, 构造期即解析 HTTP(S)_PROXY/ALL_PROXY。
+# 开发机挂着的代理 URL 端口畸形(如断网黑洞代理 "http://[x]:1]")时, 构造期直接抛
+# InvalidURL —— test_llm_resilience_matrix 9 个 / containment 2 个 / webhook 1 个
+# 全部死在这一步, 与被测逻辑无关。测试套件本就不该吃宿主代理, 这里统一摘除。
+
+
+@pytest.fixture(autouse=True)
+def _strip_proxy_env(monkeypatch):
+    for _var in (
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "all_proxy",
+    ):
+        monkeypatch.delenv(_var, raising=False)
+
+
+@pytest.fixture
+def no_dns_url_guard(monkeypatch):
+    """intel feed 轮询系测试用: net_guard 校验保留但跳过真实 DNS 解析。
+
+    开发机 DNS 常被 fake-ip 模式代理劫持(Clash/Mihomo 把公网域名解析进
+    198.18.0.0/15), ipaddress 判 is_private 后 SSRF 守卫误拒 —— 2026-11-03
+    全量跑 intel 组 6 个失败的根因; CI 上外网 DNS 抖动同样会偶红。
+    URL 的协议/字面 IP 私网校验语义不变, 仅不做域名解析那一步。
+    需要验证守卫本身的测试(如 rejects_private_url)不要用本 fixture。
+    """
+    import net_guard
+
+    real = net_guard.validate_submittable_url
+
+    def _no_dns(url: str, **kwargs):
+        return real(url, **{**kwargs, "resolve_dns": False})
+
+    monkeypatch.setattr(net_guard, "validate_submittable_url", _no_dns)
+
+
+# 6. autouse fixture —— 默认静音 trace 异步落库(2026-11-09)
+# ══════════════════════════════════════════════════════════════════
+# trace_hook._lazy_recorder 对每条 LLM 轨迹 fire-and-forget 一个 AsyncSession
+# 写库任务。任务在循环关闭时仍 pending 的话，cancel 送不进 SQLAlchemy 的
+# greenlet 桥(aiosqlite 线程模型)，任务不死 → asyncio.run / pytest-asyncio
+# session teardown 的 _cancel_all_tasks 永久挂起(实测 Windows 12 个僵尸任务,
+# EXIT=124)。测试里这些隐式落库不属于被测行为，默认替换为 no-op；
+# 显式验证落库的用例申请 real_trace_recorder 恢复真实 recorder。
+
+
+@pytest.fixture
+def real_trace_recorder():
+    """保持真实异步落库 recorder 的开关 —— 显式测试 AgentTrace 落库时申请。"""
+
+
+@pytest.fixture(autouse=True)
+def _quiet_trace_hook(request, monkeypatch):
+    if "real_trace_recorder" in request.fixturenames:
+        return
+    import trace_hook
+    monkeypatch.setattr(trace_hook, "_recorder", lambda **_kw: None)
+
+
 @pytest.fixture(autouse=True)
 def _reset_globals():
     """复位模块级单例与 settings。

@@ -62,7 +62,7 @@ def test_thought_step_inherits_trace_id():
     clear_trace_context()
 
 
-def test_emit_trace_persists_trace_id():
+def test_emit_trace_persists_trace_id(real_trace_recorder):
     from models import AgentTrace, Base, async_session, engine
     from sqlalchemy import select
     from trace_hook import clear_trace_context, emit_trace, set_trace_context

@@ -22,7 +22,7 @@ def test_misp_type_map_covers_botvrij_observed_types():
 
 
 @pytest.mark.asyncio
-async def test_poll_misp_feed_via_manifest_and_events(monkeypatch):
+async def test_poll_misp_feed_via_manifest_and_events(monkeypatch, no_dns_url_guard):
     """manifest → 最新 N 事件 → 属性抽取 → 类型映射 全链。"""
     manifest = {
         "ev-old": {"timestamp": 1600000000},

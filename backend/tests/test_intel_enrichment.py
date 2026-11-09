@@ -128,7 +128,7 @@ def test_kev_json_rejects_malformed():
     assert taxii_client._parse_kev_json('{"title": "no vulns here"}', config) == []
 
 
-def test_kev_fetch_path(monkeypatch):
+def test_kev_fetch_path(monkeypatch, no_dns_url_guard):
     """拉取→解析全链(传输打桩): feed_type=kev_json 走 _import_kev_json。"""
 
     async def _fake_fetch(url, api_key=""):

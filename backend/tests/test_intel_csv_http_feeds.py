@@ -102,7 +102,7 @@ def test_legacy_local_csv_semantics_preserved(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_poll_feed_csv_http_dispatch_and_store(monkeypatch):
+async def test_poll_feed_csv_http_dispatch_and_store(monkeypatch, no_dns_url_guard):
     """dispatch → 拉取(monkeypatch) → store_iocs 落库 全链路。"""
     from models import ThreatIoc, async_session
     from threat_intel import stix_taxii

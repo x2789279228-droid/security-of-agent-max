@@ -45,6 +45,9 @@ geoip2>=4.8,<6             # GeoIP 地理位置查询（可选，需 MaxMind 数
 # ── 可选: TLS 解密代理 (encrypted_traffic/mitm_proxy.py, 默认关闭) ──
 # mitmproxy>=10,<12
 
+# Windows zoneinfo 数据库(Python 在 Windows 无系统 tz 库, AnomalyDetector 配置时区依赖)
+tzdata>=2024.1
+
 # ── 测试依赖 (2026-10-23 起显式声明: 此前 CI 从未安装 pytest-asyncio,
 #    全量跑时所有 @pytest.mark.asyncio 用例在 CI 必挂; 本地与 CI 共用此清单) ──
 pytest>=8.3,<10              # 9.x: CVE-2025-71176; PytestRemovedIn9Warning 默认变错误

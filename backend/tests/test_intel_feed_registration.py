@@ -111,7 +111,7 @@ async def test_register_rejects_unknown_feed_type():
 
 
 @pytest.mark.asyncio
-async def test_kev_json_dialect_dispatch(monkeypatch):
+async def test_kev_json_dialect_dispatch(monkeypatch, no_dns_url_guard):
     """kev_json 走 poll_feed 分发且方言解析正确(注册后的下一跳)。"""
     from threat_intel.stix_taxii import taxii_client
 
