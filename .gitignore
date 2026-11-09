@@ -136,3 +136,8 @@ tools-maven/
 
 # 本地测试日志(评测证据由 docs/benchmark 承载, 全量日志含本机路径不入 git)
 reports/pytest-*.log
+
+# CI 状态调试转储(临时文件)
+cr*.json
+checkruns.json
+bandit-ci.json
