@@ -139,7 +139,7 @@ def render_markdown(res: dict, note_lines: list[str]) -> str:
         "# RAG 检索质量评测 — 词法层基线(可复现)", "",
         f"- 语料: {res['corpus_n']} chunks (fixtures/rag_corpus.jsonl, 提交入库)",
         f"- 黄金集: {res['queries_n']} 条查询 (fixtures/rag_golden_queries.json, 四类意图)",
-        f"- 排序器: 平台 rag.lexical.tokenize + BM25(k1=1.5,b=0.75), 确定性",
+        "- 排序器: 平台 rag.lexical.tokenize + BM25(k1=1.5,b=0.75), 确定性",
         f"- 指标: **MRR={res['mrr']}** / recall@5={res['recall_at_5']} /"
         f" recall@10={res['recall_at_10']} ({res['elapsed_ms']}ms)",
         "",

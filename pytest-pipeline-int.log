@@ -1,0 +1,35 @@
+.FF                                                                      [100%]
+================================== FAILURES ===================================
+______________ test_alert_triggers_response_decision_in_real_pg _______________
+tests\integration\test_full_pipeline_integration.py:219: in test_alert_triggers_response_decision_in_real_pg
+    actions = {r.action_name for r in rows}
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: 'coroutine' object is not iterable
+------------------------------ Captured log call ------------------------------
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-alerts is not available during auto-create initialization
+________________ test_malformed_message_lands_in_dlq_not_crash ________________
+tests\integration\test_full_pipeline_integration.py:251: in test_malformed_message_lands_in_dlq_not_crash
+    assert dlq, "畸形消息未进 DLQ —— 要么被吞(静默丢失), 要么消费循环死了"
+E   AssertionError: 畸形消息未进 DLQ —— 要么被吞(静默丢失), 要么消费循环死了
+E   assert []
+------------------------------ Captured log call ------------------------------
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-logs-dlq is not available during auto-create initialization
+ERROR    aiokafka.consumer.group_coordinator:group_coordinator.py:566 Group Coordinator Request failed: [Error 15] GroupCoordinatorNotAvailableError
+============================== warnings summary ===============================
+tests/integration/test_full_pipeline_integration.py::test_enriched_event_persists_to_real_pg
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\_pytest\python.py:187: RuntimeWarning: coroutine '_poll_until' was never awaited
+    result = testfunction(**testargs)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/integration/test_full_pipeline_integration.py::test_malformed_message_lands_in_dlq_not_crash
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\aiokafka\protocol\types.py:234: RuntimeWarning: coroutine '_poll_until' was never awaited
+    return b"".join(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_full_pipeline_integration.py::test_alert_triggers_response_decision_in_real_pg
+FAILED tests/integration/test_full_pipeline_integration.py::test_malformed_message_lands_in_dlq_not_crash
+2 failed, 1 passed, 2 warnings in 68.65s (0:01:08)

@@ -194,6 +194,13 @@ export function useDemoDirector() {
   const sceneEnteredAtRef = useRef(0)
   /** 已触发完成的本幕（防止 reviewer end + audit_complete 双触发） */
   const sceneDoneRef = useRef<Partial<Record<SceneId, boolean>>>({})
+  /**
+   * 信号分发前向引用(2026-11-10 React Compiler 合规): enterScene 的超时
+   * 降级回调需要调用 applySignal, 而后者定义在下方且依赖 completeScene
+   * →enterScene 的闭包链 —— 直接引用会形成初始化期访问。统一经此 ref
+   * 转发, 真实实现由下方 effect 在提交阶段注入。
+   */
+  const applySignalRef = useRef<(sig: DemoSignal, simulated: boolean) => void>(() => {})
 
   // ── 幕次推进 ──
   const enterScene = useCallback((idx: number) => {
@@ -227,7 +234,7 @@ export function useDemoDirector() {
           mode: 'degraded',
           sceneSimulated: { ...s.sceneSimulated, [def.id]: true },
         }))
-        for (const sig of fallbackSignals(def.id)) applySignal(sig, true)
+        for (const sig of fallbackSignals(def.id)) applySignalRef.current(sig, true)
       })
     }
     // 第五幕进入时若响应信号早已到达(流水线先于旁白完成),稍作展示后进入结案
@@ -338,8 +345,10 @@ export function useDemoDirector() {
     }
   }, [completeScene])
 
-  const applySignalRef = useRef(applySignal)
-  applySignalRef.current = applySignal
+  // 真实分发器注入(提交阶段赋值 —— 渲染期写 ref 是 React Compiler 违规)
+  useEffect(() => {
+    applySignalRef.current = applySignal
+  }, [applySignal])
 
   // ── 实时模式:消费共享 SSE 缓冲 ──
   const buffer = useEventStreamStore((s) => s.buffer)

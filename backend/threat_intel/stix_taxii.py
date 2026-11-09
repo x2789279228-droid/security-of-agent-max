@@ -631,7 +631,7 @@ class TaxiiClient:
                 if "|" in value and ioc_type in ("domain",):
                     value = value.split("|")[0]
                 tags = []
-                gal = (ev.get("Event") or {}).get("Galaxy") or []
+                _gal = (ev.get("Event") or {}).get("Galaxy") or []  # 预留: galaxy tags 收集
                 try:
                     tags.append(str((ev.get("Event") or {}).get("threat_actor_id") or ""))
                 except Exception:

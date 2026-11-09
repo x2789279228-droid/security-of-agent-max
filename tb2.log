@@ -1,0 +1,74 @@
+FFF                                                                      [100%]D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\_pytest\unraisableexception.py:29: RuntimeWarning: coroutine 'test_alert_triggers_response_decision_in_real_pg.<locals>._find.<locals>._q' was never awaited
+  gc.collect()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+
+================================== FAILURES ===================================
+___________________ test_enriched_event_persists_to_real_pg ___________________
+tests\integration\test_full_pipeline_integration.py:175: in test_enriched_event_persists_to_real_pg
+    rows = asyncio.run(_poll_until(_find, timeout_s=45))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests\integration\test_full_pipeline_integration.py:136: in _poll_until
+    result = await fn() if asyncio.iscoroutinefunction(fn) else fn()
+                                                                ^^^^
+tests\integration\test_full_pipeline_integration.py:173: in _find
+    return asyncio.run(_q())
+           ^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py:186: in run
+    raise RuntimeError(
+E   RuntimeError: asyncio.run() cannot be called from a running event loop
+----------------------------- Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+INFO     alembic.runtime.migration:migration.py:611 Running upgrade  -> 0001_baseline, baseline: 全量建表 + 既有 PG 卷补列（取代 models.py 的 except:pass 伪迁移）
+------------------------------ Captured log call ------------------------------
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-events-enriched is not available during auto-create initialization
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-events-enriched is not available during auto-create initialization
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-events-enriched is not available during auto-create initialization
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-events-enriched is not available during auto-create initialization
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-events-enriched is not available during auto-create initialization
+______________ test_alert_triggers_response_decision_in_real_pg _______________
+tests\integration\test_full_pipeline_integration.py:217: in test_alert_triggers_response_decision_in_real_pg
+    rows = asyncio.run(_poll_until(_find, timeout_s=45))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests\integration\test_full_pipeline_integration.py:136: in _poll_until
+    result = await fn() if asyncio.iscoroutinefunction(fn) else fn()
+                                                                ^^^^
+tests\integration\test_full_pipeline_integration.py:215: in _find
+    return asyncio.run(_q())
+           ^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\runners.py:186: in run
+    raise RuntimeError(
+E   RuntimeError: asyncio.run() cannot be called from a running event loop
+------------------------------ Captured log call ------------------------------
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-alerts is not available during auto-create initialization
+________________ test_malformed_message_lands_in_dlq_not_crash ________________
+tests\integration\test_full_pipeline_integration.py:251: in test_malformed_message_lands_in_dlq_not_crash
+    assert dlq, "畸形消息未进 DLQ —— 要么被吞(静默丢失), 要么消费循环死了"
+E   AssertionError: 畸形消息未进 DLQ —— 要么被吞(静默丢失), 要么消费循环死了
+E   assert []
+------------------------------ Captured log call ------------------------------
+WARNING  aiokafka.cluster:cluster.py:257 Topic security-logs-dlq is not available during auto-create initialization
+ERROR    aiokafka.consumer.group_coordinator:group_coordinator.py:566 Group Coordinator Request failed: [Error 15] GroupCoordinatorNotAvailableError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_full_pipeline_integration.py::test_enriched_event_persists_to_real_pg
+FAILED tests/integration/test_full_pipeline_integration.py::test_alert_triggers_response_decision_in_real_pg
+FAILED tests/integration/test_full_pipeline_integration.py::test_malformed_message_lands_in_dlq_not_crash
+3 failed in 74.35s (0:01:14)

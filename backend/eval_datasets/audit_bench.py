@@ -86,7 +86,6 @@ def _triage_semantic_cases() -> list[dict]:
     """25 条新增分诊/降级/账目语义样本 —— 每条调真实生产函数。"""
     from audit_triage import score_event
     from agents import llm_fallback as lf
-    from config import settings
 
     cases: list[dict] = []
 

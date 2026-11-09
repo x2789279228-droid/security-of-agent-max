@@ -29,8 +29,8 @@ async def _fresh_tables():
         await conn.run_sync(Base.metadata.create_all)
 
 
-def _mk_event(i: int, session_id: str = "sess-1") -> "SecurityEvent":
-    from models import SecurityEvent
+def _mk_event(i: int, session_id: str = "sess-1"):
+    from models import SecurityEvent  # noqa: F811 — 延迟导入避免测试收集期建表
     return SecurityEvent(
         event_type="BRUTE_FORCE", severity="high", src_ip="9.9.9.9",
         dst_ip="10.0.0.1", message=f"ev-{i}", session_id=session_id,

@@ -56,7 +56,7 @@ class LeaderElection:
             return False
         import redis as _redis  # noqa: F401
         try:
-            from distributed_lock import _RELEASE_LUA  # 同款 token 校验风格
+            pass  # 同款 token 校验风格
         except Exception:
             pass
         lua = """

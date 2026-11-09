@@ -150,14 +150,12 @@ def replay(events: list[dict]) -> list[tuple[dict, float, str]]:
 
 
 def _run_probe(det, ev):
-    import asyncio
     from eval_datasets.evaluate_detection import _probe_report
     return _probe_report(det, ev)
 
 
 def evaluate_with_thresholds(scored: list[tuple[dict, float, str]],
                              thresholds=SWEEP_THRESHOLDS) -> dict:
-    by_label = collections = {"malicious": [], "benign": []}
     n_mal = sum(1 for ev, _, _ in scored if ev["_label"] == "malicious")
     n_ben = len(scored) - n_mal
     per_threshold = []
@@ -212,8 +210,8 @@ def render_markdown(res: dict) -> str:
     lines = [
         f"# 行为层回放评测 — {res['dataset']}({mark})", "",
         f"- 流量: {res['n_events']} 条流(恶意 {res['n_malicious']} / 良性 {res['n_benign']})",
-        f"- 评测对象: anomaly_detector(频率/时序/罕见度/严重度偏移) —— "
-        f"**流级口径, Sigma 签名不适用**",
+        "- 评测对象: anomaly_detector(频率/时序/罕见度/严重度偏移) —— "
+        "**流级口径, Sigma 签名不适用**",
         f"- 吞吐: ~{res['throughput_eps']} eps",
         f"- 可行区间判据: {res['feasible_interval']['criterion']}",
         f"- **结论: {res['feasible_interval']['conclusion']}**",

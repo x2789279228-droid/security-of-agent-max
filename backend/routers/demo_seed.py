@@ -158,8 +158,10 @@ async def _seed_ioc(session: AsyncSession) -> int:
 
 def _sandbox(task_id: str, name: str, typ: str, verdict: str, score: float, status: str, mitre: list, hours: int) -> SandboxTask:
     # R12(P3): Python hash() 进程级加盐 — 重启后值变化, 与"确定性演示"矛盾;
-    # md5(name) 跨重启稳定。
-    sample_hash = "demo" + hashlib.md5(name.encode("utf-8")).hexdigest()[:12]
+    # md5(name) 跨重启稳定。usedforsecurity=False: 演示标识生成非安全用途(bandit B324)。
+    sample_hash = "demo" + hashlib.md5(
+        name.encode("utf-8"), usedforsecurity=False
+    ).hexdigest()[:12]
     return SandboxTask(task_id=task_id, sample_hash=sample_hash,
                        sample_name=name, sample_type=typ, source=MARKER, sandbox_type="cape",
                        status=status, verdict=verdict, score=score,
@@ -326,7 +328,6 @@ async def _seed_kpi(session: AsyncSession) -> int:
     """
     from ops_metrics.kpi_calculator import kpi_calculator
     from models import KpiSnapshot
-    from datetime import date as date_cls
     from sqlalchemy import func
     seeded = 0
     for i in range(14, 0, -1):

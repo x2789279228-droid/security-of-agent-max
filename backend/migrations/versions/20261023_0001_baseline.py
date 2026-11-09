@@ -73,6 +73,13 @@ def upgrade() -> None:
     bind = op.get_bind()
     from models import Base
 
+    # 0) 2026-11-10: vector 扩展必须先于建表 —— models 的 embedding 列是
+    # pgvector Vector 类型, 无扩展的全新库(如 testcontainers 裸 postgres)
+    # 会在 create_all 时报 type "vector" does not exist。生产 init.sql 已建
+    # 扩展, IF NOT EXISTS 对其无操作。集成测试容器镜像已同步 pgvector。
+    if bind.dialect.name == "postgresql":
+        bind.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
     # 1) 全量建表（幂等）：空库建齐；既有库 checkfirst 跳过已存在的表。
     #    含本次新增的 approval_tickets（审批工单持久化）。
     Base.metadata.create_all(bind, checkfirst=True)

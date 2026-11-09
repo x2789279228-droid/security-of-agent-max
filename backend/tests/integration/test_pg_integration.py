@@ -49,7 +49,7 @@ _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 @pytest.fixture(scope="module")
 def pg_url():
     from testcontainers.postgres import PostgresContainer
-    with PostgresContainer("postgres:16-alpine") as pg:
+    with PostgresContainer("pgvector/pgvector:0.8.2-pg16") as pg:
         # testcontainers 返回 psycopg2 URL; 换 asyncpg 驱动给 SQLAlchemy async
         url = pg.get_connection_url().replace("psycopg2", "asyncpg")
         yield url
@@ -64,31 +64,43 @@ def _alembic_cfg(db_url: str):
     return cfg
 
 
+
+def _pg_scalar_all(pg_url: str, sqls: list[str]) -> list:
+    """异步引擎逐条执行并返回首列值列表(替代 psycopg2 同步断言连接)。"""
+    import asyncio as _aio
+    from sqlalchemy.ext.asyncio import create_async_engine as _cae
+
+    async def _q():
+        eng = _cae(pg_url)
+        try:
+            out = []
+            async with eng.connect() as c:
+                from sqlalchemy import text as _text
+                for s in sqls:
+                    r = await c.execute(_text(s))
+                    row = r.first()
+                    out.append(row[0] if row else None)
+            return out
+        finally:
+            await eng.dispose()
+
+    return _aio.run(_q())
+
 def test_alembic_upgrade_head_on_real_postgres(pg_url):
     """真 PG 上迁移到 head: 表全量建立 + tsvector 生成列 + 版本戳。"""
     from alembic import command
     command.upgrade(_alembic_cfg(pg_url), "head")
 
-    from sqlalchemy import create_engine, text
-    eng = create_engine(pg_url.replace("asyncpg", "psycopg2"))
-    with eng.connect() as c:
-        tables = {r[0] for r in c.execute(text(
-            "SELECT tablename FROM pg_tables WHERE schemaname='public'"))}
-        assert "security_events" in tables
-        assert "approval_tickets" in tables
-        assert "audit_dead_letters" in tables
-        assert "alembic_version" in tables
-        # baseline 里的 PG 专有对象: knowledge_chunks.search_tsv 生成列 + GIN 索引
-        col = c.execute(text(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name='knowledge_chunks' AND column_name='search_tsv'"
-        )).fetchone()
-        assert col is not None, "search_tsv 生成列缺失 (baseline 迁移未生效)"
-        idx = c.execute(text(
-            "SELECT 1 FROM pg_indexes WHERE indexname='knowledge_chunks_tsv_gin'"
-        )).fetchone()
-        assert idx is not None, "tsv GIN 索引缺失"
-    eng.dispose()
+    got = _pg_scalar_all(pg_url, [
+        "SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_tables WHERE schemaname='public'",
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name='knowledge_chunks' AND column_name='search_tsv'",
+        "SELECT 1 FROM pg_indexes WHERE indexname='knowledge_chunks_tsv_gin'",
+    ])
+    tables = set((got[0] or "").split(","))
+    assert {"security_events", "approval_tickets", "audit_dead_letters", "alembic_version"} <= tables
+    assert got[1] is not None, "search_tsv 生成列缺失 (baseline 迁移未生效)"
+    assert got[2] is not None, "tsv GIN 索引缺失"
 
 
 def test_alembic_upgrade_is_idempotent_on_real_postgres(pg_url):
@@ -96,12 +108,8 @@ def test_alembic_upgrade_is_idempotent_on_real_postgres(pg_url):
     command.upgrade(_alembic_cfg(pg_url), "head")
     command.upgrade(_alembic_cfg(pg_url), "head")  # 第二次必须 no-op
     # 版本仍是 head（0001_baseline 及其后继）
-    from sqlalchemy import create_engine, text
-    eng = create_engine(pg_url.replace("asyncpg", "psycopg2"))
-    with eng.connect() as c:
-        version = c.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version, "版本戳丢失"
-    eng.dispose()
+    version = _pg_scalar_all(pg_url, ["SELECT version_num FROM alembic_version"])[0]
+    assert version, "版本戳丢失"
 
 
 @pytest.mark.asyncio

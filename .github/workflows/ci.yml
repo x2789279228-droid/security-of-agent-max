@@ -270,6 +270,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ubuntu-latest 已切 Ubuntu 26(2026-10-19) —— 裸 `python` 不再预装,
+      # type-ratchet 步骤需要; 与后端 job 一致显式装 Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
