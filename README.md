@@ -708,7 +708,7 @@ ufw deny 9093
     ├── performance/                         # 性能 / Kafka 解耦
     ├── security-audit/                      # 渗透审计 + 压测报告
     ├── upgrade-proposals/                   # 滚动 8 版技术栈升级
-    └── competition-materials/               # 总结报告 / 合规声明 / 原创声明
+    └── competition-materials/               # 技术文档(2026,16页PDF) / 演示视频脚本 / 提交清单 / 总结报告 / 合规声明 / 原创声明
 ```
 
 ---
