@@ -25,6 +25,7 @@ import json
 import random
 import re
 import ssl
+import sys
 import time
 import uuid
 
@@ -314,8 +315,19 @@ async def run_chain_kafka(bootstrap: str, api_key: str, source_id: str):
 async def run_continuous(api: str, interval: float, count: int, session_id: str,
                          token: str = ""):
     """持续模式: 按间隔生成事件流"""
+    # R12(复审 P1-8): 无 token 时此前硬编码未注册的 X-API-Key → 全部 403 且
+    # 输出被 /dev/null 吞掉, 40eps 演示流量 0 条注入完全静默。现在启动即失败。
+    if not token:
+        print(
+            "[FATAL] HTTP 持续模式必须提供 --token <JWT>。\n"
+            "  获取: curl -s -X POST $API/api/auth/login "
+            "-d '{\"username\":\"admin\",\"password\":\"...\"}' | jq -r .access_token\n"
+            "  (服务端已启用 fail-closed 数据源认证: 匿名接入仅限 dev 未配置密钥时)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     print(f"[持续模式] API={api} 间隔={interval}s 条数={'无限' if count == 0 else count}")
-    print(f"[持续模式] Session: {session_id} JWT: {'yes' if token else 'no(X-API-Key 单独会被 401)'}")
+    print(f"[持续模式] Session: {session_id} JWT: yes")
     print("-" * 60)
 
     sent = 0

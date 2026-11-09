@@ -1,0 +1,76 @@
+# docker-compose.workers.yml — A3-② 消费 worker 水平扩展（REMEDIATION-PLAN 路线 A3）
+#
+# 用法（在主 compose 之上叠加）:
+#   docker compose -f docker-compose.yml -f docker-compose.workers.yml \
+#     --profile workers up -d --scale backend-worker=2
+#
+# 语义:
+#   - backend-worker 与 backend 同镜像/同环境, 加入**同一 Kafka 消费组**
+#     (组名来自 config, 分区在组内再平衡 —— 3 分区支撑至多 3 worker);
+#   - 不发布端口(纯消费), 无固定 container_name(可 --scale);
+#   - 调度循环/巡检由 Redis 选主保证全局唯一(scheduler_leader.py),
+#     worker 只增加 消费/审计执行/HTTP 内部处理 能力;
+#   - 每 worker 的压力读数(lag/队列比/PQ)发布到 Redis 共享 Gauge,
+#     准入闸门按集群 max 判断(capacity.publish_worker_gauges)。
+#
+# 注意: 主 backend(container_name: shared-memory-backend)仍是 leader
+# 候选之一; 它停止时 worker 会接管调度(租约 TTL 30s)。
+
+services:
+  backend-worker:
+    mem_limit: 2g
+    cpus: 2.0
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    profiles: ["workers"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status < 500 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+      SHARED_MEMORY_DATABASE_URL: postgresql+asyncpg://admin:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/shared_memory
+      SHARED_MEMORY_REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/0
+      SHARED_MEMORY_LLM_API_KEY: ${SHARED_MEMORY_LLM_API_KEY:?LLM_API_KEY_REQUIRED}
+      SHARED_MEMORY_LLM_BASE_URL: ${SHARED_MEMORY_LLM_BASE_URL:-https://api.xiaomimimo.com/v1}
+      SHARED_MEMORY_LLM_MODEL: ${SHARED_MEMORY_LLM_MODEL:-mimo-v2.5}
+      SHARED_MEMORY_LLM_DAILY_BUDGET_TOKENS: ${SHARED_MEMORY_LLM_DAILY_BUDGET_TOKENS:-5000000}
+      SHARED_MEMORY_LLM_BUDGET_UNLIMITED: ${SHARED_MEMORY_LLM_BUDGET_UNLIMITED:-false}
+      SHARED_MEMORY_EMBEDDING_API_KEY: ${SHARED_MEMORY_EMBEDDING_API_KEY:?EMBEDDING_API_KEY_REQUIRED}
+      SHARED_MEMORY_EMBEDDING_BASE_URL: ${SHARED_MEMORY_EMBEDDING_BASE_URL:-https://maas-api.cn-huabei-1.xf-yun.com/v2}
+      SHARED_MEMORY_EMBEDDING_MODEL: ${SHARED_MEMORY_EMBEDDING_MODEL:-mimo-2.5}
+      SHARED_MEMORY_EMBEDDING_DIM: ${SHARED_MEMORY_EMBEDDING_DIM:-768}
+      SHARED_MEMORY_JWT_SECRET: ${SHARED_MEMORY_JWT_SECRET:?JWT_SECRET_REQUIRED}
+      SHARED_MEMORY_ADMIN_USER: ${SHARED_MEMORY_ADMIN_USER:-admin}
+      SHARED_MEMORY_ADMIN_PASSWORD: ${SHARED_MEMORY_ADMIN_PASSWORD:?ADMIN_PASSWORD_REQUIRED}
+      SHARED_MEMORY_ALLOWED_ORIGINS: '${SHARED_MEMORY_ALLOWED_ORIGINS:-["http://localhost:3001"]}'
+      SHARED_MEMORY_EXECUTION_MODE: ${SHARED_MEMORY_EXECUTION_MODE:-dry_run}
+      SHARED_MEMORY_RESPONSE_TRANSPORT_MODE: ${SHARED_MEMORY_RESPONSE_TRANSPORT_MODE:-auto}
+      SHARED_MEMORY_FW_SSH_HOST: ${SHARED_MEMORY_FW_SSH_HOST:-soc-firewall}
+      SHARED_MEMORY_FW_SSH_PORT: ${SHARED_MEMORY_FW_SSH_PORT:-22}
+      SHARED_MEMORY_FW_SSH_USER: ${SHARED_MEMORY_FW_SSH_USER:-root}
+      SHARED_MEMORY_FW_SSH_PASSWORD: ${SHARED_MEMORY_FW_SSH_PASSWORD:-}
+      SHARED_MEMORY_FW_USE_SUDO: ${SHARED_MEMORY_FW_USE_SUDO:-false}
+      SHARED_MEMORY_FW_SSH_ALLOW_UNKNOWN_HOST: ${SHARED_MEMORY_FW_SSH_ALLOW_UNKNOWN_HOST:-false}
+      SHARED_MEMORY_KAFKA_ENABLED: ${SHARED_MEMORY_KAFKA_ENABLED:-true}
+      SHARED_MEMORY_KAFKA_BOOTSTRAP: ${SHARED_MEMORY_KAFKA_BOOTSTRAP:-kafka-1:9092,kafka-2:9092,kafka-3:9092}
+      SHARED_MEMORY_KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
+      SHARED_MEMORY_KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-SCRAM-SHA-512}
+      SHARED_MEMORY_KAFKA_SASL_USERNAME: ${KAFKA_APP_USER:-soc-app}
+      SHARED_MEMORY_KAFKA_SASL_PASSWORD: ${KAFKA_APP_PASSWORD:-}
+      SHARED_MEMORY_KAFKA_SSL_CA_FILE: /etc/kafka/secrets/ca-cert.pem
+      SHARED_MEMORY_KAFKA_SSL_CHECK_HOSTNAME: ${KAFKA_SSL_CHECK_HOSTNAME:-false}
+      SHARED_MEMORY_SOURCE_API_KEYS: ${SHARED_MEMORY_SOURCE_API_KEYS:-}
+      SHARED_MEMORY_AUTO_MIGRATE: ${SHARED_MEMORY_AUTO_MIGRATE:-false}
+      SHARED_MEMORY_CONTROL_HMAC_KEY: ${SHARED_MEMORY_CONTROL_HMAC_KEY:-}
+      # worker 身份由代码默认 hostname-pid 生成; 需要显式命名时覆盖:
+      # SHARED_MEMORY_WORKER_ID: worker-1

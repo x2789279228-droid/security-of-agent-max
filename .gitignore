@@ -130,3 +130,9 @@ coverage.json
 
 # preflight 自检回执(时间戳报告, 运行时产物)
 tools/.preflight/
+
+# Maven 本地安装/仓库缓存(2026-11-09: 构建工具产物, 不入 git)
+tools-maven/
+
+# 本地测试日志(评测证据由 docs/benchmark 承载, 全量日志含本机路径不入 git)
+reports/pytest-*.log

@@ -568,6 +568,15 @@ services:
       dockerfile: Dockerfile
     container_name: shared-memory-backend
     restart: always
+    # W3(复审 P1-2): 自研核心服务此前无健康探测 — deploy verify 只 sleep 10 后
+    # curl 一次, 崩溃循环显示 Restarting 而非 unhealthy。/api/health 是公开路径,
+    # python:3.12-slim 自带 urllib, 零额外依赖。
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status < 500 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -745,6 +754,9 @@ services:
   #   3) SHARED_MEMORY_RAG_RERANK_URL=http://soc-bge-rerank:7997/rerank
   # 未启用时 RAG 走 BM25+RRF+特征重排，功能完整，只是没有神经网络 CE。
   soc-bge-rerank:
+    # W3(复审 P1-4): latest 漂移会直接改变 RAG 重排行为 — 生产请在 .env 用
+    # INFINITY_IMAGE 钉住具体 tag(如 michaelf34/infinity:v2.x.y); 上游 tag 命名
+    # 需查 https://hub.docker.com/r/michaelf34/infinity/tags 后填入, 不猜。
     image: ${INFINITY_IMAGE:-michaelf34/infinity:latest}
     container_name: soc-bge-rerank
     profiles: ["rerank"]
@@ -776,6 +788,13 @@ services:
       dockerfile: Dockerfile
     container_name: shared-memory-frontend
     restart: always
+    # W3: nginx (busybox wget) 探活静态站点
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     ports:
       - "3001:80"     # Web 前端
       - "3002:8080"   # Flink Dashboard 认证反代 (Basic Auth)
@@ -799,6 +818,13 @@ services:
     container_name: soc-temporal-worker
     restart: always
     command: ["python", "-m", "temporal.worker"]
+    # W3: worker 进程存活探活(不依赖 Temporal 服务端可达)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     environment:
       SHARED_MEMORY_DATABASE_URL: postgresql+asyncpg://admin:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@postgres:5432/shared_memory
       SHARED_MEMORY_REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/0
@@ -918,7 +944,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: ${TEMPORAL_PASSWORD:-temporal_dev_pwd}
+      POSTGRES_PASSWORD: ${TEMPORAL_PASSWORD:?TEMPORAL_PASSWORD must be set — 禁止默认密码(2026-10-29 复审 P1-14)}
       POSTGRES_DB: temporal
     ports:
       - "127.0.0.1:5434:5432"   # 仅本机调试
@@ -941,7 +967,7 @@ services:
       - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_USER=temporal
-      - POSTGRES_PWD=${TEMPORAL_PASSWORD:-temporal_dev_pwd}
+      - POSTGRES_PWD=${TEMPORAL_PASSWORD:?TEMPORAL_PASSWORD must be set — 禁止默认密码(2026-10-29 复审 P1-14)}
       - POSTGRES_SEEDS=temporal-postgres
       - NUM_HISTORY_SHARDS=4
       - SKIP_DEFAULT_NAMESPACE_CREATION=false
@@ -966,6 +992,18 @@ services:
       - temporal
 
   # ── Prometheus (Flink 9250/9251 + Python /metrics, 支持 exemplar) ──
+  alertmanager:
+    # J 清零(2026-10-30): Alertmanager 接入 —— alerts.yml 的告警从此有路由/静默/去重,
+    # 不再只在 Prometheus UI 里裸晾。仅本机 9093; 生产叠加文件再上收件人。
+    image: prom/alertmanager:v0.28.0
+    container_name: soc-alertmanager
+    restart: always
+    volumes:
+      - ./config/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:9093:9093"
+    profiles: ["full", "lite"]
+
   prometheus:
     # P1 资源限制: 防止单服务内存/ CPU 失控拖垮宿主机上全部 SOC 组件
     mem_limit: 1g
@@ -985,6 +1023,7 @@ services:
       - "127.0.0.1:9090:9090"   # 仅本机调试
     depends_on:
       - flink-jobmanager
+      - alertmanager
       - flink-taskmanager-1
       - flink-taskmanager-2
       - flink-taskmanager-3
@@ -1048,11 +1087,15 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        # R10(P2): eve-out 目录缺失时 cp 会失败且被 || true 吞掉 — 评测器读不到
+        # 任何 eve.json 还无提示。这里显式建目录; cp 失败改打 WARN(可见但不致命)。
+        mkdir -p /pcaps/eve-out
         for pcap in /pcaps/*.pcap /pcaps/*.pcapng; do
           [ -e "$$pcap" ] || continue
           echo "[replay] $$pcap"
           suricata -r "$$pcap" -l /var/log/suricata --runmode=single
-          cp /var/log/suricata/eve.json "/pcaps/eve-out/$(basename "$${pcap%.*}").eve.json" || true
+          cp /var/log/suricata/eve.json "/pcaps/eve-out/$(basename "$${pcap%.*}").eve.json" \
+            || echo "[replay] WARN: eve copy failed for $$pcap" >&2
           rm -f /var/log/suricata/eve.json
         done
     volumes:
@@ -1121,7 +1164,7 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      FIREWALL_ROOT_PASSWORD: ${SHARED_MEMORY_FW_SSH_PASSWORD:-***REMOVED-LEAKED-SECRET***}
+      FIREWALL_ROOT_PASSWORD: ${SHARED_MEMORY_FW_SSH_PASSWORD:?SHARED_MEMORY_FW_SSH_PASSWORD must be set — 禁止默认密码(2026-10-29 复审 P1-14)}
 
 volumes:
   pgdata:

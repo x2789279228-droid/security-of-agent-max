@@ -4,7 +4,7 @@
 > 📚 完整文档导航见 [`docs/INDEX.md`](docs/INDEX.md)。
 
 > **能力状态以 [`backend/capabilities.yaml`](backend/capabilities.yaml) 为准**
-> （2026-10-25 快照：4 verified / 13 experimental / 1 disabled）；
+> （2026-11-01 快照：10 verified / 7 experimental / 1 disabled；B3 转正 184 条执法）；
 > 响应执行默认 `dry_run`（真实执行需显式开启）；升级计划与证据见 [`docs/upgrade/`](docs/upgrade/)。
 >
 > 📊 **检测能力评测**（真实数据回放，报告在 [`docs/benchmark/`](docs/benchmark/)）：
@@ -20,7 +20,7 @@
 |------|------|
 | **业务问题** | 安全运营中心 (SOC) 的告警噪声、跨域关联、响应滞后、规则僵化、Agent 行为失控五大痛点 |
 | **解决方式** | 流式数据底座 + 规则/Sigma 引擎兜底 + LLM 智能审计 + 自动响应 + 红蓝自博弈持续进化 + 工具调用四层控制 |
-| **核心能力** | 27 个后端能力子模块、19 个 Router、231 个 REST 端点、16 个路由页面（22 个页面文件）、6 个 Flink 作业、16 个 Kafka Topic、3084 项后端测试 |
+| **核心能力** | 27 个后端能力子模块、20 个 Router、230+ REST 端点(openapi operations 口径)、18 个路由页面（24 个页面文件）、6 个 Flink 作业、16 个 Kafka Topic、3300 项后端测试 |
 | **目标用户** | 企业 SOC 运营方 / MSSP 安全托管 / 高校与竞赛团队 / 平台自审计研究 |
 | **场景** | 揭榜挂帅（共享记忆）智能体竞赛 · 校级 SOC 试点 · 攻防演练与红蓝自博弈训练 |
 
@@ -77,7 +77,7 @@
      (self_play)            (规则挖掘+改进)         (work_order/case/post_mortem)
 ```
 
-辅助通路（横向能力）：`causal_chain` 因果推断（PC / GES-style / do-calculus）→ `phishing_guard` 反钓鱼 6 通道 → `mcp_guard` 4 层工具调用控制 → `security_guard` 调用安全守卫 → `tool_behavior_signature` UEBA-for-AI → `sigma_engine` 150 条规则动态管理（20 自研 + 130 SigmaHQ 社区规则，社区规则默认影子模式）。
+辅助通路（横向能力）：`causal_chain` 因果推断（PC / GES-style / do-calculus）→ `phishing_guard` 反钓鱼 6 通道 → `mcp_guard` 4 层工具调用控制 → `security_guard` 调用安全守卫 → `tool_behavior_signature` UEBA-for-AI → `sigma_engine` 159 条规则动态管理（20 自研 + 139 社区规则[130 SigmaHQ + 9 自定义社区]，社区规则默认影子模式）。
 
 ---
 
@@ -145,12 +145,12 @@
 
 | 模块 | 说明 |
 |------|------|
-| **Sigma 检测引擎 (sigma_engine / sigma_detector)** | 150 条规则（`rules/` 自研 20 条 + `rules_community_active/` 社区 130 条，其中 SigmaHQ 批量导入 116 条编译通过、125 条默认 `x-soc-shadow` 影子模式仅记录不告警；候选/自博弈影子目录预留）。动态启停 + 影子切换 + SigmaHQ 批量导入管线 (dry_run_import / tools/import_sigmahq.py) + 引擎 (engine) + 映射 (mapping) |
+| **Sigma 检测引擎 (sigma_engine / sigma_detector)** | **1675 条规则**（2026-10-30 B2 全量导入后：`rules/` 自研 20 条 + `rules_community_active/` 1655 条 = 1641 条 SigmaHQ 影子 hq_* + 9 条手适配影子 c_0xx + 5 条旧执法 web_*；pySigma 编译门禁 1641/0；**2026-11-01 B3 双门禁转正 184 条执法**（CSIC FP=0 + 30h 真机 Sysmon FP=0 + EVTX-ATTACK 命中证据；9 条被良性行为拦截），报告见 `docs/benchmark/RULE-PROMOTION-v2.json`）。动态启停 + 影子切换 + SigmaHQ 批量导入管线 (dry_run_import / tools/import_sigmahq.py) + 转正回测引擎 (eval_datasets/backtest_promotion.py, FP=0+命中证据硬门禁) + 引擎 (engine) + 映射 (mapping) |
 | **CEP 攻击链 (CepPatternConfig / CepPartialMatchFunction)** | 端口扫描→C2 / 横向移动 / 数据外泄 3 模式 + 部分匹配 |
 | **源信誉评分 (SourceReputationFunction)** | 数据源动态信誉 + 信誉衰减 |
 | **异常检测 (anomaly_detector)** | Python 侧兼容 HTTP 模式 + 频率/严重度/时段多维评分 |
 | **攻击链关联 (correlation_engine)** | 跨事件时间窗关联 + 攻击重建 |
-| **行为异常分析 (zeroday_detect/behavior_analyzer)** ⚠未接线 | 0day 检测：变体聚类 (variant_cluster ⚠能力未接线) + LLM 行为 (llm_behavior ⚠未接线) + 沙箱对接 (sandbox_connector) |
+| **行为异常分析 (zeroday_detect/behavior_analyzer)** | 0day 检测：行为分析（2026-10-30 H 接线：`_sandbox` 分诊 lane）+ LLM 行为 (llm_behavior，同日接线：异步解读) + 变体聚类 (variant_cluster，同日接线：learn_loop 收割面) + 沙箱对接 (sandbox_connector) |
 
 ### NDR / EDR / Threat Intel / 反钓鱼
 
@@ -159,19 +159,22 @@
 | **加密流量 (encrypted_traffic/)** | TLS 元数据 (tls_metadata) + 会话采集 (session_collector) + MITM 代理 (mitm_proxy ⚠未接线) + JA3 指纹 (ja3_fingerprint) + 证书分析 (cert_analyzer) + LLM TLS 分析 |
 | **流量采集 (traffic_capture/)** | 抓包引擎 (capture_engine) + PCAP 存储 (pcap_store) + 流聚合 (flow_aggregator) |
 | **协议解析 (protocol_parser/)** | TLS / SMB / HTTP / DNS / 通用 dissector |
-| **流量基线 (traffic_baseline/)** | 时序季节性 (seasonal) + 同侪组 (peer_group ⚠未接线) + LLM 异常 (llm_anomaly) |
-| **EDR 融合 (edr_fusion/)** | 适配器 (edr_adapter) + Sysmon/WinEvent 解析 (sysmon_parser / winevent_parser) + LLM 关联 (llm_correlation ⚠未接线) + 跨源关联 (cross_correlator) |
+| **流量基线 (traffic_baseline/)** | 时序季节性 (seasonal) + 同侪组 (peer_group，2026-10-30 H 接线：seasonal 旁路) + LLM 异常 (llm_anomaly) |
+| **EDR 融合 (edr_fusion/)** | 适配器 (edr_adapter) + Sysmon/WinEvent 解析 (sysmon_parser / winevent_parser) + LLM 关联 (llm_correlation，2026-10-30 H 接线：cross_correlator 后置) + 跨源关联 (cross_correlator) |
 | **IDS 对接 (ids_connector/suricata_connector)** | Suricata EVE JSON 接入（2026-10-27 路线 2 接线：app 启动分支 + 默认落库处理器 + pcap 回放评测） |
-| **威胁情报 (threat_intel/)** | STIX/TAXII 拉取 (stix_taxii) + IOC 落库 (ioc_ingest) + IOC 匹配 (ioc_matcher) + 信誉 (reputation) + 富化 (intel_enricher，2026-10-27 路线 3 接线) + LLM 上下文 (llm_context ⚠未接线) |
+| **威胁情报 (threat_intel/)** | STIX/TAXII 拉取 (stix_taxii) + IOC 落库 (ioc_ingest) + IOC 匹配 (ioc_matcher) + 信誉 (reputation) + 富化 (intel_enricher，2026-10-27 路线 3 接线) + LLM 上下文 (llm_context，2026-10-30 H 接线：intel_enricher 后置) |
 | **反钓鱼 (phishing_guard/)** | 6 通道：邮件 (email_detector) / BEC (bec_detector) / 网站 (web_detector) / SMS / 二维码 (qrcode_detector) / 附件 (attachment_detector) + LLM 维度 (llm_dimension) + 评分 (scoring) + 演练 (drill_manager) |
 
 > **⚠未接线** = 该模块的代码存在且有测试，但**生产代码里没有任何导入方**，
-> 即实现从未被执行过。本表里带这个标记的 **7 个模块**是这种情况
-> （`behavior_analyzer` / `llm_behavior` / `variant_cluster` 的聚类能力 /
-> `mitm_proxy` / `peer_group` / `llm_correlation` / `llm_context`）。
-> 2026-10-27：`suricata_connector` 与 `intel_enricher` 已接线并从本清单移除
-> （守卫测试 `test_dormant_modules_guard` / `test_threat_intel_pipeline_gap`
-> 同步收口）。
+> 即实现从未被执行过。
+> 2026-10-30 H 路线收口：`behavior_analyzer`/`llm_behavior`（`_sandbox` 分诊 lane，
+> `zeroday_lane_enabled`）、`llm_context`（intel_enricher 后置，
+> `intel_llm_context_enabled`）、`llm_correlation`（cross_correlator 后置，
+> `edr_llm_correlation_enabled`）、`peer_group`（SeasonalDetector 旁路，
+> `traffic_peer_group_enabled`）、`variant_cluster` 聚类（learn_loop 收割面，
+> `learn_variant_cluster_enabled`）**全部接线并从休眠清单移除**
+> （守卫 `test_dormant_modules_guard` 同步摘记，接线单测 `test_h_wiring.py`）。
+> 唯一刻意豁免：`mitm_proxy`（需真实 MITM 证书/中间人环境，非无设备可落地项）。
 >
 > 「有测试」只说明规则写对了，**不代表它在跑**。
 > 这些模块的代码质量结论见
@@ -251,7 +254,7 @@
 - **前端**: React 19 + TypeScript + Vite 7 + Tailwind CSS 4 + Framer Motion + 自研组件库 (`components/{brand,charts,common,demo,home,login,logs,monitor,operations,phishing,rag,ui}`)
 - **可视化**: Kafka UI (Topic 监控 / 消息浏览) + Prometheus + Grafana (经 OTEL)
 - **部署**: Docker Compose (PostgreSQL 16 + Redis 7 + Kafka + Flink + Qdrant + Temporal)
-- **测试**: pytest (3084 项后端测试, 含 Kafka+PG testcontainers 集成测试) + 前端 lint/build + Flink 编译 + Docker 构建校验
+- **测试**: pytest (3200 项后端测试, 含 Kafka+PG testcontainers 集成测试) + 前端 lint/build + Flink 编译 + Docker 构建校验
 
 ---
 
@@ -364,7 +367,7 @@ bash demo/production-drill.sh    # 生产演练剧本（含核实步骤）
 
 ## CI/CD 与部署
 
-- **CI (合并门禁)**: 每次 PR / push main 自动执行 后端 pytest(覆盖率门禁 `--cov-fail-under=55`, 3084 项测试, 约 7 分钟) + Kafka/PG testcontainers 集成测试 → 前端 lint+build → Flink 编译+窗口真执行 → API 契约 diff → 密钥泄漏扫描 → Docker 构建校验 (`publish.yml` 推送 GHCR 镜像 `ghcr.io/<owner>/soc-{backend,frontend,flink}`)。
+- **CI (合并门禁)**: 每次 PR / push main 自动执行 后端 pytest(覆盖率门禁 `--cov-fail-under=55`, 3200 项测试, 约 7 分钟) + Kafka/PG testcontainers 集成测试 → 前端 lint+build → Flink 编译+窗口真执行 → API 契约 diff → 密钥泄漏扫描 → Docker 构建校验 (`publish.yml` 推送 GHCR 镜像 `ghcr.io/<owner>/soc-{backend,frontend,flink}`)。
 - **镜像版本**: main → `:main` + `:sha-<7>`; 打 `v*` 标签 → `:<semver>` + `:latest`; 生产必须显式指定 `IMAGE_TAG`。
 - **环境分离**: dev = `docker-compose.yml`(源码构建); prod = 叠加 `docker-compose.prod.yml`(拉取预构建镜像 + 关闭调试端口)。
 - **部署**: `deploy.yml` 手动触发, staging/production 双环境 (production 人工审批), 暂无远程服务器前默认禁用。
@@ -487,7 +490,7 @@ ufw deny 9093
 
 ---
 
-## 能力索引（19 个后端 Router · 16 个路由页面 · 6 个 Flink 作业）
+## 能力索引（20 个后端 Router · 18 个路由页面 · 6 个 Flink 作业）
 
 ### 后端 REST 端点（按 router 聚合, 总计 231）
 
@@ -515,13 +518,15 @@ ufw deny 9093
 
 > 端点数为代码内路由装饰器实测（2026-10-27）；`backend/openapi.json` 为快照（226），实时以 `http://localhost:8001/docs` 为准。变更型端点已全部声明 RBAC 角色，并由 `tests/test_rbac_write_endpoints_guard.py` AST 守卫锁定。
 
-### 前端页面（16 个路由 · 22 个页面文件）
+### 前端页面（18 个路由 · 24 个页面文件）
 
-16 个路由页面注册于 `App.tsx`；另有 6 个感知域页面（Traffic / Encrypted / Intel / Sandbox / EDR / CapabilitiesDashboard）作为 **Sensing 感知中心的域 Tab** 渲染（旧路由 `/traffic` 等已 301 到 `/sensing?t=...`）。
+18 个路由页面注册于 `App.tsx`；另有 6 个感知域页面（Traffic / Encrypted / Intel / Sandbox / EDR / CapabilitiesDashboard）作为 **Sensing 感知中心的域 Tab** 渲染（旧路由 `/traffic` 等已 301 到 `/sensing?t=...`）。
 
 | 页面 | 路径 | 说明 |
 |------|------|------|
 | **Home** | `pages/Home.tsx` | 守望品牌首页（Hero / Blueprint / Manifesto / ShiftConsole） |
+| **Ingest 接入台** | `pages/Ingest.tsx` | 日志注入窗口（2026-11 传智杯改造：攻击剧本一键注入 / 手动录入 / 文件上传 / 管道状态灯；日志带 inject_source 审计标记） |
+| **Copilot** | `pages/Copilot.tsx` | AI 分析副驾驶（2026-11 传智杯改造：流式问答 + reasoning 思考轨 + RAG 引用溯源 + 截图研判；入口散布于监控事件行/审计页/知识库） |
 | **Monitor** | `pages/Monitor.tsx` | 实时监控（事件流 / 思维链 / 工具签名 / 管道） |
 | **Operations** | `pages/Operations.tsx` | 运营中心（14 个 Tab：概览 / KPI / 工单 / 案例 / 反馈 / 复盘 / 规则 / 审计 / 跟踪 / 学习 / 资产 / 成本 / 生命周期 / 徽记） |
 | **Sensing** | `pages/Sensing.tsx` | 感知中心（6 域 Tab：Traffic 流量基线 / Encrypted 加密流量 / Intel 威胁情报 / Sandbox 0day / EDR 融合 / Capabilities 能力开关） |
@@ -556,11 +561,11 @@ ufw deny 9093
 
 | 层级 | 命令 | 覆盖 |
 |------|------|------|
-| 后端单元/集成 | `pytest backend/tests -q` | 3084 项测试（252 个文件，全量约 7 分钟）: 审计流水线 / 限流分类 / 路由白名单 / RBAC AST 守卫 / 沙箱 / 反馈闭环 / 自博弈 / Sigma 动作链 / 工具行为签名 / 因果链 / 撤销门 / 休眠模块守卫 |
+| 后端单元/集成 | `pytest backend/tests -q` | 3200 项测试（274 个文件，全量约 7 分钟）: 审计流水线 / 限流分类 / 路由白名单 / RBAC AST 守卫 / 沙箱 / 反馈闭环 / 自博弈 / Sigma 动作链 / 工具行为签名 / 因果链 / 撤销门 / 休眠模块守卫 |
 | 后端集成 (testcontainers) | `pytest backend/tests/integration -q` | 真 Kafka (cp-kafka 7.6) + PG16 容器：enriched 落库 / 告警→响应留痕 / 畸形消息进 DLQ |
-| 检测评测 | `python -m backend.eval_datasets.evaluate_detection` 等 | CSIC-2010 全量回放 / 分层消融 / 对抗保持率 / 阈值扫描（见下节） |
+| 检测评测 | `cd backend && python -m eval_datasets.evaluate_detection` 等 | CSIC-2010 全量回放 / 分层消融 / 对抗保持率 / 阈值扫描（见下节） |
 | 后端导入检查 | `python -c "import app"` | 主应用可启动 |
-| 前端 | `cd frontend && npm run lint && npm run build` | 16 路由页 + 71 组件 |
+| 前端 | `cd frontend && npm run lint && npm run build` | 16 路由页 + 63 组件 |
 | Flink | `cd flink-jobs && mvn -DskipTests package` | 6 作业 + 2 辅助类编译（CI 另含窗口函数真执行测试, 0 skip 门禁） |
 | Docker | `docker compose config` | compose 文件可解析 |
 
@@ -654,13 +659,13 @@ ufw deny 9093
 │   ├── event_archive/                       # 长期归档
 │   ├── schemas/                             # AVRO Schema (Python 端)
 │   ├── eval_datasets/                       # ★ 评测体系（detection/behavior/grounding 三族 + CSIC-2010 回放 + 消融 + 对抗保持）
-│   ├── tests/                               # ★ 3084 项 pytest（252 文件, 含 testcontainers 集成测试）
+│   ├── tests/                               # ★ 3200 项 pytest（274 文件, 含 testcontainers 集成测试）
 │   └── tools/                               # 维护脚本
 ├── frontend/                                # ★ React 19 前端
 │   ├── src/
 │   │   ├── App.tsx / main.tsx / index.css
-│   │   ├── pages/                           # 16 个路由页面（22 个页面文件, 6 个感知域并入 Sensing Tab）
-│   │   ├── components/                      # 12 个组件分类（71 组件）
+│   │   ├── pages/                           # 18 个路由页面（24 个页面文件, 6 个感知域并入 Sensing Tab）
+│   │   ├── components/                      # 12 个组件分类（63 组件, 2026-10-29 清除 14 个死文件后）
 │   │   │   ├── brand/ (BrandCrest/BrandMark/BrandSeal)
 │   │   │   ├── home/ (Blueprint/EventTicker/ShiftConsole/ShiftOrbit)
 │   │   │   ├── monitor/ (监控组件)
