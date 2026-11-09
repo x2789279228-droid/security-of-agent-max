@@ -86,7 +86,8 @@ export default function Copilot() {
 
   const retry = useCallback(
     (t: CopilotTurn) => {
-      ask(t.question, { eventId: t.eventId, imageBase64: undefined, imageName: undefined })
+      // 2026-11-09: 修复带图提问失败后重试静默丢图 —— 附件随轮次留存并带回
+      ask(t.question, { eventId: t.eventId, imageBase64: t.imageBase64, imageName: t.imageName })
     },
     [ask],
   )

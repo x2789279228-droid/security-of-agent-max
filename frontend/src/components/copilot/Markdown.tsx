@@ -6,15 +6,13 @@
  * 部分渲染 —— 天然适配打字机式输出，无需额外容错。
  * 样式走 token 类，与 v8 编辑部风一致（无 prose 插件，手动映射元素）。
  */
+import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-export function Markdown({ text }: { text: string }) {
-  return (
-    <div className="copilot-md text-[13.5px] leading-relaxed text-ink">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
+// 2026-11-09: components 提升到模块级 —— 每次渲染新建对象会击穿
+// react-markdown 内部缓存, 历史气泡因 done/usage 帧重渲染时全部重解析
+const MD_COMPONENTS = {
           p: (props) => <p className="my-2 first:mt-0 last:mb-0" {...props} />,
           ul: (props) => <ul className="my-2 list-disc pl-5 space-y-1" {...props} />,
           ol: (props) => <ol className="my-2 list-decimal pl-5 space-y-1" {...props} />,
@@ -46,10 +44,17 @@ export function Markdown({ text }: { text: string }) {
           ),
           a: (props) => <a className="text-accent underline underline-offset-2" target="_blank" rel="noreferrer" {...props} />,
           hr: () => <hr className="my-3 border-line" />,
-        }}
+}
+
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
+  return (
+    <div className="copilot-md text-[13.5px] leading-relaxed text-ink">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={MD_COMPONENTS}
       >
         {text}
       </ReactMarkdown>
     </div>
   )
-}
+})

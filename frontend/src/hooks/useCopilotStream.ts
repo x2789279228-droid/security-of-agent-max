@@ -53,6 +53,8 @@ export interface CopilotTurn {
   question: string
   /** 附件（诚实展示文件名/来源，不装作纯文本） */
   imageName?: string
+  /** 附件原图（data URL）—— 留存供失败重试时带回，修复 retry 静默丢图 */
+  imageBase64?: string
   eventId?: number
   eventCtx?: CopilotEventCtx | null
   stages: StageStep[]
@@ -192,6 +194,7 @@ export function useCopilotStream() {
         id: nextTurnId(),
         question: q,
         imageName: opts.imageName,
+        imageBase64: opts.imageBase64,
         eventId: opts.eventId,
         stages: [],
         reasoning: '',

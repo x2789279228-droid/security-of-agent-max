@@ -5,6 +5,7 @@
  * （ThinkingRail 思考轨 + 流式 Markdown + 引用条 + 用量脚注）。
  * 每条消息由调用方包 ErrorBoundary —— 单条渲染崩溃不拖垮整页。
  */
+import { memo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { CopilotTurn } from '../../hooks/useCopilotStream'
 import { Markdown } from './Markdown'
@@ -19,7 +20,15 @@ const severityTone: Record<string, string> = {
   info: 'text-ink-faint',
 }
 
-export function MessageBubble({ turn, onRetry }: { turn: CopilotTurn; onRetry?: (turn: CopilotTurn) => void }) {
+// 2026-11-09: memo 化 —— 流式期间每 token 帧重渲染全会话, 历史 turn 的
+// 引用经 applyAction map 保持稳定, memo 后只重渲染当前流式气泡
+export const MessageBubble = memo(function MessageBubble({
+  turn,
+  onRetry,
+}: {
+  turn: CopilotTurn
+  onRetry?: (turn: CopilotTurn) => void
+}) {
   const tokens = turn.usage?.total_tokens
   return (
     <motion.div
@@ -114,7 +123,7 @@ export function MessageBubble({ turn, onRetry }: { turn: CopilotTurn; onRetry?: 
       </div>
     </motion.div>
   )
-}
+})
 
 /** AnimatePresence 伴生组件导出（页面用布局动画） */
 export const BubblePresence = AnimatePresence

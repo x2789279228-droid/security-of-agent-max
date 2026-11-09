@@ -15,15 +15,16 @@ export default defineConfig({
     proxy: { '/api': BACKEND_PROXY },
   },
   build: {
-    // 2026-11 AI Web 改造:vendor 手动分包 —— react 系/markdown(仅 Copilot 用)/
-    // 图表系各自独立,业务代码改动不再打爆整块 vendor 缓存;首屏只加载 react 系。
+    // 2026-11-09 修复: 删除 charts/markdown/motion 三组手动分包 —— Rolldown
+    // advancedChunks 依赖捕获语义下它们把 react 核心/jsx-runtime 捕进懒加载
+    // 页面的 chunk, 入口被迫静态 import → 首屏 modulepreload 全量 6 chunk
+    // (~988KB raw)。改为只保留 react/vendor 两组, recharts/react-markdown
+    // 自然跟随 lazy() 页面按需分包; framer-motion 因 PageTransition 在入口
+    // 图内, 留在 vendor 属预期。缓存隔离由 nginx /assets/ immutable 承担。
     rollupOptions: {
       output: {
         manualChunks(id: string) {
           if (!id.includes('node_modules')) return undefined
-          if (id.includes('react-markdown') || id.includes('remark-') || id.includes('unified') || id.includes('micromark') || id.includes('mdast') || id.includes('hast') || id.includes('rehype') || id.includes('parse5') || id.includes('property-information') || id.includes('vfile') || id.includes('unist')) return 'markdown'
-          if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-vendor') || id.includes('internmap')) return 'charts'
-          if (id.includes('framer-motion') || id.includes('motion-dom') || id.includes('motion-utils')) return 'motion'
           if (id.includes('react') || id.includes('scheduler')) return 'react'
           return 'vendor'
         },

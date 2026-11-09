@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { RootLayout } from './layouts/RootLayout'
 import { ROUTES } from './lib/constants'
 import { PageTransition } from './components/common/PageTransition'
+import { ErrorBoundary } from './components/common/ErrorBoundary'
 import { useAuthStore } from './stores/authStore'
 import { applyThemeMode } from './lib/themeMode'
 
@@ -56,9 +57,13 @@ function Guard({ children }: { children: ReactNode }) {
  * 它们在下方直接用 Suspense 包裹，不经过本函数。
  */
 function page(el: ReactNode) {
+  // ErrorBoundary 包在 Suspense 外 —— 同时兜住页面渲染异常与 lazy chunk
+  // 拉取失败(此前 15 条业务路由任一崩溃/断网加载失败 = 整站白屏)
   return (
     <Guard>
-      <Suspense fallback={<PageLoader />}>{el}</Suspense>
+      <ErrorBoundary fallbackTitle="页面渲染异常">
+        <Suspense fallback={<PageLoader />}>{el}</Suspense>
+      </ErrorBoundary>
     </Guard>
   )
 }
