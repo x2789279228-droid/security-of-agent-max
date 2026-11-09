@@ -22,6 +22,13 @@
   - [09 推荐学习路径](./study-guide/09-learning-path.md)
   - [10 常见问题与陷阱](./study-guide/10-faq.md)
 
+## 架构与模块目录
+
+- **[architecture/module-catalog.md](./architecture/module-catalog.md)** ⭐ — **模块目录与全景导读**（2026-10-30 全仓库按目录分批精读）：M01–M38 模块清单，每模块含职责 / 对外接口 / 依赖 / 调用关系 / 风险点 / Mermaid 图，附全局架构总图、数据流图与跨模块风险台账
+- [architecture/data-flow-analysis.md](./architecture/data-flow-analysis.md) — 数据流分析
+- [architecture/rag-architecture.md](./architecture/rag-architecture.md) — RAG 架构
+- [architecture/self-play-architecture.md](./architecture/self-play-architecture.md) — 红蓝自博弈架构
+
 ## 运维与生产化
 
 - [deployment.md](./deployment.md) — 部署手册（端口矩阵、TLS、CI/CD）
@@ -39,7 +46,7 @@
 ## 仓库根目录的其它文档
 
 - [../README.md](../README.md) — 项目自述（启动、快速使用）
-- [../security_audit_report.md](../security_audit_report.md) — 渗透审计报告（早期）
+- 渗透审计报告（早期）— 原文件按密级管理未入库(见 docs/security-audit/ 目录的脱敏版)
 
 ## 安全审计与修复计划
 
