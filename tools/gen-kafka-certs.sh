@@ -10,8 +10,8 @@ mkdir -p "$CERT_DIR"
 cd "$CERT_DIR"
 
 DAYS=365
-# 密钥库密码: 优先取 .env 的 KAFKA_SSL_PASSWORD (README 部署检查清单要求设置)
-PASSWORD="${KAFKA_SSL_PASSWORD:-soc-kafka-2024}"
+# 密钥库密码: 必须由 .env 的 KAFKA_SSL_PASSWORD 提供, 禁止内置默认值(2026-11-09 泄密审计 P0)
+PASSWORD="${KAFKA_SSL_PASSWORD:?KAFKA_SSL_PASSWORD must be set — 请在 .env 中配置(模板见 .env.example)}"
 
 # 公网主机(IP 或域名, 来自 .env 的 KAFKA_PUBLIC_HOST), 外部日志源经 SASL_SSL 连接时校验用
 # 生产化 profile: 3-broker 集群的容器名 kafka-1/2/3 也必须进 SAN ——

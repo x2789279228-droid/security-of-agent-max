@@ -3,7 +3,8 @@
 # 密码经 compose 注入, 与 backend 的 SHARED_MEMORY_FW_SSH_PASSWORD 对齐。
 set -eu
 
-: "${FIREWALL_ROOT_PASSWORD:=***REMOVED-LEAKED-SECRET***}"
+# 密码必须由 compose 注入(compose 侧已 :? 强制), 容器侧同样禁止内置默认值(2026-11-09 泄密审计 P0)
+: "${FIREWALL_ROOT_PASSWORD:?FIREWALL_ROOT_PASSWORD must be set — compose 应从 SHARED_MEMORY_FW_SSH_PASSWORD 注入}"
 echo "root:${FIREWALL_ROOT_PASSWORD}" | chpasswd
 
 # 靶场专用: root 密码登录(容器仅在内网, compose 不映射 22 到宿主)
