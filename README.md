@@ -118,7 +118,7 @@
 
 | 模块 | 说明 |
 |------|------|
-| **MCP Guard (mcp_guard/)** | 4 层工具调用控制：白名单 → RBAC → 参数校验 → 规则引擎，含行为签名 (behavior_signature) 与行为检测 (behavior_detector) |
+| **MCP 协议 + 治理网关 (mcp_protocol/ + mcp_guard/)** | 标准 MCP 端点 `POST /api/mcp`（JSON-RPC 2.0: initialize/tools/list/tools/call，协议层不放松治理——拒绝以 isError 结果返回并透出决策明细）；tools/call 经 4 层检查链：白名单 → RBAC → 参数校验 → 规则引擎，含行为签名与行为检测 |
 | **Security Guard (security_guard/)** | 调用安全守卫：意图审查 (intent_checker) + 序列管控 (sequence_guard) + 频率限制 (rate_limiter) + 上下文感知 (context_manager) |
 | **Tool Behavior Signature** | UEBA-for-AI：工具调用行为画像、偏离基线告警 |
 | **Tool Registry (tool_registry)** | 工具注册中心 + 签名 + 调用统计 |

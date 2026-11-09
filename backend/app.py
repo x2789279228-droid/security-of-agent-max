@@ -718,6 +718,8 @@ from routers.ndr import router as ndr_router
 from routers.edr_intel import router as edr_intel_router
 from routers.ops import router as ops_router
 from routers.copilot import router as copilot_router
+# MCP 协议端点(JSON-RPC 2.0: initialize/tools/list/tools/call) — 治理语义仍走 mcp_guard
+from mcp_protocol import router as mcp_protocol_router
 from routers.capabilities import router as capabilities_router
 from routers.benchmark import router as benchmark_router
 from routers.demo_seed import router as demo_seed_router
@@ -749,8 +751,10 @@ app.include_router(ops_router)
 app.include_router(self_play_router)
 app.include_router(causal_router)
 app.include_router(copilot_router)
+# MCP 协议端点挂载(2026-11-09 阶段4A): /api/mcp 上的 JSON-RPC 2.0
+app.include_router(mcp_protocol_router)
 
-logger.info(f"Mounted 18 routers — {len(app.routes)} routes total")
+logger.info(f"Mounted 19 routers — {len(app.routes)} routes total")
 
 # ── OpenTelemetry 说明（初始化已移入 lifespan，见下）──
 # 2026-10-03: 原先在本模块 import 期无条件 setup_otel()。OTel 的全局 TracerProvider
