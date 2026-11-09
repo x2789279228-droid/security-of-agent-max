@@ -59,8 +59,13 @@ jobs:
     needs: [schema-gate, quality-gate]
     runs-on: ubuntu-latest
     strategy:
+      # 2026-11-10: flink 镜像的构建上下文是 flink-jobs/(此前 ./flink 不存在,
+      # buildx "path ./flink not found" —— publish 的 flink 路从未成功过)
       matrix:
-        image: [backend, frontend, flink]
+        include:
+          - { image: backend, ctx: backend }
+          - { image: frontend, ctx: frontend }
+          - { image: flink, ctx: flink-jobs }
     steps:
       - uses: actions/checkout@v4
 
@@ -90,7 +95,7 @@ jobs:
       - name: Build & push
         uses: docker/build-push-action@v6
         with:
-          context: ./${{ matrix.image }}
+          context: ./${{ matrix.ctx }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
