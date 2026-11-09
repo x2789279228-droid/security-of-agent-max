@@ -9,4 +9,117 @@
 ....................xxxxx............................................... [ 19%]
 .............................................................FF......... [ 21%]
 ....................................................x................... [ 23%]
-...................
+..................................................................xxxxxx [ 26%]
+xxxx..s..................................F.............................. [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+..................................................xx.................... [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 63%]
+............................................F........................... [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+...............................x...............x........................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+..........................................s.................ssssssssssss [ 91%]
+sssss............sssssss.........................................sssssss [ 93%]
+...............................s........................................ [ 95%]
+.................................xxx.................................... [ 97%]
+.................................................................xxs     [100%]
+================================== FAILURES ===================================
+_______________ test_chat_stream_no_api_key_yields_error_frame ________________
+tests\test_copilot_stream.py:129: in test_chat_stream_no_api_key_yields_error_frame
+    frames = _consume(LLMClient().chat_stream([{"role": "user", "content": "hi"}]))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_copilot_stream.py:118: in _consume
+    return asyncio.get_event_loop().run_until_complete(_consume_async(gen))
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py:681: in get_event_loop
+    raise RuntimeError('There is no current event loop in thread %r.'
+E   RuntimeError: There is no current event loop in thread 'MainThread'.
+____________ test_chat_stream_budget_exhausted_yields_error_frame _____________
+tests\test_copilot_stream.py:144: in test_chat_stream_budget_exhausted_yields_error_frame
+    frames = _consume(LLMClient().chat_stream([{"role": "user", "content": "hi"}]))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_copilot_stream.py:118: in _consume
+    return asyncio.get_event_loop().run_until_complete(_consume_async(gen))
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py:681: in get_event_loop
+    raise RuntimeError('There is no current event loop in thread %r.'
+E   RuntimeError: There is no current event loop in thread 'MainThread'.
+_______________________ test_hybrid_mode_fails_honestly _______________________
+tests\test_eval_rag.py:78: in test_hybrid_mode_fails_honestly
+    assert rc == 3
+E   assert 4 == 3
+---------------------------- Captured stdout setup ----------------------------
+2026-11-10 00:13:03,085 [response_engine.threat_taxonomy] INFO: Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-8cspyys5\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+2026-11-10 00:13:03,085 [response_engine.response_policies] INFO: Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+2026-11-10 00:13:03,085 [response_engine.response_policies] INFO: All policy cooldowns cleared
+----------------------------- Captured log setup ------------------------------
+INFO     response_engine.threat_taxonomy:threat_taxonomy.py:119 Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-8cspyys5\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+INFO     response_engine.response_policies:response_policies.py:511 Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+INFO     response_engine.response_policies:response_policies.py:909 All policy cooldowns cleared
+---------------------------- Captured stderr call -----------------------------
+[hybrid] 真实栈未就绪, 不伪造数字。缺:
+  - SHARED_MEMORY_QDRANT_URL 未配置
+runbook: docker compose up -d postgres qdrant backend → 确认 .env 的 QDRANT_URL/EMBEDDING_API_KEY → 重跑本命令。
+__________________ test_hybrid_branch_reports_unimplemented ___________________
+tests\test_rag_eval_hybrid_honesty.py:28: in test_hybrid_branch_reports_unimplemented
+    assert rc == 3
+E   assert 4 == 3
+---------------------------- Captured stdout setup ----------------------------
+2026-11-10 00:19:13,262 [response_engine.threat_taxonomy] INFO: Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-8cspyys5\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+2026-11-10 00:19:13,262 [response_engine.response_policies] INFO: Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+2026-11-10 00:19:13,262 [response_engine.response_policies] INFO: All policy cooldowns cleared
+----------------------------- Captured log setup ------------------------------
+INFO     response_engine.threat_taxonomy:threat_taxonomy.py:119 Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-8cspyys5\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+INFO     response_engine.response_policies:response_policies.py:511 Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+INFO     response_engine.response_policies:response_policies.py:909 All policy cooldowns cleared
+---------------------------- Captured stderr call -----------------------------
+[hybrid] 真实栈未就绪, 不伪造数字。缺:
+  - SHARED_MEMORY_QDRANT_URL 未配置
+runbook: docker compose up -d postgres qdrant backend → 确认 .env 的 QDRANT_URL/EMBEDDING_API_KEY → 重跑本命令。
+============================== warnings summary ===============================
+..\.venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_http_guards.py::TestJwtRevoke::test_logout_blocks_jti
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_http_guards.py::TestJwtRevoke::test_logout_blocks_jti
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_llm_enhancers.py::TestLlmEnhancer::test_safe_dispatch_does_not_throw_without_event_loop
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\backend\tests\test_llm_enhancers.py:145: RuntimeWarning: coroutine 'TestLlmEnhancer.test_safe_dispatch_does_not_throw_without_event_loop.<locals>.noop' was never awaited
+    llm_enhancer.safe_dispatch(noop(), log_label="test")
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_copilot_stream.py::test_chat_stream_no_api_key_yields_error_frame
+FAILED tests/test_copilot_stream.py::test_chat_stream_budget_exhausted_yields_error_frame
+FAILED tests/test_eval_rag.py::test_hybrid_mode_fails_honestly - assert 4 == 3
+FAILED tests/test_rag_eval_hybrid_honesty.py::test_hybrid_branch_reports_unimplemented
+4 failed, 3230 passed, 37 skipped, 39 xfailed, 4 warnings in 1360.81s (0:22:40)

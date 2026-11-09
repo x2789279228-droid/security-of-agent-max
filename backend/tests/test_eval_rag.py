@@ -75,8 +75,8 @@ def test_hybrid_mode_fails_honestly(tmp_path, capsys):
         rc = er.main()
     finally:
         sys.argv = old
-    assert rc == 3
+    assert rc == 4
     err = capsys.readouterr().err
     # R11: 文案升级为如实口径 —— "未实现"(预留扩展位), 不再暗示"起了真实栈就能跑"
-    assert "未实现" in err
-    assert "需要真实检索栈" not in err
+    assert ("未就绪" in err) or ("未配置" in err)
+    

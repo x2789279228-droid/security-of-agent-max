@@ -115,7 +115,9 @@ def test_stream_run_failure_degrades_to_error_frame(client, monkeypatch):
 # ── chat_stream 门禁帧 ─────────────────────────────────────────────────────
 
 def _consume(gen):
-    return asyncio.get_event_loop().run_until_complete(_consume_async(gen))
+    # 2026-11-09: get_event_loop 在全量跑中会因 pytest-asyncio 复位主线程循环态而抛
+    # RuntimeError(单跑正常/全量必红) —— 改为 asyncio.run 每次显式新循环
+    return asyncio.run(_consume_async(gen))
 
 
 async def _consume_async(gen):
