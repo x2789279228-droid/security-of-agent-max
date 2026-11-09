@@ -61,9 +61,22 @@ COMPAT_FIELDS = {
     # 当前类别无 hash 规则, 第二批(Sysmon 数据源)到位后生效。
     "file_hash", "file.hash.sha256", "file.hash.md5", "file.hash.sha1",
     "sha256", "sha1", "md5",
+    # ── 2026-10-30 B1 第二批字段（REMEDIATION-PLAN 路线 B1）──
+    # Sysmon/WinEvent 进程面 + linux 认证 —— 与 mapping.py 第二批条目
+    # 一一对应（一致性由 backend/tests/test_sigma_mapping_compat_sync.py 钉住）。
+    "EventID", "Image", "ImageLoaded", "CommandLine", "ProcessCommandLine",
+    "ParentImage", "ParentProcessName", "User", "SubjectUserName",
+    "TargetFilename", "TargetObject",
+    "process.name", "process.command_line", "user.name", "file.path",
 }
 
-CATEGORIES = {"webserver", "proxy", "network", "dns"}
+# 2026-10-30 B1: 第二批类别 —— windows 进程面(Sysmon EID1/3/11/12-13/22)
+# + linux 认证(sshd)。配套扫描目录 rules/windows 与 rules/linux。
+CATEGORIES = {
+    "webserver", "proxy", "network", "dns",
+    "process_creation", "network_connection", "dns_query",
+    "file_event", "registry_event", "authentication",
+}
 ID_START = 101          # C-101 起, 避开手策展的 C-001..C-005
 PREFIX = "hq_"
 LEVEL_TO_CONF = {"critical": "high", "high": "high", "medium": "medium",
@@ -129,7 +142,8 @@ def _rule_disqualify_reasons(d: dict) -> list[str]:
 def collect_rules(sigma_root: Path) -> list[dict]:
     """扫描 + 过滤, 返回可适配的规则列表(带剔除原因)。"""
     out: list[dict] = []
-    for sub in ("web", "proxy", "network", "rules-emerging-threats"):
+    for sub in ("web", "proxy", "network", "rules-emerging-threats",
+                "windows", "linux"):
         base = sigma_root / "rules" / sub if sub != "rules-emerging-threats" \
             else sigma_root / sub
         if not base.is_dir():

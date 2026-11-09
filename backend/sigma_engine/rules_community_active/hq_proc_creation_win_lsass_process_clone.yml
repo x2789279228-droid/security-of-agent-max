@@ -1,0 +1,39 @@
+title: Potential Credential Dumping Via LSASS Process Clone
+id: c8da0dfd-4ed0-4b68-962d-13c9c884384e
+status: test
+description: Detects a suspicious LSASS process process clone that could be a sign
+  of credential dumping activity
+references:
+- https://www.matteomalvica.com/blog/2019/12/02/win-defender-atp-cred-bypass/
+- https://twitter.com/Hexacorn/status/1420053502554951689
+- https://twitter.com/SBousseaden/status/1464566846594691073?s=20
+author: Florian Roth (Nextron Systems), Samir Bousseaden
+date: 2021-11-27
+modified: 2023-03-02
+tags:
+- attack.credential-access
+- attack.t1003
+- attack.t1003.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    ParentImage|endswith: \Windows\System32\lsass.exe
+    Image|endswith: \Windows\System32\lsass.exe
+  condition: selection
+falsepositives:
+- Unknown
+level: critical
+x-soc-id: C-949
+x-soc-shadow: false
+x-soc-action: alert
+x-soc-confidence: high
+x-soc-attack_type: brute_force
+x-soc-severity: critical
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: c8da0dfd-4ed0-4b68-962d-13c9c884384e
+x-soc-version: 1
+x-soc-promoted-at: '2026-11-01'
+x-soc-promotion-fp: 0
+x-soc-promotion-hits: 1

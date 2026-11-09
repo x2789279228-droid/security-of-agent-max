@@ -111,12 +111,19 @@ class SigmaKeywordsBackend(SQLiteBackend):
     #: 数值语义字段（不参与文本 LIKE）
     NUMERIC_FIELDS = NUMERIC_FIELDS
 
+    def _quote_field(self, field: str) -> str:
+        """字段标识符引用。pySigma-backend-sqlite 2.0 起 ``field_quote`` 为 None,
+        列名统一走 backend 自己的 escape_and_quote_field (裸名不加引号,
+        `cs-referer` 这类带连字符的自动反引号) —— 手工拼 ``field_quote`` 会
+        生成 `Nonecs-...None` 这种坏列名。"""
+        return self.escape_and_quote_field(field)
+
     def _keyword_like_expr(self, value: str) -> str:
         """为每个文本字段生成 `f LIKE '%value%' ESCAPE '\\'`, 用 OR 连接。"""
         escaped = _escape_like(value)
         parts = []
         for field in self.KEYWORD_FIELDS:
-            qf = f"{self.field_quote}{field}{self.field_quote}"
+            qf = self._quote_field(field)
             parts.append(f"{qf} LIKE '%{escaped}%' ESCAPE '\\'")
         return "(" + " OR ".join(parts) + ")"
 
@@ -145,7 +152,7 @@ class SigmaKeywordsBackend(SQLiteBackend):
         literal = str(int(num)) if float(num).is_integer() else repr(num)
         parts = []
         for field in self.NUMERIC_FIELDS:
-            qf = f"{self.field_quote}{field}{self.field_quote}"
+            qf = self._quote_field(field)
             # SQLite 的 TEXT 列存的是字符串，用 CAST 做数值比较
             parts.append(f"CAST({qf} AS REAL) = {literal}")
         if parts:

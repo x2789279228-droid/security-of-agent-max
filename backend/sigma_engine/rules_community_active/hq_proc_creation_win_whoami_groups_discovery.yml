@@ -1,0 +1,40 @@
+title: Group Membership Reconnaissance Via Whoami.EXE
+id: bd8b828d-0dca-48e1-8a63-8a58ecf2644f
+status: test
+description: Detects the execution of whoami.exe with the /group command line flag
+  to show group membership for the current user, account type, security identifiers
+  (SID), and attributes.
+references:
+- https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/whoami
+author: Nasreddine Bencherchali (Nextron Systems)
+date: 2023-02-28
+tags:
+- attack.discovery
+- attack.t1033
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_img:
+  - Image|endswith: \whoami.exe
+  - OriginalFileName: whoami.exe
+  selection_cli:
+    CommandLine|contains:
+    - ' /groups'
+    - ' -groups'
+  condition: all of selection_*
+falsepositives:
+- Unknown
+level: medium
+x-soc-id: C-1543
+x-soc-shadow: false
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: info_disclosure
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: bd8b828d-0dca-48e1-8a63-8a58ecf2644f
+x-soc-version: 1
+x-soc-promoted-at: '2026-11-01'
+x-soc-promotion-fp: 0
+x-soc-promotion-hits: 3

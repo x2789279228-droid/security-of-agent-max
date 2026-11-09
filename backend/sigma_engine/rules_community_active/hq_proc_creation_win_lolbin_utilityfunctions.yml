@@ -1,0 +1,32 @@
+title: UtilityFunctions.ps1 Proxy Dll
+id: 0403d67d-6227-4ea8-8145-4e72db7da120
+status: test
+description: Detects the use of a Microsoft signed script executing a managed DLL with PowerShell.
+references:
+- https://lolbas-project.github.io/lolbas/Scripts/UtilityFunctions/
+author: frack113
+date: 2022-05-28
+tags:
+- attack.stealth
+- attack.t1216
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains:
+    - UtilityFunctions.ps1
+    - 'RegSnapin '
+  condition: selection
+falsepositives:
+- Unknown
+level: medium
+x-soc-id: C-942
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: network_anomaly
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 0403d67d-6227-4ea8-8145-4e72db7da120
+x-soc-version: 1

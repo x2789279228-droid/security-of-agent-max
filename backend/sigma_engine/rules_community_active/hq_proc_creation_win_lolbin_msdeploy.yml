@@ -1,0 +1,37 @@
+title: Execute Files with Msdeploy.exe
+id: 646bc99f-6682-4b47-a73a-17b1b64c9d34
+status: test
+description: Detects file execution using the msdeploy.exe lolbin
+references:
+- https://lolbas-project.github.io/lolbas/OtherMSBinaries/Msdeploy/
+- https://twitter.com/pabraeken/status/995837734379032576
+- https://twitter.com/pabraeken/status/999090532839313408
+author: Beyu Denis, oscd.community
+date: 2020-10-18
+modified: 2021-11-27
+tags:
+- attack.stealth
+- attack.t1218
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains|all:
+    - verb:sync
+    - -source:RunCommand
+    - -dest:runCommand
+    Image|endswith: \msdeploy.exe
+  condition: selection
+falsepositives:
+- System administrator Usage
+level: medium
+x-soc-id: C-915
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: network_anomaly
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 646bc99f-6682-4b47-a73a-17b1b64c9d34
+x-soc-version: 1

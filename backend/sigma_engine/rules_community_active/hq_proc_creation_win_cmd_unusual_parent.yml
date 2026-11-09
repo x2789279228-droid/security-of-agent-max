@@ -1,0 +1,59 @@
+title: Unusual Parent Process For Cmd.EXE
+id: 4b991083-3d0e-44ce-8fc4-b254025d8d4b
+status: test
+description: Detects suspicious parent process for cmd.exe
+references:
+- https://www.elastic.co/guide/en/security/current/unusual-parent-process-for-cmd.exe.html
+author: Tim Rauch, Elastic (idea)
+date: 2022-09-21
+modified: 2023-12-05
+tags:
+- attack.execution
+- attack.t1059
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: \cmd.exe
+    ParentImage|endswith:
+    - \csrss.exe
+    - \ctfmon.exe
+    - \dllhost.exe
+    - \epad.exe
+    - \FlashPlayerUpdateService.exe
+    - \GoogleUpdate.exe
+    - \jucheck.exe
+    - \jusched.exe
+    - \LogonUI.exe
+    - \lsass.exe
+    - \regsvr32.exe
+    - \SearchIndexer.exe
+    - \SearchProtocolHost.exe
+    - \SIHClient.exe
+    - \sihost.exe
+    - \slui.exe
+    - \spoolsv.exe
+    - \sppsvc.exe
+    - \taskhostw.exe
+    - \unsecapp.exe
+    - \WerFault.exe
+    - \wermgr.exe
+    - \wlanext.exe
+    - \WUDFHost.exe
+  condition: selection
+falsepositives:
+- Unknown
+level: medium
+x-soc-id: C-697
+x-soc-shadow: false
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: malware
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 4b991083-3d0e-44ce-8fc4-b254025d8d4b
+x-soc-version: 1
+x-soc-promoted-at: '2026-11-01'
+x-soc-promotion-fp: 0
+x-soc-promotion-hits: 9

@@ -1,0 +1,36 @@
+title: Hijack Legit RDP Session to Move Laterally
+id: 52753ea4-b3a0-4365-910d-36cff487b789
+status: test
+description: Detects the usage of tsclient share to place a backdoor on the RDP source
+  machine's startup folder
+author: Samir Bousseaden
+references:
+- Internal Research
+date: 2019-02-21
+modified: 2021-11-27
+tags:
+- attack.command-and-control
+- attack.t1219.002
+logsource:
+  product: windows
+  category: file_event
+detection:
+  selection:
+    Image|endswith: \mstsc.exe
+    TargetFilename|contains: \Microsoft\Windows\Start Menu\Programs\Startup\
+  condition: selection
+falsepositives:
+- Unlikely
+level: high
+x-soc-id: C-579
+x-soc-shadow: false
+x-soc-action: alert
+x-soc-confidence: high
+x-soc-attack_type: c2_communication
+x-soc-severity: high
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 52753ea4-b3a0-4365-910d-36cff487b789
+x-soc-version: 1
+x-soc-promoted-at: '2026-11-01'
+x-soc-promotion-fp: 0
+x-soc-promotion-hits: 1

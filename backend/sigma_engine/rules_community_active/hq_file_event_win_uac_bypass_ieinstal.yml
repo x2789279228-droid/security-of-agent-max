@@ -1,0 +1,37 @@
+title: UAC Bypass Using IEInstal - File
+id: bdd8157d-8e85-4397-bb82-f06cc9c71dbb
+status: test
+description: Detects the pattern of UAC Bypass using IEInstal.exe (UACMe 64)
+references:
+- https://github.com/hfiref0x/UACME
+author: Christian Burkard (Nextron Systems)
+date: 2021-08-30
+modified: 2022-10-09
+tags:
+- attack.privilege-escalation
+- attack.t1548.002
+logsource:
+  category: file_event
+  product: windows
+detection:
+  selection:
+    Image: C:\Program Files\Internet Explorer\IEInstal.exe
+    TargetFilename|startswith: C:\Users\
+    TargetFilename|contains: \AppData\Local\Temp\
+    TargetFilename|endswith: consent.exe
+  condition: selection
+falsepositives:
+- Unknown
+level: high
+x-soc-id: C-584
+x-soc-shadow: false
+x-soc-action: alert
+x-soc-confidence: high
+x-soc-attack_type: privilege_escalation
+x-soc-severity: high
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: bdd8157d-8e85-4397-bb82-f06cc9c71dbb
+x-soc-version: 1
+x-soc-promoted-at: '2026-11-01'
+x-soc-promotion-fp: 0
+x-soc-promotion-hits: 1

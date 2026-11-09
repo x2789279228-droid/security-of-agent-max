@@ -1,0 +1,32 @@
+title: Potential Memory Dumping Activity Via LiveKD
+id: a85f7765-698a-4088-afa0-ecfbf8d01fa4
+status: test
+description: Detects execution of LiveKD based on PE metadata or image name
+references:
+- https://learn.microsoft.com/en-us/sysinternals/downloads/livekd
+author: Nasreddine Bencherchali (Nextron Systems)
+date: 2023-05-15
+tags:
+- attack.stealth
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+  - Image|endswith:
+    - \livekd.exe
+    - \livekd64.exe
+  - OriginalFileName: livekd.exe
+  condition: selection
+falsepositives:
+- Administration and debugging activity (must be investigated)
+level: medium
+x-soc-id: C-1468
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: network_anomaly
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: a85f7765-698a-4088-afa0-ecfbf8d01fa4
+x-soc-version: 1

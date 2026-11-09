@@ -1,0 +1,42 @@
+title: PUA - CleanWipe Execution
+id: f44800ac-38ec-471f-936e-3fa7d9c53100
+status: test
+description: Detects the use of CleanWipe a tool usually used to delete Symantec antivirus.
+references:
+- https://github.com/3CORESec/MAL-CL/tree/master/Descriptors/Other/CleanWipe
+author: Nasreddine Bencherchali (Nextron Systems)
+date: 2021-12-18
+modified: 2023-02-14
+tags:
+- attack.defense-impairment
+- attack.t1685
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection1:
+    Image|endswith: \SepRemovalToolNative_x64.exe
+  selection2:
+    Image|endswith: \CATClean.exe
+    CommandLine|contains: --uninstall
+  selection3:
+    Image|endswith: \NetInstaller.exe
+    CommandLine|contains: -r
+  selection4:
+    Image|endswith: \WFPUnins.exe
+    CommandLine|contains|all:
+    - /uninstall
+    - /enterprise
+  condition: 1 of selection*
+falsepositives:
+- Legitimate administrative use (Should be investigated either way)
+level: high
+x-soc-id: C-1162
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: high
+x-soc-attack_type: network_anomaly
+x-soc-severity: high
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: f44800ac-38ec-471f-936e-3fa7d9c53100
+x-soc-version: 1

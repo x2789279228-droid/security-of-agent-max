@@ -1,0 +1,39 @@
+title: File Download via CertOC.EXE
+id: 70ad0861-d1fe-491c-a45f-fa48148a300d
+related:
+- id: b86f6dea-0b2f-41f5-bdcc-a057bd19cd6a
+  type: similar
+status: test
+description: Detects when a user downloads a file by using CertOC.exe
+references:
+- https://lolbas-project.github.io/lolbas/Binaries/Certoc/
+author: Nasreddine Bencherchali (Nextron Systems)
+date: 2022-05-16
+modified: 2023-10-18
+tags:
+- attack.command-and-control
+- attack.t1105
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_img:
+  - Image|endswith: \certoc.exe
+  - OriginalFileName: CertOC.exe
+  selection_cli:
+    CommandLine|contains|all:
+    - -GetCACAPS
+    - http
+  condition: all of selection*
+falsepositives:
+- Unknown
+level: medium
+x-soc-id: C-651
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: c2_communication
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 70ad0861-d1fe-491c-a45f-fa48148a300d
+x-soc-version: 1

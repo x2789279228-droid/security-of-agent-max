@@ -1,0 +1,51 @@
+title: Scripting/CommandLine Process Spawned Regsvr32
+id: ab37a6ec-6068-432b-a64e-2c7bf95b1d22
+related:
+- id: 8e2b24c9-4add-46a0-b4bb-0057b4e6187d
+  type: obsolete
+status: test
+description: Detects various command line and scripting engines/processes such as
+  "PowerShell", "Wscript", "Cmd", etc. spawning a "regsvr32" instance.
+references:
+- https://web.archive.org/web/20171001085340/https://subt0x10.blogspot.com/2017/04/bypass-application-whitelisting-script.html
+- https://app.any.run/tasks/34221348-072d-4b70-93f3-aa71f6ebecad/
+author: Florian Roth (Nextron Systems), Nasreddine Bencherchali (Nextron Systems)
+date: 2023-05-26
+tags:
+- attack.stealth
+- attack.t1218.010
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    ParentImage|endswith:
+    - \cmd.exe
+    - \cscript.exe
+    - \mshta.exe
+    - \powershell_ise.exe
+    - \powershell.exe
+    - \pwsh.exe
+    - \wscript.exe
+    Image|endswith: \regsvr32.exe
+  filter_main_rpcproxy:
+    ParentImage: C:\Windows\System32\cmd.exe
+    CommandLine|endswith: ' /s C:\Windows\System32\RpcProxy\RpcProxy.dll'
+  condition: selection and not 1 of filter_main_*
+falsepositives:
+- Legitimate ".bat", ".hta", ".ps1" or ".vbs" scripts leverage legitimately often.
+  Apply additional filter and exclusions as necessary
+- Some legitimate Windows services
+level: medium
+x-soc-id: C-1259
+x-soc-shadow: false
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: network_anomaly
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: ab37a6ec-6068-432b-a64e-2c7bf95b1d22
+x-soc-version: 1
+x-soc-promoted-at: '2026-11-01'
+x-soc-promotion-fp: 0
+x-soc-promotion-hits: 6

@@ -1,0 +1,44 @@
+title: Access of Sudoers File Content
+id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+status: test
+description: Detects the execution of a text-based file access or inspection utilities to read the content
+  of /etc/sudoers in order to potentially list all users that have sudo rights.
+references:
+- https://github.com/sleventyeleven/linuxprivchecker/
+author: Florian Roth (Nextron Systems)
+date: 2022-06-20
+modified: 2025-06-04
+tags:
+- attack.reconnaissance
+- attack.t1592.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith:
+    - /cat
+    - /ed
+    - /egrep
+    - /emacs
+    - /fgrep
+    - /grep
+    - /head
+    - /less
+    - /more
+    - /nano
+    - /tail
+    CommandLine|contains: ' /etc/sudoers'
+  condition: selection
+falsepositives:
+- Legitimate administration activities
+level: medium
+x-soc-id: C-1726
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: network_anomaly
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 0f79c4d2-4e1f-4683-9c36-b5469a665e06
+x-soc-version: 1

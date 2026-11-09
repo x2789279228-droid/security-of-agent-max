@@ -1,0 +1,33 @@
+title: Execute Pcwrun.EXE To Leverage Follina
+id: 6004abd0-afa4-4557-ba90-49d172e0a299
+status: test
+description: Detects indirect command execution via Program Compatibility Assistant "pcwrun.exe" leveraging
+  the follina (CVE-2022-30190) vulnerability
+references:
+- https://twitter.com/nas_bench/status/1535663791362519040
+author: Nasreddine Bencherchali (Nextron Systems)
+date: 2022-06-13
+tags:
+- attack.stealth
+- attack.t1218
+- attack.execution
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    Image|endswith: \pcwrun.exe
+    CommandLine|contains: ../
+  condition: selection
+falsepositives:
+- Unlikely
+level: high
+x-soc-id: C-920
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: high
+x-soc-attack_type: malware
+x-soc-severity: high
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 6004abd0-afa4-4557-ba90-49d172e0a299
+x-soc-version: 1

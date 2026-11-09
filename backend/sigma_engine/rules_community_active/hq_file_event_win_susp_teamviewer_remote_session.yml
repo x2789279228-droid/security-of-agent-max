@@ -1,0 +1,36 @@
+title: TeamViewer Remote Session
+id: 162ab1e4-6874-4564-853c-53ec3ab8be01
+status: test
+description: Detects the creation of log files during a TeamViewer remote session
+references:
+- https://www.teamviewer.com/en-us/
+author: Florian Roth (Nextron Systems)
+date: 2022-01-30
+tags:
+- attack.command-and-control
+- attack.t1219.002
+logsource:
+  product: windows
+  category: file_event
+detection:
+  selection1:
+    TargetFilename|endswith:
+    - \TeamViewer\RemotePrinting\tvprint.db
+    - \TeamViewer\TVNetwork.log
+  selection2:
+    TargetFilename|contains|all:
+    - \TeamViewer
+    - _Logfile.log
+  condition: 1 of selection*
+falsepositives:
+- Legitimate uses of TeamViewer in an organisation
+level: medium
+x-soc-id: C-564
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: c2_communication
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 162ab1e4-6874-4564-853c-53ec3ab8be01
+x-soc-version: 1

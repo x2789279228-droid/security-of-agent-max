@@ -152,13 +152,17 @@ try:
     from sigma.collection import SigmaCollection
     from sigma.backends.sqlite import sqliteBackend as SQLiteBackend
     # keywords 兼容 backend(继承 SQLiteBackend, 支持 value-only 全文搜索)。若不可用则退回原 backend。
+    # pySigma-backend-sqlite 2.0 起默认表名是 "logs"(1.x 是 <TABLE_NAME> 占位符) ——
+    # 检测路径建的临时表是 events, 必须用 backend 的 table 选项对齐,
+    # 否则每条编译出的 SQL 都指向不存在的 logs 表, 全部规则报 no such table。
+    _EVENTS_TABLE = "events"
     try:
         from sigma_engine.backend_keywords import SigmaKeywordsBackend
-        _BACKEND_FACTORY = lambda: SigmaKeywordsBackend()  # noqa: E731
+        _BACKEND_FACTORY = lambda: SigmaKeywordsBackend(table=_EVENTS_TABLE)  # noqa: E731
         _BACKEND_NAME = "SigmaKeywordsBackend"
     except Exception as _be:  # noqa: BLE001
         logger.warning(f"SigmaKeywordsBackend unavailable ({_be}); fallback SQLiteBackend")
-        _BACKEND_FACTORY = lambda: SQLiteBackend()  # noqa: E731
+        _BACKEND_FACTORY = lambda: SQLiteBackend(table=_EVENTS_TABLE)  # noqa: E731
         _BACKEND_NAME = "SQLiteBackend"
     PY_SIGMA_AVAILABLE = True
 except Exception as _e:  # noqa: BLE001
@@ -450,6 +454,24 @@ class PySigmaDetector:
         return files
 
     @staticmethod
+    def _rule_alive_on_event(meta: dict, ev: dict) -> bool:
+        """PERF-OPT Wave 1-3 预筛判活（A4 惰性 schema 复用同一判据）。
+
+        每段至少缺一个 presence-必须列 ⇒ 段死；全段死 ⇒ 整条跳过。
+        段集合在编译期按 UNION ALL 前的段提取（见 _segment_required_cols
+        的安全性论证）；req_col_sets 缺失 = 提取不到 = 不预筛恒活。
+        """
+        req_sets = meta.get("req_col_sets")
+        if not req_sets:
+            return True
+        for cols in req_sets:
+            for c in cols:
+                v = ev.get(c)
+                if v is not None and v != "":
+                    return True  # 该段有值列 ⇒ 段活 ⇒ 规则活
+        return False
+
+    @staticmethod
     def _segment_required_cols(seg: str) -> frozenset:
         """提取一段 SQL 里「**列有值**才可能命中」的 presence-必须列。
 
@@ -468,8 +490,11 @@ class PySigmaDetector:
         cols: set = set()
         for m in re.finditer(r"`([^`]+)`", seg):
             cols.add(m.group(1))
+        # 标识符两端 \b: 阻止贪婪回溯把 `bytes_in` 劈成 `bytes_`+`IN`
+        # (pySigma-backend-sqlite 2.x 对裸列名不加反引号, CAST(bytes_in AS REAL)
+        # 会在词内匹配出假列名, 预筛据此误杀整条规则; 1.x 反引号包裹时不触发)
         for m in re.finditer(
-                r"(?i)(?:\bWHERE\b|\bAND\b|\bOR\b|\()\s*([A-Za-z_][\w.\-]*)\s*(?:=|LIKE|IN|!=|<>)",
+                r"(?i)(?:\bWHERE\b|\bAND\b|\bOR\b|\()\s*\b([A-Za-z_][\w.\-]*)\b\s*(?:=|LIKE|IN|!=|<>)",
                 seg):
             if m.group(1).upper() not in {
                     "SELECT", "FROM", "WHERE", "AND", "OR", "LIKE", "IN",
@@ -539,9 +564,23 @@ class PySigmaDetector:
                     sql = (sql_list[0] if isinstance(sql_list, list) and sql_list else str(sql_list))
                 sql = sql.replace("<TABLE_NAME>", self.TABLE)
                 meta["req_col_sets"] = [sorted(s) for s in seg_cols if s]
+                # A4 惰性 schema(B2 2026-10-30): 本条 SQL 引用的全部列。
+                # 检测期只为**存活**规则建列 —— 1675 条规则全量 field_index
+                # 会让每事件的 DROP/CREATE/INSERT 背上千列DDL(web 事件实测
+                # 7.48ms→496ms)。提取不到(空)则存 None = 保守回退全量列。
+                rule_cols = set()
+                for m in re.finditer(r"`([^`]+)`", sql):
+                    rule_cols.add(m.group(1))
+                for m in re.finditer(r"(?i)(?:\bWHERE\b|\bAND\b|\bOR\b|\()\s*\b([A-Za-z_][\w.\-]*)\b\s*(?:=|LIKE|IN|!=|<>)", sql):
+                    col_name = m.group(1)
+                    if col_name.upper() not in {"SELECT", "FROM", "WHERE", "AND", "OR", "LIKE", "IN", "NOT", "NULL"}:
+                        rule_cols.add(col_name)
+                for m in re.finditer(r"(?i)(?:\bWHERE\b|\bAND\b|\bOR\b|\()\s*\b([A-Za-z_][\w.\-]*)\b\s+IS\s+NULL", sql):
+                    rule_cols.add(m.group(1))
+                meta["sql_cols"] = sorted(rule_cols) if rule_cols else None
                 for m in re.finditer(r"`([^`]+)`", sql):
                     field_index.add(m.group(1))
-                for m in re.finditer(r"(?i)(?:\bWHERE\b|\bAND\b|\bOR\b|\()\s*([A-Za-z_][\w.\-]*)\s*(?:=|LIKE|IN|!=|<>)", sql):
+                for m in re.finditer(r"(?i)(?:\bWHERE\b|\bAND\b|\bOR\b|\()\s*\b([A-Za-z_][\w.\-]*)\b\s*(?:=|LIKE|IN|!=|<>)", sql):
                     col_name = m.group(1)
                     if col_name.upper() not in {"SELECT", "FROM", "WHERE", "AND", "OR", "LIKE", "IN", "NOT", "NULL"}:
                         field_index.add(col_name)
@@ -749,30 +788,31 @@ class PySigmaDetector:
         # 每次检测一个私有 :memory: 库 → 事件之间零共享状态, 也天然线程安全
         conn = sqlite3.connect(":memory:")
         try:
-            # 每事件重建单行表，避免历史行残留造成假命中
-            self._ensure_table(cols, ev, conn=conn)
-            results = []
-            cur = conn.cursor()
+            # A4 惰性 schema(B2 2026-10-30): 先按预筛判活, 只为存活规则
+            # 引用的列建表。1675 条规则的全量 field_index 会让每事件的
+            # DROP/CREATE/INSERT 背上千列 DDL(web 事件实测 7.48ms→496ms)。
+            # 任一存活规则缺 sql_cols(编译期提取失败) → 保守回退全量列
+            # (旧口径) —— 不许因惰性引入漏报。
+            alive: list = []
+            needed_cols: set = set()
+            conservative_schema = False
             for meta, sql in compiled:
                 if not meta.get("enabled", True):
                     continue
-                # PERF-OPT Wave 1-3 规则预筛: 每段至少缺一个 presence-必须列
-                # ⇒ 该段不可能命中(正向谓词在 NULL 上非 TRUE); 全段死 ⇒ 整条跳过。
-                # 段集合在编译期按 UNION ALL 前的段提取(见 _segment_required_cols
-                # 的安全性论证)。空集合 = 提取不到必须列 = 不预筛, 恒执行。
-                req_sets = meta.get("req_col_sets")
-                if req_sets:
-                    dead = True
-                    for cols in req_sets:
-                        for c in cols:
-                            v = ev.get(c)
-                            if v is not None and v != "":
-                                dead = False
-                                break
-                        if not dead:
-                            break
-                    if dead:
-                        continue
+                if not self._rule_alive_on_event(meta, ev):
+                    continue
+                alive.append((meta, sql))
+                rule_cols = meta.get("sql_cols")
+                if rule_cols:
+                    needed_cols.update(rule_cols)
+                else:
+                    conservative_schema = True
+            # 每事件重建单行表，避免历史行残留造成假命中
+            self._ensure_table(cols, ev, conn=conn,
+                               extra_cols=(None if conservative_schema else needed_cols))
+            results = []
+            cur = conn.cursor()
+            for meta, sql in alive:
                 try:
                     row = cur.execute(sql)
                     hit = row.fetchone() is not None
@@ -846,11 +886,15 @@ class PySigmaDetector:
         """
         return '"' + str(name).replace('"', '""') + '"'
 
-    def _ensure_table(self, cols: List[str], ev: dict, conn=None):
+    def _ensure_table(self, cols: List[str], ev: dict, conn=None, extra_cols=None):
         """每次重建单行表：DROP → CREATE(当前事件列) → INSERT 当前事件。
 
         补齐所有已编译 SQL 引用的字段列(self._field_index), 事件缺省时值为空串,
         避免 SQL 引用不存在的列报错(空列不影响命中, 且 keywords 全文搜索需要这些列)。
+
+        extra_cols(A4 惰性 schema, 2026-10-30): 传入**存活规则**引用列集合时,
+        只补这些列而非全量 field_index —— 千列 DDL 是 web 事件 496ms 的主因。
+        None = 旧口径(全量 field_index), 语义不变。
 
         `conn` 为本次检测独占的连接(整改方案 §六: 检测执行所用连接与其他事件隔离)。
         """
@@ -871,8 +915,25 @@ class PySigmaDetector:
             standard = standard | set(_KW) | set(_NUM)
         except Exception:  # pragma: no cover - backend 不可用时退回原集合
             pass
-        needed = set(cols) | set(self._field_index) | standard
-        cols = sorted(needed)
+        if extra_cols is None:
+            needed = set(cols) | set(self._field_index) | standard
+        else:
+            needed = set(cols) | set(extra_cols) | standard
+        # 大小写不敏感去重（B2 全量导入实测缺陷, 2026-10-30）：SQLite 标识符
+        # 不区分大小写 —— 事件经 mapping 产出 "User"（SigmaHQ 检测字段）而
+        # 标准列已有 "user" 时, CREATE TABLE 直接 duplicate column name 崩掉。
+        # 统一保留**标准名形态**；取值侧用大小写不敏感回退（User/user 同逻辑字段）。
+        chosen: dict = {}
+        for name in sorted(needed):
+            low = str(name).lower()
+            if low not in chosen:
+                chosen[low] = name
+        for s in standard:
+            low = str(s).lower()
+            if low in chosen:
+                chosen[low] = s
+        cols = sorted(set(chosen.values()))
+        ev_ci = {str(k).lower(): v for k, v in ev.items()}
         cur = conn.cursor()
         try:
             cur.execute(f"DROP TABLE IF EXISTS {self._quote_ident(self.TABLE)}")
@@ -891,6 +952,10 @@ class PySigmaDetector:
         values = []
         for c in cols:
             v = ev.get(c, "")
+            if v is None or v == "":
+                # 大小写不敏感回退：列保留的是标准形态（user），事件携带的
+                # 可能是规则字段形态（User）—— 同一逻辑字段不得因形态丢值。
+                v = ev_ci.get(str(c).lower(), "")
             if (c == "dst_port" or c == "port") and (v is None or v == ""):
                 proto = str(ev.get("protocol") or "").lower()
                 if proto in ("ssh", "tcp/22"):

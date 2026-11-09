@@ -30,7 +30,7 @@ detection:
 falsepositives:
 - Vulnerability scanners
 level: high
-x-soc-id: C-183
+x-soc-id: C-279
 x-soc-shadow: true
 x-soc-action: alert
 x-soc-confidence: high

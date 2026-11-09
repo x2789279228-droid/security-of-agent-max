@@ -35,7 +35,7 @@ detection:
 falsepositives:
 - Unknown
 level: medium
-x-soc-id: C-205
+x-soc-id: C-314
 x-soc-shadow: true
 x-soc-action: alert
 x-soc-confidence: medium

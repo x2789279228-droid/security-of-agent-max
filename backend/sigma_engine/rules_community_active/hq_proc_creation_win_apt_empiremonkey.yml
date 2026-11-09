@@ -1,0 +1,35 @@
+title: Potential EmpireMonkey Activity
+id: 10152a7b-b566-438f-a33c-390b607d1c8d
+status: test
+description: Detects potential EmpireMonkey APT activity
+references:
+- https://securelist.com/fin7-5-the-infamous-cybercrime-rig-fin7-continues-its-activities/90703/
+- https://malpedia.caad.fkie.fraunhofer.de/actor/anthropoid_spider
+author: Markus Neis, Nasreddine Bencherchali (Nextron Systems)
+date: 2019-04-02
+modified: 2023-03-09
+tags:
+- attack.stealth
+- attack.t1218.010
+- detection.emerging-threats
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains|all:
+    - /e:jscript
+    - \Local\Temp\Errors.bat
+  condition: selection
+falsepositives:
+- Unlikely
+level: high
+x-soc-id: C-183
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: high
+x-soc-attack_type: network_anomaly
+x-soc-severity: high
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: 10152a7b-b566-438f-a33c-390b607d1c8d
+x-soc-version: 1

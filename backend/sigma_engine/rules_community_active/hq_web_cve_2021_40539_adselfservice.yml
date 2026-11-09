@@ -25,7 +25,7 @@ detection:
 falsepositives:
 - Unknown
 level: high
-x-soc-id: C-166
+x-soc-id: C-236
 x-soc-shadow: true
 x-soc-action: alert
 x-soc-confidence: high

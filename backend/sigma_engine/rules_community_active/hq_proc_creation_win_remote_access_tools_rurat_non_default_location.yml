@@ -1,0 +1,38 @@
+title: Remote Access Tool - RURAT Execution From Unusual Location
+id: e01fa958-6893-41d4-ae03-182477c5e77d
+status: test
+description: Detects execution of Remote Utilities RAT (RURAT) from an unusual location (outside of 'C:\Program
+  Files')
+references:
+- https://redcanary.com/blog/misbehaving-rats/
+author: Nasreddine Bencherchali (Nextron Systems)
+date: 2022-09-19
+modified: 2023-03-05
+tags:
+- attack.stealth
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+  - Image|endswith:
+    - \rutserv.exe
+    - \rfusclient.exe
+  - Product: Remote Utilities
+  filter:
+    Image|startswith:
+    - C:\Program Files\Remote Utilities
+    - C:\Program Files (x86)\Remote Utilities
+  condition: selection and not filter
+falsepositives:
+- Unknown
+level: medium
+x-soc-id: C-1271
+x-soc-shadow: true
+x-soc-action: alert
+x-soc-confidence: medium
+x-soc-attack_type: network_anomaly
+x-soc-severity: medium
+x-soc-source: SigmaHQ
+x-soc-sigmahq-id: e01fa958-6893-41d4-ae03-182477c5e77d
+x-soc-version: 1

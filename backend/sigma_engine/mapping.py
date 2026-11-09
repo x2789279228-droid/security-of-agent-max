@@ -43,9 +43,36 @@ PLATFORM_TO_SIGMA: Dict[str, list[str]] = {
     # 2026-10-27 路线 4 预铺: 文件哈希。当前平台类别(webserver/proxy/network/dns)
     # 无 hash 字段规则(实测普查 0 条, hash 规则全在 windows 类=需 Sysmon 数据源
     # 的第二批), 链路先通, 第二批字段(process.command_line 等)到位后即测解锁。
-    "file_hash": ["file_hash", "file.hash.sha256", "file.hash.md5", "file.hash.sha1",
-                  "sha256", "sha1", "md5"],
+    # W1-6: 算法目标字段由 _HASH_TARGETS 路由(不再一对全写), 此处仅登记源键。
+    "file_hash": ["file_hash"],
+    "sha256": ["file_hash"],
+    "sha1": ["file_hash"],
+    "md5": ["file_hash"],
+    # ── 2026-10-30 B1 第二批字段（REMEDIATION-PLAN 路线 B1）──
+    # 来源 = edr_fusion/sysmon_parser.py::SysmonEvent.to_dict() 的归一键
+    # (+ winevent_parser 同名键 + syslog auth 的 user_name)。目标是解锁
+    # SigmaHQ windows 进程面与 linux 认证类规则 —— 键名与解析器产出严格
+    # 对齐，解析器改名时 mapping 必须跟着改（由 COMPAT_FIELDS 一致性测试
+    # test_sigma_mapping_compat_sync.py 钉住）。
+    "event_id": ["EventID"],                       # Sysmon/WinEvent 路由字段
+    "process_name": ["Image", "ImageLoaded", "process.name"],
+    "command_line": ["CommandLine", "ProcessCommandLine", "process.command_line"],
+    "parent_process": ["ParentImage", "ParentProcessName"],
+    "user_name": ["User", "SubjectUserName", "user.name"],
+    "file_path": ["TargetFilename", "file.path"],
+    "registry_key": ["TargetObject"],
+    "image_hash": ["file_hash"],                   # sysmon_parser 已提取纯 SHA256
 }
+
+#: W1-6(复审 P3): 哈希按算法路由 — 修复前 file_hash 一对全写
+#: sha256/sha1/md5 全部目标字段, MD5 值也会出现在 sha256 字段(黑名单规则
+#: 跨算法错配)。键名即算法的直连; 泛化名按 hex 长度识别算法后路由。
+_HASH_TARGETS = {
+    "sha256": ["file.hash.sha256", "sha256"],
+    "sha1": ["file.hash.sha1", "sha1"],
+    "md5": ["file.hash.md5", "md5"],
+}
+_HASH_LEN = {64: "sha256", 40: "sha1", 32: "md5"}
 
 __all__ = ["PLATFORM_TO_SIGMA", "apply_mapping"]
 
@@ -55,6 +82,14 @@ __all__ = ["PLATFORM_TO_SIGMA", "apply_mapping"]
 #: 目标 IP 从此匹配不上任何规则。平台校验面（Flink/HTTP）当前收 IPv4，
 #: 但 mapping 是纯函数，防御在拆分处而不是假设上游永远干净。
 _IPV4_PORT_RE = re.compile(r"^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$")
+
+
+def _is_hex(s: str) -> bool:
+    try:
+        int(s, 16)
+        return True
+    except ValueError:
+        return False
 
 
 def apply_mapping(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -75,6 +110,17 @@ def apply_mapping(event: Dict[str, Any]) -> Dict[str, Any]:
                     v = m.group(1)
                     out["dst_port"] = int(m.group(2))
             out[src] = v
+            if src in ("file_hash", "sha256", "sha1", "md5", "image_hash"):
+                # W1-6: 哈希算法路由(见 _HASH_TARGETS 注释)。
+                # image_hash: sysmon_parser 从 Hashes 提取的纯 SHA256 ——
+                # 按长度路由, 脏值(非 hex/非标长)只落 file_hash 泛化名。
+                algo = src if src in _HASH_TARGETS else (
+                    _HASH_LEN.get(len(str(v))) if _is_hex(str(v)) else None)
+                out.setdefault("file_hash", v)
+                if algo:
+                    for t in _HASH_TARGETS[algo]:
+                        out.setdefault(t, v)
+                continue
             for t in targets:
                 if t not in out:
                     out[t] = v
