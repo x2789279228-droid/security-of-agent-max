@@ -70,12 +70,61 @@ register_feed "cisa-kev" \
   "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" "kev_json" \
   '{"severity":"critical"}' 360
 
+# ══ 2026-10-30 扩容批 (REMEDIATION-PLAN 路线 D: 免费源最大化, 全部无 key) ══
+# 各源网络可达性实测(2026-10-30, 开发机出口): 见 docs/upgrade/INTEL-FEEDS.md
+# —— 注册幂等; 拉取按源容错, 单源网络不通不影响其它源。
+
+# 源 5: abuse.ch ThreatFox — 恶意 IOC (IP/域名/URL, JSON API)
+register_feed "abuse.ch-threatfox" \
+  "https://threatfox.abuse.ch/api/v1/" "json_api" \
+  '{"method":"POST","body":{"query":"get_iocs","days":1},"items_path":"data","value_path":"ioc","type_path":"ioc_type","type_map":{"ip:port":"ip","domain":"domain","url":"url"},"strip_port":true,"threat_path":"malware","severity":"high"}' 120
+
+# 源 6: abuse.ch MalwareBazaar — 恶意样本哈希 (JSON API)
+register_feed "abuse.ch-malwarebazaar" \
+  "https://malwarebazaar.abuse.ch/api/v1/" "json_api" \
+  '{"method":"POST","body":{"query":"get_taginfo","tag":"AgentTesla","limit":500},"items_path":"data","value_path":"sha256_hash","fixed_type":"file_hash","threat_path":"signature","severity":"high"}' 720
+
+# 源 7: abuse.ch SSL Blacklist — JA3 指纹 (CSV; 命中 tls_fingerprint 会话精确比对)
+register_feed "abuse.ch-sslbl-ja3" \
+  "https://sslbl.abuse.ch/blacklist/ja3_fingerprints.csv" "csv_http" \
+  '{"format":"csv","value_column":"ja3_md5","fixed_type":"ja3","fixed_threat":"malicious_ja3","severity":"high","comment_prefix":"#"}' 720
+
+# 源 8: Spamhaus DROP — 劫持网段 CIDR ("1.2.4.0/22 ; SBL..." 行, 分号取首字段)
+register_feed "spamhaus-drop" \
+  "https://www.spamhaus.org/drop/drop.txt" "csv_http" \
+  '{"format":"plain","fixed_type":"cidr","fixed_threat":"hijacked_netblock","severity":"high","comment_prefix":";","split_delimiter":";"}' 720
+
+# 源 9: FireHOL level1 — 聚合高危 IP 列表 (GitHub, 纯 IP 行)
+register_feed "firehol-level1" \
+  "https://raw.githubusercontent.com/firehol/blocklist/master/firehol_level1.netset" "csv_http" \
+  '{"format":"plain","fixed_type":"ip","fixed_threat":"firehol_level1","severity":"medium"}' 720
+
+# 源 10: blocklist.de — 暴力破解源 IP (纯 IP 行)
+register_feed "blocklist-de-all" \
+  "https://lists.blocklist.de/lists/all.list" "csv_http" \
+  '{"format":"plain","fixed_type":"ip","fixed_threat":"brute_force","severity":"medium"}' 120
+
+# 源 11: Tor 出口节点 (纯 IP 行)
+register_feed "tor-exit-nodes" \
+  "https://check.torproject.org/torbulkexitlist" "csv_http" \
+  '{"format":"plain","fixed_type":"ip","fixed_threat":"tor_exit","severity":"low"}' 720
+
+# ── 源 13: botvrij.eu OSINT MISP feed — 真实 MISP feed 静态目录(免 key, 2026-10-30 实拉验证: 25 事件→884 IOC) ──
+register_feed "botvrij-osint-mispfeed"   "https://www.botvrij.eu/data/feed-osint/" "misp_feed"   '{"max_events":25}' 720
+
+# 源 12: Cisco Talos IP 黑名单 (纯 IP 行)
+register_feed "talos-ip-blacklist" \
+  "https://www.talosintelligence.com/documents/ip-blacklist" "csv_http" \
+  '{"format":"plain","fixed_type":"ip","fixed_threat":"spam_botnet","severity":"medium"}' 720
+
 if [ "${POLL}" != "1" ]; then say "POLL=0, 跳过拉取"; exit 0; fi
 
-# ── 立即拉取 + 证据输出 ──
+# ── 立即拉取 + 证据输出 (按源容错: 单源失败只告警不中断) ──
 auth "${SOC_BASE}/api/intel/feeds" | jq -r '.[] | "\(.id) \(.name)"' | while read -r id name; do
   say "拉取 ${name} (id=${id})..."
-  auth -X POST "${SOC_BASE}/api/intel/feeds/${id}/poll" | jq -c .
+  if ! auth -X POST "${SOC_BASE}/api/intel/feeds/${id}/poll" | jq -c .; then
+    say "拉取失败 (网络/端点), 注册保留: ${name}"
+  fi
 done
 
 echo

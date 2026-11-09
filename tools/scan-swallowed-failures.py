@@ -21,9 +21,12 @@ import io
 import os
 import re
 import sys
-from collections import defaultdict
 
-REPO = r"D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\backend"
+# 相对脚本位置解析仓库 backend/ — 不允许硬编码本机绝对路径：
+# 2026-10-29 复审 P0-1：写死 Windows 路径后在 Linux CI 上 os.walk 空迭代、
+# 退出 0，"扫描没跑"与"扫出零结果"同形（假门禁）。
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.normpath(os.path.join(HERE, "..", "backend"))
 sys.stdout.reconfigure(encoding="utf-8")
 
 SKIP_DIRS = {"node_modules", ".venv", "venv", "__pycache__", ".git",
@@ -42,11 +45,13 @@ OPS_HINT = re.compile(
     r"commit|remind|quarantine|kill_|close_case|resolve", re.I)
 
 results = []
+scanned_files = 0
 for dirpath, dirnames, filenames in os.walk(REPO):
     dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
     for fn in filenames:
         if not fn.endswith(".py"):
             continue
+        scanned_files += 1
         p = os.path.join(dirpath, fn)
         rel = os.path.relpath(p, REPO).replace("\\", "/")
         if rel.startswith("tests/") or "/tests/" in rel:
@@ -109,8 +114,15 @@ for dirpath, dirnames, filenames in os.walk(REPO):
                 "snippet": lines[node.lineno - 1].strip()[:90],
             })
 
+# ── 空扫描自检（P0-1 防复发）：扫描了 0 个文件 = 目标不存在 = 假门禁，
+#    必须失败而非产出空报告。退出码 2 = "扫描未执行"，1 = "无命中"。
+if scanned_files == 0:
+    print("[scan-swallowed-failures] FATAL: 未扫描到任何 .py 文件 — 目标目录不存在: %r"
+          % REPO, file=sys.stderr)
+    sys.exit(2)
+
 print("宽异常处理器（except Exception/BaseException）里「只记日志、无计数」："
-      " %d 处\n" % len(results))
+      " %d 处（扫描 %d 个文件）\n" % (len(results), scanned_files))
 
 print("=== A. 运营决策路径（优先处理）===")
 a = [r for r in results if r["ops"]]

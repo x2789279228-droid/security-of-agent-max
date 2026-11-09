@@ -14,12 +14,10 @@ import argparse
 import json
 import os
 import random
-import socket
-import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 # ---- config ----
 API = os.environ.get("SOC_API", "http://localhost:8001").rstrip("/")
@@ -27,6 +25,9 @@ TOTAL = int(os.environ.get("SOC_TOTAL", "3000"))
 RATE = float(os.environ.get("SOC_RATE", "2.0"))  # req/s
 SESSION = os.environ.get("SOC_SESSION", f"large-scale-20260910-{int(time.time())}")
 TOKEN = os.environ.get("SOC_TOKEN", "")  # JWT Bearer token (mandatory since 2026-09-10)
+# 2026-10-30 A3: 全量覆写事件 severity —— "medium" 使 triage 走 P2/tools_only
+# 车道, 排除 LLM 供应商配额对消费吞吐测量的污染(扩缩测量的正确仪器)。
+SEV_OVERRIDE = os.environ.get("SOC_SEV_OVERRIDE", "").strip().lower() or None  # JWT Bearer token (mandatory since 2026-09-10)
 OUT = os.environ.get("SOC_OUT", r"D:\揭榜挂帅\shared-memory-platform\.tmp_large_attack_20260910.jsonl")
 PROGRESS_EVERY = int(os.environ.get("SOC_PROGRESS_EVERY", "50"))
 
@@ -117,6 +118,9 @@ def http_post(path: str, body: dict, timeout: float = 30.0) -> tuple[int, dict |
             "Content-Type": "application/json",
             "Accept": "application/json",
             **({"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}),
+            # R12 后配置数据源密钥的部署: ingest 还需有效 X-API-Key(2026-10-30 A3 实测)
+            **({"X-API-Key": os.environ["SOC_API_KEY"]}
+               if os.environ.get("SOC_API_KEY") else {}),
         },
         method="POST",
     )
@@ -149,7 +153,7 @@ def build_event(seq: int, threat: str, src: str, dst: str, id_prefix: str = "lar
         "event": threat,
         "type": threat,
         "threat_type": threat,
-        "severity": profile["sev"],
+        "severity": SEV_OVERRIDE or profile["sev"],
         "protocol": profile["proto"],
         "message": profile["msg_tmpl"].format(src=src, dst=dst),
         "src_ip": src,
@@ -215,7 +219,7 @@ def main() -> int:
             ev = build_event(-i - 1, threat, src, dst, args.id_prefix)
             http_post("/api/logs/ingest", {"session_id": args.session + "-warmup", "message": ev})
             time.sleep(0.3)
-        print(f"[WARMUP] done")
+        print("[WARMUP] done")
 
     sent_ok = 0
     sent_fail = 0

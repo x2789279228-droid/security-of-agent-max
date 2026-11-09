@@ -199,6 +199,13 @@ def main() -> int:
 
     active, zero, all_mods, n_tests, entry = active_modules()
 
+    # 空扫描自检（P0-1 防复发，与 scan-swallowed-failures 同规）：
+    # 0 个模块 = 目标目录不存在 = 假门禁，必须失败而非产出"零结果"报告。
+    if not all_mods:
+        print("[scan-active-zero-coverage] FATAL: 未扫描到任何模块 — 目标目录不存在: %r"
+              % BACKEND, file=sys.stderr)
+        return 2
+
     if args.json:
         print(json.dumps({
             "total_modules": len(all_mods),

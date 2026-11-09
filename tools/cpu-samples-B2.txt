@@ -1,0 +1,40 @@
+15:54:18 host_container_total=601% | soc-backend-worker-1=205.99% shared-memory-backend=196.92% 
+15:54:33 host_container_total=537% | soc-backend-worker-1=201.76% shared-memory-backend=158.39% 
+15:54:48 host_container_total=458% | soc-backend-worker-1=202.49% shared-memory-backend=201.84% 
+15:55:03 host_container_total=514% | soc-backend-worker-1=194.85% shared-memory-backend=190.35% 
+15:55:18 host_container_total=601% | soc-backend-worker-1=211.69% shared-memory-backend=205.20% 
+15:55:33 host_container_total=235% | soc-backend-worker-1=2.91% shared-memory-backend=156.90% 
+15:55:48 host_container_total=273% | soc-backend-worker-1=4.92% shared-memory-backend=193.16% 
+15:56:03 host_container_total=244% | soc-backend-worker-1=3.21% shared-memory-backend=189.41% 
+15:56:18 host_container_total=417% | soc-backend-worker-1=55.88% shared-memory-backend=187.87% 
+15:56:33 host_container_total=396% | soc-backend-worker-1=97.97% shared-memory-backend=198.72% 
+15:56:48 host_container_total=402% | soc-backend-worker-1=4.50% shared-memory-backend=183.17% 
+15:57:03 host_container_total=127% | soc-backend-worker-1=2.59% shared-memory-backend=23.14% 
+15:57:18 host_container_total=50% | soc-backend-worker-1=25.65% shared-memory-backend=25.38% 
+15:57:33 host_container_total=114% | soc-backend-worker-1=2.86% shared-memory-backend=23.24% 
+15:57:48 host_container_total=72% | shared-memory-backend=23.05% 
+15:58:03 host_container_total=63% | shared-memory-backend=25.50% 
+15:58:18 host_container_total=384% | shared-memory-backend=182.77% 
+15:58:33 host_container_total=334% | shared-memory-backend=178.19% 
+15:58:48 host_container_total=372% | shared-memory-backend=188.26% 
+15:59:03 host_container_total=384% | shared-memory-backend=176.12% 
+15:59:18 host_container_total=311% | shared-memory-backend=201.80% 
+15:59:33 host_container_total=326% | shared-memory-backend=191.11% 
+15:59:48 host_container_total=123% | shared-memory-backend=73.15% 
+16:00:03 host_container_total=151% | shared-memory-backend=204.96% 
+16:00:18 host_container_total=300% | shared-memory-backend=190.06% 
+16:00:33 host_container_total=382% | shared-memory-backend=199.53% 
+16:00:48 host_container_total=250% | shared-memory-backend=189.78% 
+16:01:03 host_container_total=288% | shared-memory-backend=196.29% 
+16:01:18 host_container_total=325% | shared-memory-backend=204.83% 
+16:01:33 host_container_total=396% | shared-memory-backend=177.91% 
+16:01:48 host_container_total=265% | shared-memory-backend=198.53% 
+16:02:03 host_container_total=385% | shared-memory-backend=206.18% 
+16:02:18 host_container_total=240% | shared-memory-backend=197.59% 
+16:02:33 host_container_total=231% | shared-memory-backend=205.60% 
+16:02:48 host_container_total=229% | shared-memory-backend=199.90% 
+16:03:03 host_container_total=281% | shared-memory-backend=204.19% 
+16:03:18 host_container_total=308% | shared-memory-backend=137.95% 
+16:03:33 host_container_total=230% | shared-memory-backend=190.47% 
+16:03:48 host_container_total=268% | shared-memory-backend=198.81% 
+16:04:03 host_container_total=249% | shared-memory-backend=201.49% 

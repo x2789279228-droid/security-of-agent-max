@@ -1,38 +1,110 @@
 {
- "backend/tests/test_agent_live_ticks.py": {
-  "asserts": 25,
-  "sha256": "0123e8bc672f540a84ee8790d433235f96ce8eb90ff1006daf244b407d3c5a4d"
+ "backend/tests/test_a3_multiprocess.py": {
+  "asserts": 15,
+  "sha256": "5c77896ecbac58da90ad00d58413716417c0391ff12ed30c98f0cc34464f9bfa"
  },
- "backend/tests/test_anomaly_partial_evidence.py": {
-  "asserts": 12,
-  "sha256": "1cf1e1ca97a1ad6cbb44a8daa3059f4914043e4053e7ebcf085b6ec26f72f212"
- },
- "backend/tests/test_containment_ledger.py": {
-  "asserts": 13,
-  "sha256": "8bd0821c8c3962c5f629e8dd58d2827790a2198f3be0412a9e672225f96c2f4e"
- },
- "backend/tests/test_demo_seed.py": {
-  "asserts": 38,
-  "sha256": "ee7c69b5078ec40cfa1816e3c13673dbfab7ac2d353340c000bf99d1de14a8f6"
- },
- "backend/tests/test_geo_attack_map.py": {
-  "asserts": 25,
-  "sha256": "a9838f796eb70dee2abbc6dfd1fd0981af06fb439a0ba2108aad775cf95de684"
- },
- "backend/tests/test_normalization.py": {
-  "asserts": 40,
-  "sha256": "182a64892f9bb190513efa09d9fd08532d2684762ba51202d5395a730f9f56f5"
- },
- "backend/tests/test_rollback_effective_params.py": {
-  "asserts": 13,
-  "sha256": "e6c16386a7b1afd056dcf8628391f9565a2f62ff36f44b79ec338483d6f2ab4e"
- },
- "flink-jobs/src/test/java/com/soc/model/SecurityEventSerializationTest.java": {
+ "backend/tests/test_audit_pq_corrupt_payload.py": {
   "asserts": 0,
   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
  },
- "flink-jobs/src/test/java/com/soc/util/UrlCanonicalizerTest.java": {
-  "asserts": 0,
-  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ "backend/tests/test_audit_pq_triangulation.py": {
+  "asserts": 8,
+  "sha256": "98131c0ba857f3ec652391d5d565eee5672aa67d56a8563db300333725e28e6b"
+ },
+ "backend/tests/test_auth_no_event_loop_block.py": {
+  "asserts": 4,
+  "sha256": "a47f386ede5e81293f7221ce42ecbf055c087423f3301518c524410f17ad6deb"
+ },
+ "backend/tests/test_backtest_promotion_decision.py": {
+  "asserts": 14,
+  "sha256": "3cf012c5a65a64943e230d3681e3c94abe21ec4080fbda0f0493b17b86110368"
+ },
+ "backend/tests/test_capacity_backpressure.py": {
+  "asserts": 23,
+  "sha256": "adb9acfd8c9f283e73bc7f992d46165ee7d8a64a01198c353915e0f0a490dcbd"
+ },
+ "backend/tests/test_case_aggregation_bounds.py": {
+  "asserts": 7,
+  "sha256": "3839a35a9db036a1397c8479da6a59d1a23c767cae093dfbae1d324efa7347df"
+ },
+ "backend/tests/test_demo_isolation.py": {
+  "asserts": 16,
+  "sha256": "ffa24af2bf8ce789ef66d78af57a27327717bef61b673708d8a3527a9363935b"
+ },
+ "backend/tests/test_dns_query_gating.py": {
+  "asserts": 6,
+  "sha256": "8be793045158fdcf22208b4ac0cf61fb032dd1f1ed56a6027710f23d39b9f4df"
+ },
+ "backend/tests/test_h_wiring.py": {
+  "asserts": 16,
+  "sha256": "0ba1b94226ebe3048b20dd29419791f12a21a09cc9517a1bd6423e8348cff5a3"
+ },
+ "backend/tests/test_intel_feed_registration.py": {
+  "asserts": 10,
+  "sha256": "a381cb9a0585e1f7a73782ec50fdd47ce80ff3c8fc42b9d547f692bd99fdbf0f"
+ },
+ "backend/tests/test_intel_fetch_net_guard.py": {
+  "asserts": 17,
+  "sha256": "3dde310493252b4dba7f197ce0c6f03166bcc3a732cea9e526db9a6ba0d10aed"
+ },
+ "backend/tests/test_intel_json_api.py": {
+  "asserts": 27,
+  "sha256": "13f993f2f609a833537522707f8e484dfc9d7e092b9140ddf410d39448dcc500"
+ },
+ "backend/tests/test_intel_misp_feed.py": {
+  "asserts": 9,
+  "sha256": "88c5b128979120eea64b731f8cce3b9cb2e4649868e635dc02e291156d3d59eb"
+ },
+ "backend/tests/test_llm_resilience_matrix.py": {
+  "asserts": 28,
+  "sha256": "6e090858ba37c2317b0ff0ae4a561bc8fc484c22becae283544cd91f19aa87fc"
+ },
+ "backend/tests/test_op_semantics_contract.py": {
+  "asserts": 15,
+  "sha256": "f27eeddcc251d68702d485089874df99f0772c5f558387c3795d9118d55b5ccb"
+ },
+ "backend/tests/test_rag_eval_hybrid_honesty.py": {
+  "asserts": 6,
+  "sha256": "68410fbfff75a8391c1d8c5b6e2fd41c939a11907101d54a2249b678905f6aae"
+ },
+ "backend/tests/test_redis_pool_w31.py": {
+  "asserts": 3,
+  "sha256": "9aeada7491222eabe9a48574139df4c0699a0131b9ce8b850da12ac362c13a24"
+ },
+ "backend/tests/test_rollback_cross_process_fix.py": {
+  "asserts": 11,
+  "sha256": "f3efb763c158763eec6cceadb8af90638a032bded479cca69843df5e2aa3fba6"
+ },
+ "backend/tests/test_scheduler_commit_logging.py": {
+  "asserts": 7,
+  "sha256": "eb788868cce79f5afaa92ec92509560a88b9c53fdaf5b29c704559aed1830de4"
+ },
+ "backend/tests/test_shutdown_stops_engines.py": {
+  "asserts": 5,
+  "sha256": "4516dda253b49dbdc25cb523cad7ee2e23c7d75b21b484d668a2a0443baf59d3"
+ },
+ "backend/tests/test_sigma_mapping_compat_sync.py": {
+  "asserts": 19,
+  "sha256": "c64ce389c83d1a1c6640f1ecc6aa7df99e6e3494388ab1ac5871249cd84758d2"
+ },
+ "backend/tests/test_simulate_no_live_blocking.py": {
+  "asserts": 4,
+  "sha256": "53658562b902d50520e03ea5a0b6599b68305df23de9b56ff86205a6061ca99c"
+ },
+ "backend/tests/test_sliding_window_ttl.py": {
+  "asserts": 3,
+  "sha256": "ff8275ab02bcda156025423982076471c584018371bca4d55826b53ddd823736"
+ },
+ "backend/tests/test_suricata_consume_retry.py": {
+  "asserts": 7,
+  "sha256": "3957c300f943ef6635427a513e320752750ba0b95cba873981bd8641bd66b193"
+ },
+ "backend/tests/test_sysmon_parser_e1_fixes.py": {
+  "asserts": 8,
+  "sha256": "6f675fb9e29cc6daee656b7d1aff1d51d5c5a5f20dd5517a5e5fe74adaa395d7"
+ },
+ "backend/tests/test_windows_whitelist_decoded.py": {
+  "asserts": 7,
+  "sha256": "9ba1012065d1c485ee49f51f27ba6facdcb9d2740912224997bd4bd0b15672dd"
  }
 }
