@@ -483,7 +483,9 @@ jobs:
         # .trivyignore 条目): 上游未发修复版, 无可升级路径, 阻断只会
         # 永久卡死 CI。扫描照跑、报告照留(下方 always 上传), 上游发版
         # 后删 ignore 条目并恢复 exit-code '1'。
-        uses: aquasecurity/trivy-action@v0.33.1
+        # 注: pin v0.33.1 在 runner 上反复 action 内部错误, 回 @master
+        # (该引用在本仓库历史上可运行; exit 0 下版本浮动不影响结论)。
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: .
