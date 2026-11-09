@@ -487,7 +487,7 @@ jobs:
           format: table
           severity: 'CRITICAL'
           ignore-unfixed: true
-          ignorefile: .trivyignore
+          trivyignores: .trivyignore
           exit-code: '1'          # 仅 Critical 阻断
       - name: 留存全量结果
         if: always()
