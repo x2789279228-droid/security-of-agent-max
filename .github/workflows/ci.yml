@@ -137,9 +137,11 @@ jobs:
 
       - name: Repo hygiene gates (R3/R5, 2026-10-29)
         # R3: compose 凭据变量禁止非空默认回退; R5: README 数字与实测比对
+        # 2026-11-10: 本 job working-directory=backend, 脚本在仓库根 tools/
+        # —— 相对路径必须 ../tools/(此前 exit 2 = python 打不开文件)
         run: |
-          python tools/check-compose-no-default-secrets.py
-          python tools/check-readme-numbers.py --fast
+          python ../tools/check-compose-no-default-secrets.py
+          python ../tools/check-readme-numbers.py --fast
 
       - name: tools/ lint (W3, 2026-10-29)
         # ruff.toml 把 tools/ 整体排除出主检查 — 此处单独覆盖语法/未定义名/
@@ -288,7 +290,7 @@ jobs:
 
       - name: Frontend type ratchet (W2-2, 2026-10-29)
         # fetchJSON<any> 只许降不许升 + EventSource 单点持有
-        run: python tools/check-frontend-any.py
+        run: python ../tools/check-frontend-any.py
 
       - name: 安全/结构护栏测试（无需 node_modules）
         # 2026-10-03 新增。断言的是"不许回退"的不变量:
