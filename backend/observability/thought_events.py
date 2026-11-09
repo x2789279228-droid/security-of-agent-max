@@ -523,6 +523,13 @@ def emit_plan(decomp_output: Optional[dict], **ids_kw: Any) -> list[dict]:
         "metrics": {
             "sub_tasks": len(sub_tasks),
             "mode": decomp_output.get("mode") or "",
+            # 阶段4B(2026-11-09): 规划溯源透出 —— llm=LLM 挑选取证面 /
+            # rules_fallback=LLM 规划失败回退模板 / rules=规则车道。
+            # 运维面直接看到"这次计划是谁定的、定了哪些取证"。
+            "plan_source": decomp_output.get("plan_source") or "",
+            "plan_selected": [
+                str(k) for k in ((decomp_output.get("planning") or {}).get("selected") or [])
+            ][:8],
             # P3-6: Decomposer 因参数上界做过裁剪时，这里是它唯一的出口。
             # 修复前截断只写在返回 dict 里，而本函数只挑上面这几个固定字段，
             # 于是那条记录下游一个消费者都读不到 —— 与「只打日志」无异。

@@ -1,0 +1,19 @@
+请为下面这个进入深度审核的安全事件规划取证子任务。
+
+允许的能力清单（只能从中选择）：
+- query_events_24h: 源 IP 近 24 小时全量事件回查
+- ip_baseline: 源 IP 行为基线比对（是否偏离历史模式）
+- target_events: 目标 IP 侧事件回查（事件有明确目标时才有价值）
+- attack_chains: 48 小时跨事件攻击链检测
+- entity_link: 实体图关联分析（同主机/账号/证书的横向脉络）
+- memory_check: 相似历史案例记忆检索
+- knowledge_search: MITRE/CAPEC 安全知识库检索（攻击手法/IOC/响应建议）
+
+事件数据：
+{{ event_json }}
+
+异常分数：{{ anomaly_score }}
+异常原因：
+{{ reasons_str }}
+
+输出 JSON（能力键必须来自清单，2~5 项，按价值排序）。

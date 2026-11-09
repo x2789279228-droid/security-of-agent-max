@@ -146,114 +146,143 @@ def _get_subtasks_standard(session_id: str, event: dict,
 
 
 def _get_subtasks_deep(session_id: str, event: dict,
-                       anomaly_score: float) -> list[SubTask]:
-    """深度审核子任务"""
+                       anomaly_score: float,
+                       selected: "list[str] | None" = None) -> list[SubTask]:
+    """深度审核子任务。
+
+    2026-11-09 阶段4B(LLM 真决策): 支持 ``selected`` 能力键子集 —— deep 档的
+    LLM 规划器可从取证类能力中挑选实际需要的子任务(防幻觉: 只接受本函数
+    认识的键; 越权键静默丢弃)。两条安全底线不参与挑选:
+      - deep_analyze: 综合分析必须保留(Executor 的 synthesize 依赖)
+      - review: 复核必须保留(Reviewer 只准降级的安全语义依赖)
+    selected=None → 全量构建(规则模板默认行为, 与历史版本完全一致)。
+    """
     src_ip = event.get("src_ip", "")
     dst_ip = event.get("dst_ip", "")
     event_type = event.get("event", event.get("type", ""))
-    tasks = []
-    idx = 0
+    by_key: dict[str, SubTask] = {}
 
     # t1: 全量事件查询
-    idx += 1
-    tasks.append(SubTask(
-        task_id=f"t{idx}",
+    by_key["query_events_24h"] = SubTask(
+        task_id="t?",
         type=SUBTASK_QUERY_EVENTS,
         params={"session_id": session_id, "src_ip": src_ip,
                 "time_window_minutes": 1440, "limit": 200},
         priority=5,
         description=f"{src_ip} 24小时全量事件",
-    ))
+    )
 
     # t2: IP基线
-    idx += 1
-    tasks.append(SubTask(
-        task_id=f"t{idx}",
+    by_key["ip_baseline"] = SubTask(
+        task_id="t?",
         type=SUBTASK_ANALYZE_IP,
         params={"src_ip": src_ip},
         priority=4,
         description=f"{src_ip} 基线分析",
-    ))
+    )
 
     # t3: 如果目标IP存在，查目标事件
     if dst_ip:
-        idx += 1
-        tasks.append(SubTask(
-            task_id=f"t{idx}",
+        by_key["target_events"] = SubTask(
+            task_id="t?",
             type=SUBTASK_QUERY_EVENTS,
             params={"session_id": session_id, "src_ip": dst_ip,
                     "time_window_minutes": 1440, "limit": 100},
             priority=4,
             description=f"目标 {dst_ip} 的事件",
-        ))
+        )
 
     # t4: 攻击链
-    idx += 1
-    tasks.append(SubTask(
-        task_id=f"t{idx}",
+    by_key["attack_chains"] = SubTask(
+        task_id="t?",
         type=SUBTASK_FIND_CHAINS,
         params={"session_id": session_id, "time_window_minutes": 2880},
         priority=4,
         description="48小时攻击链检测",
-    ))
+    )
 
     # t5: 实体图关联
-    idx += 1
-    tasks.append(SubTask(
-        task_id=f"t{idx}",
+    by_key["entity_link"] = SubTask(
+        task_id="t?",
         type=SUBTASK_ENTITY_LINK,
         params={"session_id": session_id, "time_window_minutes": 1440},
         priority=3,
         description="实体关联分析",
-    ))
+    )
 
     # t6: 记忆检索
-    idx += 1
-    tasks.append(SubTask(
-        task_id=f"t{idx}",
+    by_key["memory_check"] = SubTask(
+        task_id="t?",
         type=SUBTASK_CHECK_MEMORY,
         params={"query": f"{event_type} {src_ip} {dst_ip}"},
         priority=3,
         description="相关记忆",
-    ))
+    )
 
     # t6b: 安全知识库检索 (RAG)
-    idx += 1
-    tasks.append(SubTask(
-        task_id=f"t{idx}",
+    by_key["knowledge_search"] = SubTask(
+        task_id="t?",
         type=SUBTASK_KNOWLEDGE_SEARCH,
         params={"query": f"{event_type} 攻击手法 检测指标 IOC 响应建议",
                 "threat_type": event_type, "severity": event.get("severity", "")},
         priority=4,
         description=f"深度检索 {event_type} 安全知识 (MITRE/CAPEC)",
-    ))
+    )
 
-    # t7: 深度LLM分析（依赖前序结果）
-    idx += 1
-    tasks.append(SubTask(
-        task_id=f"t{idx}",
+    # 能力键稳定顺序(取证类可被 LLM 规划挑选; 后两个为安全底线, 不可挑选)
+    evidence_keys = _DEEP_EVIDENCE_KEYS
+
+    if selected is None:
+        chosen = [k for k in evidence_keys if k in by_key]
+    else:
+        # 防幻觉: 只接受认识的键; 条件键(dst_ip 缺失时的 target_events)自然剔除
+        chosen = [k for k in evidence_keys if k in by_key and k in set(selected)]
+        if not chosen:
+            chosen = [k for k in evidence_keys if k in by_key]
+
+    # t7: 深度LLM分析（依赖前序实际存在的取证任务）
+    deep_analyze = SubTask(
+        task_id="t?",
         type=SUBTASK_DEEP_ANALYZE,
         params={"event": event},
         priority=2,
-        depends_on=[f"t{i+1}" for i in range(idx - 1)],
         description="综合所有数据深度分析",
-    ))
-
+    )
     # t8: 复核
-    idx += 1
-    tasks.append(SubTask(
-        task_id=f"t{idx}",
+    review = SubTask(
+        task_id="t?",
         type=SUBTASK_RECHECK,
         params={},
         priority=1,
-        depends_on=[f"t{idx - 1}"],
         description="复核审计结论",
-    ))
+    )
+
+    # 按 chosen → deep_analyze → review 的顺序重编号并接依赖
+    tasks: list[SubTask] = []
+    for k in chosen:
+        tasks.append(by_key[k])
+    prev_ids: list[str] = []
+    for i, t in enumerate(tasks, start=1):
+        t.task_id = f"t{i}"
+        prev_ids.append(t.task_id)
+    deep_analyze.task_id = f"t{len(tasks) + 1}"
+    deep_analyze.depends_on = list(prev_ids)
+    tasks.append(deep_analyze)
+    review.task_id = f"t{len(tasks) + 1}"
+    review.depends_on = [deep_analyze.task_id]
+    tasks.append(review)
 
     return tasks
 
 
 # ── Decomposer 主类 ──
+
+# deep 档取证能力键(LLM 规划器的合法选择域; 防幻觉白名单的唯一来源)
+_DEEP_EVIDENCE_KEYS = [
+    "query_events_24h", "ip_baseline", "target_events", "attack_chains",
+    "entity_link", "memory_check", "knowledge_search",
+]
+
 
 class Decomposer(BaseAuditComponent):
     """
@@ -327,11 +356,21 @@ class Decomposer(BaseAuditComponent):
         )
 
         llm_analysis = ""
+        # 阶段4B(2026-11-09): deep 档 LLM 真决策 —— 规划器输出直接决定取证子任务集合。
+        # 失败/超时/schema 不过 → selected=None 回退规则模板(可解释降级)。
+        _selected: "list[str] | None" = None
+        plan_source = "rules"
         # 硬预算下 P0 仍 deep,但可跳过昂贵 pre-analyze(保留 SubAuditor+synthesize)
         _sig = triage.get("signals") or {}
         _skip_pre = bool(triage.get("skip_pre_analyze") or _sig.get("skip_pre_analyze"))
         if depth == AUDIT_DEPTH_DEEP and not _skip_pre:
-            llm_analysis = await self._llm_pre_analyze(event, anomaly_score, anomaly_reasons)
+            plan = await self._llm_plan_subtasks(event, anomaly_score, anomaly_reasons)
+            if plan is not None:
+                _selected, llm_analysis = plan
+                plan_source = "llm"
+            else:
+                llm_analysis = await self._llm_pre_analyze(event, anomaly_score, anomaly_reasons)
+                plan_source = "rules_fallback"
 
         depth_to_tasks = {
             AUDIT_DEPTH_QUICK: _get_subtasks_quick,
@@ -339,9 +378,14 @@ class Decomposer(BaseAuditComponent):
             AUDIT_DEPTH_DEEP: _get_subtasks_deep,
         }
         task_fn = depth_to_tasks.get(depth, _get_subtasks_standard)
-        sub_tasks = task_fn(session_id, event, anomaly_score)
+        if depth == AUDIT_DEPTH_DEEP and _selected is not None:
+            sub_tasks = task_fn(session_id, event, anomaly_score, selected=_selected)
+        else:
+            sub_tasks = task_fn(session_id, event, anomaly_score)
 
-        logger.info(f"Decomposer(full): {len(sub_tasks)} sub-tasks")
+        logger.info(
+            f"Decomposer(full): {len(sub_tasks)} sub-tasks plan_source={plan_source}"
+        )
 
         return {
             "audit_depth": depth,
@@ -349,6 +393,15 @@ class Decomposer(BaseAuditComponent):
             "llm_analysis": llm_analysis,
             "depth_reason": depth_reason,
             "mode": "full",
+            # 规划溯源: llm=LLM 挑选取证面 / rules=quick|standard 或未启用 /
+            # rules_fallback=deep 档 LLM 规划失败回退模板
+            "plan_source": plan_source,
+            "planning": {
+                "source": plan_source,
+                "selected": _selected or [],
+                "evidence_keys": _DEEP_EVIDENCE_KEYS,
+                "notes": llm_analysis if plan_source == "llm" else "",
+            },
         }
 
     async def _decompose_supplement(
@@ -531,6 +584,58 @@ class Decomposer(BaseAuditComponent):
             {"role": "user", "content": prompt},
         ])
         return result
+
+    async def _llm_plan_subtasks(
+        self, event: dict, anomaly_score: float,
+        anomaly_reasons: list[str],
+    ) -> "tuple[list[str], str] | None":
+        """deep 档 LLM 规划(2026-11-09 阶段4B): 让 LLM 真正决定取证子任务集合。
+
+        返回 (selected_keys, planning_notes); 失败/超时/schema 不过 → None(回退规则模板)。
+        约束(见 _get_subtasks_deep): 只能在取证类能力键中挑选,
+        deep_analyze 与 review 由代码强制保留 —— LLM 只能裁剪取证面, 不能拆安全底线。
+        """
+        from pydantic import BaseModel, ValidationError
+
+        class _PlannedTask(BaseModel):
+            capability: str
+            reason: str = ""
+
+        class _Plan(BaseModel):
+            sub_tasks: list[_PlannedTask]
+            planning_notes: str = ""
+
+        event_json = json.dumps(event, ensure_ascii=False, indent=2)
+        reasons_str = "\n".join(anomaly_reasons) if anomaly_reasons else "无"
+        from prompts import render
+        prompt = render(
+            "audit/decomposer_planning",
+            event_json=event_json,
+            anomaly_score=anomaly_score,
+            reasons_str=reasons_str,
+        )
+        raw = await self.llm_chat([
+            {"role": "system", "content": render("audit/decomposer_planning_system")},
+            {"role": "user", "content": prompt},
+        ])
+        # 降级标记(预算耗尽/无 key)不是可解析输出 —— 交由上层回退
+        if not raw or "fallback" in raw[:60]:
+            return None
+
+        from audit_schemas import extract_json
+        data = extract_json(raw)
+        if not isinstance(data, dict):
+            return None
+        try:
+            plan = _Plan.model_validate(data)
+        except ValidationError:
+            return None
+
+        known = set(_DEEP_EVIDENCE_KEYS)
+        selected = [t.capability for t in plan.sub_tasks if t.capability in known]
+        if not selected:
+            return None
+        return selected, plan.planning_notes
 
 
 decomposer = Decomposer()
