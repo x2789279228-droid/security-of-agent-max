@@ -480,7 +480,7 @@ jobs:
       - name: Run Trivy (fs)
         # 2026-11-10: @master 浮动引用不可复现(上游行为随日变化, 本地同库
         # 全仓复扫 0 CRITICAL) —— pin 到稳定 tag
-        uses: aquasecurity/trivy-action@0.33.0
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: fs
           scan-ref: .
