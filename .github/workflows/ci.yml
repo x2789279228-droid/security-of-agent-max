@@ -125,10 +125,26 @@ jobs:
 
       - name: Static risk scans (non-gating, artifacts)
         # 吞异常 / 零覆盖是报告工具，不是门禁；先把结果留档，M6 再收紧。
+        # 2026-10-29 (R2): 两脚本带空扫描自检 — 目录缺失时退出码 2,
+        # "扫描没跑"不再与"扫出零结果"同形(假门禁防复发)。
+        # 注: `python x | tee` 的步骤退出码取自 tee, 故末尾显式裸跑复核退出码。
         working-directory: .
         run: |
           python tools/scan-swallowed-failures.py | tee swallowed-failures.txt
           python tools/scan-active-zero-coverage.py | tee active-zero-coverage.txt
+          python tools/scan-swallowed-failures.py > /dev/null
+          python tools/scan-active-zero-coverage.py > /dev/null
+
+      - name: Repo hygiene gates (R3/R5, 2026-10-29)
+        # R3: compose 凭据变量禁止非空默认回退; R5: README 数字与实测比对
+        run: |
+          python tools/check-compose-no-default-secrets.py
+          python tools/check-readme-numbers.py --fast
+
+      - name: tools/ lint (W3, 2026-10-29)
+        # ruff.toml 把 tools/ 整体排除出主检查 — 此处单独覆盖语法/未定义名/
+        # 未用导入(硬编码路径类假门禁事故的事后防线)
+        run: ruff check --isolated --select E9,F,UP --ignore UP tools/
 
       - name: Upload static risk scans
         if: always()
@@ -263,6 +279,10 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+      - name: Frontend type ratchet (W2-2, 2026-10-29)
+        # fetchJSON<any> 只许降不许升 + EventSource 单点持有
+        run: python tools/check-frontend-any.py
 
       - name: 安全/结构护栏测试（无需 node_modules）
         # 2026-10-03 新增。断言的是"不许回退"的不变量:
