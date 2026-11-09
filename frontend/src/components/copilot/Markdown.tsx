@@ -7,12 +7,12 @@
  * 样式走 token 类，与 v8 编辑部风一致（无 prose 插件，手动映射元素）。
  */
 import { memo } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 // 2026-11-09: components 提升到模块级 —— 每次渲染新建对象会击穿
 // react-markdown 内部缓存, 历史气泡因 done/usage 帧重渲染时全部重解析
-const MD_COMPONENTS = {
+const MD_COMPONENTS: Components = {
           p: (props) => <p className="my-2 first:mt-0 last:mb-0" {...props} />,
           ul: (props) => <ul className="my-2 list-disc pl-5 space-y-1" {...props} />,
           ol: (props) => <ol className="my-2 list-decimal pl-5 space-y-1" {...props} />,

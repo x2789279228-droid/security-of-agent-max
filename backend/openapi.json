@@ -116,6 +116,70 @@
     "title": "ChatRequest",
     "type": "object"
    },
+   "CopilotMessage": {
+    "properties": {
+     "content": {
+      "title": "Content",
+      "type": "string"
+     },
+     "role": {
+      "title": "Role",
+      "type": "string"
+     }
+    },
+    "required": [
+     "role",
+     "content"
+    ],
+    "title": "CopilotMessage",
+    "type": "object"
+   },
+   "CopilotRequest": {
+    "properties": {
+     "event_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Event Id"
+     },
+     "history": {
+      "items": {
+       "$ref": "#/components/schemas/CopilotMessage"
+      },
+      "maxItems": 40,
+      "title": "History",
+      "type": "array"
+     },
+     "image_data_url": {
+      "default": "",
+      "maxLength": 10000000,
+      "title": "Image Data Url",
+      "type": "string"
+     },
+     "mode": {
+      "default": "auto",
+      "pattern": "^(auto|rag)$",
+      "title": "Mode",
+      "type": "string"
+     },
+     "question": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+     }
+    },
+    "required": [
+     "question"
+    ],
+    "title": "CopilotRequest",
+    "type": "object"
+   },
    "DataSecurityClassifyRequest": {
     "properties": {
      "body_snippet": {
@@ -2443,6 +2507,77 @@
     ]
    }
   },
+  "/api/benchmark/reports": {
+   "get": {
+    "description": "全部评测报告一次拉取(带标题与口径注释)。缺失的文件静默跳过。",
+    "operationId": "benchmark_reports_api_benchmark_reports_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Benchmark Reports",
+    "tags": [
+     "benchmark"
+    ]
+   }
+  },
+  "/api/benchmark/reports/{key}": {
+   "get": {
+    "description": "单份报告直取(key 见 REPORTS 表)。",
+    "operationId": "benchmark_report_api_benchmark_reports__key__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "key",
+      "required": true,
+      "schema": {
+       "title": "Key",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Benchmark Report",
+    "tags": [
+     "benchmark"
+    ]
+   }
+  },
   "/api/cad/accuracy": {
    "get": {
     "description": "CAD 自身准确率统计",
@@ -3601,6 +3736,76 @@
     ]
    }
   },
+  "/api/copilot/capabilities": {
+   "get": {
+    "description": "前端空态/输入区按此渲染能力开关（未配置视觉模型时置灰并说明原因）。",
+    "operationId": "copilot_capabilities_api_copilot_capabilities_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Copilot Capabilities",
+    "tags": [
+     "copilot"
+    ]
+   }
+  },
+  "/api/copilot/stream": {
+   "post": {
+    "description": "流式安全问答。图片仅在配置了视觉模型时参与分析（否则发 vision_note 降级帧）。",
+    "operationId": "copilot_stream_api_copilot_stream_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CopilotRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Copilot Stream",
+    "tags": [
+     "copilot"
+    ]
+   }
+  },
   "/api/data-security/classify": {
    "post": {
     "description": "手动触发数据安全大模型分类（运营人工复核 / 测试）.\n主体 LLM 调用阻塞返结果（控制台测试用），生产路径由 http_linker 异步派发.",
@@ -4717,6 +4922,110 @@
      }
     ],
     "summary": "Guard Approvals",
+    "tags": [
+     "audit"
+    ]
+   }
+  },
+  "/api/guard/approvals/{ticket_id}/approve": {
+   "post": {
+    "description": "批准 MCP Guard 人工确认工单（仅决策记录，不自动执行工具）。\n\n与 /response/approvals 的差异：guard 工单不携带可执行载荷，通过后由\n调用方按工单状态自行重放 /guard/call；本端点只落决策与审计。\ndecided_by 强制取 JWT 身份，不信任请求体（与审批 actor 原则一致）。",
+    "operationId": "guard_approval_approve_api_guard_approvals__ticket_id__approve_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "ticket_id",
+      "required": true,
+      "schema": {
+       "title": "Ticket Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Guard Approval Approve",
+    "tags": [
+     "audit"
+    ]
+   }
+  },
+  "/api/guard/approvals/{ticket_id}/deny": {
+   "post": {
+    "description": "拒绝 MCP Guard 人工确认工单（reason 走 query，与 /response/approvals 同风格）。",
+    "operationId": "guard_approval_deny_api_guard_approvals__ticket_id__deny_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "ticket_id",
+      "required": true,
+      "schema": {
+       "title": "Ticket Id",
+       "type": "string"
+      }
+     },
+     {
+      "description": "拒绝原因",
+      "in": "query",
+      "name": "reason",
+      "required": false,
+      "schema": {
+       "default": "",
+       "description": "拒绝原因",
+       "title": "Reason",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Guard Approval Deny",
     "tags": [
      "audit"
     ]
@@ -5846,6 +6155,96 @@
     ]
    }
   },
+  "/api/logs/manual": {
+   "post": {
+    "description": "值班员手动录入单条日志（接入台编辑器专用）。\n\n与外部数据源 /logs/ingest 的差别：JWT 鉴权（无需 X-API-Key），且日志带\ninject_source=\"manual:<username>\" —— 平台上可审计到\"谁手动录的\"。",
+    "operationId": "ingest_manual_api_logs_manual_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LogIngestRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ingest Manual",
+    "tags": [
+     "logs"
+    ]
+   }
+  },
+  "/api/logs/manual/batch": {
+   "post": {
+    "description": "值班员批量录入（接入台文件上传专用）——口径同 /logs/manual，逐条打标。",
+    "operationId": "ingest_manual_batch_api_logs_manual_batch_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LogBatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ingest Manual Batch",
+    "tags": [
+     "logs"
+    ]
+   }
+  },
   "/api/logs/reset-stuck": {
    "post": {
     "description": "将所有卡住的事件标记为已分析（含错误标记），释放管道 (管道状态变更限操作员以上)",
@@ -5950,6 +6349,77 @@
     ]
    }
   },
+  "/api/logs/scenario/{name}": {
+   "post": {
+    "description": "一键注入攻击剧本。\n\n每条日志带 inject_source=\"scenario:<name>\" 标记（明示演练来源，不伪装真实流量）。",
+    "operationId": "ingest_scenario_api_logs_scenario__name__post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Ingest Scenario",
+    "tags": [
+     "logs"
+    ]
+   }
+  },
+  "/api/logs/scenarios": {
+   "get": {
+    "description": "剧本目录（前端接入台卡片数据：名称/描述/事件数/severity 分布）。",
+    "operationId": "list_scenarios_api_logs_scenarios_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "List Scenarios",
+    "tags": [
+     "logs"
+    ]
+   }
+  },
   "/api/logs/status": {
    "get": {
     "description": "查询日志接入状态",
@@ -6034,6 +6504,51 @@
     "summary": "Stuck Events",
     "tags": [
      "logs"
+    ]
+   }
+  },
+  "/api/mcp": {
+   "post": {
+    "description": "MCP JSON-RPC 2.0 端点(单条与批量)。\n\n认证与 /api/audit/guard/call 同口径(operator 及以上); 角色取自 JWT,\n客户端无法通过参数自报角色提权。",
+    "operationId": "mcp_endpoint_api_mcp_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "payload",
+      "required": true,
+      "schema": {
+       "title": "Payload"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "security": [
+     {
+      "HTTPBearer": []
+     }
+    ],
+    "summary": "Mcp Endpoint",
+    "tags": [
+     "mcp-protocol"
     ]
    }
   },

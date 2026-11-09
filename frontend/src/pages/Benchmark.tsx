@@ -265,7 +265,7 @@ export default function Benchmark() {
           value={(evasion?.overall ?? 0) * 100}
           decimals={1}
           suffix="%"
-          sub={evasionGain ? `规范化整改前 ${(evasion.overallPre! * 100).toFixed(1)}%(${evasionGain})` : '四种对抗编码算子'}
+          sub={evasionGain && evasion?.overallPre != null ? `规范化整改前 ${(evasion.overallPre * 100).toFixed(1)}%(${evasionGain})` : '四种对抗编码算子'}
           tone="ok"
         />
       </div>

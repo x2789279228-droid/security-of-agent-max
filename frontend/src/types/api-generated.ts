@@ -411,6 +411,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmark/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Reports
+         * @description 全部评测报告一次拉取(带标题与口径注释)。缺失的文件静默跳过。
+         */
+        get: operations["benchmark_reports_api_benchmark_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmark/reports/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Report
+         * @description 单份报告直取(key 见 REPORTS 表)。
+         */
+        get: operations["benchmark_report_api_benchmark_reports__key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cad/accuracy": {
         parameters: {
             query?: never;
@@ -936,6 +976,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/copilot/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Copilot Capabilities
+         * @description 前端空态/输入区按此渲染能力开关（未配置视觉模型时置灰并说明原因）。
+         */
+        get: operations["copilot_capabilities_api_copilot_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/copilot/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copilot Stream
+         * @description 流式安全问答。图片仅在配置了视觉模型时参与分析（否则发 vision_note 降级帧）。
+         */
+        post: operations["copilot_stream_api_copilot_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/data-security/classify": {
         parameters: {
             query?: never;
@@ -1415,6 +1495,50 @@ export interface paths {
         get: operations["guard_approvals_api_guard_approvals_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guard/approvals/{ticket_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guard Approval Approve
+         * @description 批准 MCP Guard 人工确认工单（仅决策记录，不自动执行工具）。
+         *
+         *     与 /response/approvals 的差异：guard 工单不携带可执行载荷，通过后由
+         *     调用方按工单状态自行重放 /guard/call；本端点只落决策与审计。
+         *     decided_by 强制取 JWT 身份，不信任请求体（与审批 actor 原则一致）。
+         */
+        post: operations["guard_approval_approve_api_guard_approvals__ticket_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guard/approvals/{ticket_id}/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guard Approval Deny
+         * @description 拒绝 MCP Guard 人工确认工单（reason 走 query，与 /response/approvals 同风格）。
+         */
+        post: operations["guard_approval_deny_api_guard_approvals__ticket_id__deny_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2012,6 +2136,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/logs/manual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Manual
+         * @description 值班员手动录入单条日志（接入台编辑器专用）。
+         *
+         *     与外部数据源 /logs/ingest 的差别：JWT 鉴权（无需 X-API-Key），且日志带
+         *     inject_source="manual:<username>" —— 平台上可审计到"谁手动录的"。
+         */
+        post: operations["ingest_manual_api_logs_manual_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/manual/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Manual Batch
+         * @description 值班员批量录入（接入台文件上传专用）——口径同 /logs/manual，逐条打标。
+         */
+        post: operations["ingest_manual_batch_api_logs_manual_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/logs/reset-stuck": {
         parameters: {
             query?: never;
@@ -2044,6 +2211,48 @@ export interface paths {
          * @description 查询每条日志的审核状态
          */
         get: operations["review_status_api_logs_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/scenario/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Scenario
+         * @description 一键注入攻击剧本。
+         *
+         *     每条日志带 inject_source="scenario:<name>" 标记（明示演练来源，不伪装真实流量）。
+         */
+        post: operations["ingest_scenario_api_logs_scenario__name__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/logs/scenarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scenarios
+         * @description 剧本目录（前端接入台卡片数据：名称/描述/事件数/severity 分布）。
+         */
+        get: operations["list_scenarios_api_logs_scenarios_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2086,6 +2295,29 @@ export interface paths {
         get: operations["stuck_events_api_logs_stuck_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mcp Endpoint
+         * @description MCP JSON-RPC 2.0 端点(单条与批量)。
+         *
+         *     认证与 /api/audit/guard/call 同口径(operator 及以上); 角色取自 JWT,
+         *     客户端无法通过参数自报角色提权。
+         */
+        post: operations["mcp_endpoint_api_mcp_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4272,6 +4504,32 @@ export interface components {
              */
             session_id: string;
         };
+        /** CopilotMessage */
+        CopilotMessage: {
+            /** Content */
+            content: string;
+            /** Role */
+            role: string;
+        };
+        /** CopilotRequest */
+        CopilotRequest: {
+            /** Event Id */
+            event_id?: number | null;
+            /** History */
+            history?: components["schemas"]["CopilotMessage"][];
+            /**
+             * Image Data Url
+             * @default
+             */
+            image_data_url: string;
+            /**
+             * Mode
+             * @default auto
+             */
+            mode: string;
+            /** Question */
+            question: string;
+        };
         /** DataSecurityClassifyRequest */
         DataSecurityClassifyRequest: {
             /**
@@ -5659,6 +5917,57 @@ export interface operations {
             };
         };
     };
+    benchmark_reports_api_benchmark_reports_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    benchmark_report_api_benchmark_reports__key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cad_accuracy_api_cad_accuracy_get: {
         parameters: {
             query?: never;
@@ -6474,6 +6783,59 @@ export interface operations {
             };
         };
     };
+    copilot_capabilities_api_copilot_capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    copilot_stream_api_copilot_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CopilotRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     data_security_classify_api_data_security_classify_post: {
         parameters: {
             query?: never;
@@ -7167,6 +7529,71 @@ export interface operations {
             };
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guard_approval_approve_api_guard_approvals__ticket_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    guard_approval_deny_api_guard_approvals__ticket_id__deny_post: {
+        parameters: {
+            query?: {
+                /** @description 拒绝原因 */
+                reason?: string;
+            };
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -7969,6 +8396,72 @@ export interface operations {
             };
         };
     };
+    ingest_manual_api_logs_manual_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_manual_batch_api_logs_manual_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reset_stuck_api_logs_reset_stuck_post: {
         parameters: {
             query?: {
@@ -8035,6 +8528,57 @@ export interface operations {
             };
         };
     };
+    ingest_scenario_api_logs_scenario__name__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scenarios_api_logs_scenarios_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     log_status_api_logs_status_get: {
         parameters: {
             query: {
@@ -8072,6 +8616,37 @@ export interface operations {
             query?: {
                 /** @description 超过多少分钟未分析视为卡住 */
                 minutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mcp_endpoint_api_mcp_post: {
+        parameters: {
+            query: {
+                payload: unknown;
             };
             header?: never;
             path?: never;

@@ -9,6 +9,9 @@
  *   meta | stage | context | citations | vision_note | reasoning | token | done | error
  */
 import { useCallback, useRef, useState } from 'react'
+// 请求体契约走 openapi 生成类型(与后端 CopilotRequest schema 同源;
+// response 侧因后端 response_model 声明率为 0 暂不可生成, 见 api.ts 注)
+import type { components } from '../types/api-generated'
 // .ts 扩展显式写出 —— scripts/*.test.ts 的 node:test 直跑需要真实文件名解析
 // （allowImportingTsExtensions 已开，vite 构建不受影响）
 import { consumeSseStream } from '../lib/streamSse.ts'
@@ -207,16 +210,38 @@ export function useCopilotStream() {
       const ctrl = new AbortController()
       abortRef.current = ctrl
       try {
+        const body: components['schemas']['CopilotRequest'] = {
+          question: q,
+          event_id: opts.eventId ?? null,
+          image_data_url: opts.imageBase64 ?? '',
+          history: history ?? [],
+          mode: 'auto',
+        }
+        // 2026-11-09: token/reasoning 增量帧 60ms 合流 —— 每 token 一次 setTurns
+        // 会让整棵会话树重渲染; 非增量帧(done/error/citations 等)直通保时序,
+        // 流结束前必须 flush, 否则尾帧丢失(见 finally 前 flush 调用)
+        const THROTTLE_MS = 60
+        const INCREMENTAL = new Set(['token', 'reasoning'])
+        let pendingFrames: { event: string; data: unknown }[] = []
+        let flushTimer: ReturnType<typeof setTimeout> | null = null
+        const flush = () => {
+          flushTimer = null
+          if (!pendingFrames.length) return
+          const batch = pendingFrames
+          pendingFrames = []
+          setTurns((prev) => {
+            let next = prev
+            for (const f of batch) {
+              next = applyAction(next, { kind: 'frame', turnId: turn.id, event: f.event, data: f.data })
+            }
+            return next
+          })
+        }
+
         await consumeSseStream({
           path: '/api/copilot/stream',
           signal: ctrl.signal,
-          body: {
-            question: q,
-            event_id: opts.eventId ?? null,
-            image_data_url: opts.imageBase64 ?? '',
-            history: history ?? [],
-            mode: 'auto',
-          },
+          body,
           onFrame: (event, data) => {
             let parsed: unknown = null
             try {
@@ -224,9 +249,19 @@ export function useCopilotStream() {
             } catch {
               parsed = {}
             }
+            if (INCREMENTAL.has(event)) {
+              pendingFrames.push({ event, data: parsed })
+              if (flushTimer == null) flushTimer = setTimeout(flush, THROTTLE_MS)
+              return
+            }
+            // 非增量帧: 先冲干净已积压的增量, 保证帧序
+            if (flushTimer != null) { clearTimeout(flushTimer); flush() }
             setTurns((prev) => applyAction(prev, { kind: 'frame', turnId: turn.id, event, data: parsed }))
           },
         })
+        // 流结束: 冲掉最后的增量帧(60ms 窗口内可能还压着尾巴)
+        if (flushTimer != null) { clearTimeout(flushTimer); flush() }
+        else flush()
         // 流正常关闭但未收到 done（网关中断）：如实标注
         setTurns((prev) =>
           prev.map((t) => (t.id === turn.id && !t.done ? { ...t, done: true, error: t.error ?? '连接中断，回答可能不完整' } : t)),
