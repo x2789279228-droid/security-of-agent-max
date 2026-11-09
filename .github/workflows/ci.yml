@@ -146,7 +146,11 @@ jobs:
       - name: tools/ lint (W3, 2026-10-29)
         # ruff.toml 把 tools/ 整体排除出主检查 — 此处单独覆盖语法/未定义名/
         # 未用导入(硬编码路径类假门禁事故的事后防线)
-        run: ruff check --isolated --select E9,F,UP --ignore UP tools/
+        # 2026-11-10: requirements.lock 不含 ruff —— 本 job 需自装(与静态
+        # 分析 job 同版本; 此前 exit 127 = command not found)
+        run: |
+          pip install -q ruff==0.17.2
+          ruff check --isolated --select E9,F,UP --ignore UP tools/
 
       - name: Upload static risk scans
         if: always()
