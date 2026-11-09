@@ -138,16 +138,16 @@ for _p, _r in [
 
 # ── 休眠能力：文档声称有、生产从不调用 ──
 DORMANT_CAPABILITIES = [
-    ("zeroday_detect/behavior_analyzer.py",
-     "沙箱报告行为分析：拿到 CAPE report 后没人调用它产出 clean/suspicious/malicious"),
-    ("zeroday_detect/llm_behavior.py",
-     "LLM 行为解读：前置 behavior_analyzer 已休眠，它自然更不会被调用"),
+    # 2026-10-30 H 路线接线摘记: behavior_analyzer/llm_behavior 已接入
+    # (audit_triage.score_event 的 _sandbox 分诊 + log_ingestion 异步解读),
+    # 从 dormant 移除。
     # 2026-10-21: stix_taxii 已由 /api/intel/feeds/{id}/poll 调用，
     # 并从 dormant 清单移除；ioc_ingest 负责落库。
     # 2026-10-27: intel_enricher 已接线(ingest_pipeline.detect 与
     # kafka_consumer._handle_enriched 经 enrich_event_if_enabled 调用)，
     # 同样从 dormant 清单移除 —— 接线即转红的守卫机制反向验证接线完成。
-    ("threat_intel/llm_context.py", "LLM 情报上下文：intel_enricher 已接线但本模块暂无生产调用方"),
+    # 2026-10-30 H 路线接线摘记: llm_context 挂 intel_enricher 后置
+    # (intel_llm_context_enabled), 从 dormant 移除。
     # 2026-10-27 路线 2: ids_connector/suricata_connector 已接线(app.py 启动
     # 分支 + 默认落库处理器 + pcap 回放评测器), 从 dormant 清单移除。
     ("session_reconstruct/timeline.py", "会话时间线重建"),
@@ -157,11 +157,15 @@ DORMANT_CAPABILITIES = [
     ("response_engine/containment/directory_adapter.py", "域账号处置适配器"),
     ("response_engine/containment/mail_adapter.py", "邮箱处置适配器"),
     ("traffic_baseline/traffic_profiler.py", "流量画像基线"),
-    ("traffic_baseline/peer_group.py", "对等组基线"),
+    # 2026-10-30 H 路线接线摘记: peer_group 挂 SeasonalDetector 旁路
+    # (traffic_peer_group_enabled), 从 dormant 移除。
     # ("ids_connector/suricata_connector.py", "Suricata IDS 接入")
     # —— 2026-10-27 路线 2 接线, 移出 dormant(见上方注释)。
-    ("encrypted_traffic/mitm_proxy.py", "加密流量 MITM"),
-    ("edr_fusion/llm_correlation.py", "EDR LLM 跨源关联"),
+    # 2026-10-30 H 路线豁免登记: mitm_proxy 需真实 MITM 证书/中间人环境,
+    # 不属"无设备可落地"项 —— 保持 dormant 属刻意豁免而非遗漏。
+    ("encrypted_traffic/mitm_proxy.py", "加密流量 MITM（豁免：需真实中间人证书环境）"),
+    # 2026-10-30 H 路线接线摘记: llm_correlation 挂 cross_correlator 后置
+    # (edr_llm_correlation_enabled), 从 dormant 移除。
     ("agents/audit_single.py", "单事件审计 Agent"),
     ("self_play/store.py", "SelfPlay 状态存储"),
 ]
@@ -173,14 +177,8 @@ for _p, _r in DORMANT_CAPABILITIES:
 #:
 #: 这类文件**不能整文件删** —— 活着的符号在生产链路里。
 PARTIALLY_DORMANT: dict[str, dict[str, object]] = {
-    "zeroday_detect/variant_cluster.py": {
-        "reason": (
-            "文件被 learn_loop 生产导入，但只为纯函数 jaccard_similarity；"
-            "零日变种聚类能力 VariantCluster 本体生产零引用，stats 恒为全零"
-        ),
-        "live": ["jaccard_similarity"],
-        "dead": ["VariantCluster"],
-    },
+    # 2026-10-30 H 路线接线摘记: VariantCluster 已接入 learn_loop 收割面
+    # (learn_variant_cluster_enabled), 本表清空。
 }
 for _p in PARTIALLY_DORMANT:
     _add(_p, "partial", str(PARTIALLY_DORMANT[_p]["reason"]))
@@ -318,8 +316,8 @@ def test_scanner_detects_a_known_imported_module(dormant):
 
 
 def test_scanner_detects_a_known_dormant_module(dormant):
-    """反向自检：`zeroday_detect.behavior_analyzer` 确实零生产导入。"""
-    assert "zeroday_detect/behavior_analyzer.py" in dormant, \
+    """反向自检：`session_reconstruct/timeline.py` 确实零生产导入。"""
+    assert "session_reconstruct/timeline.py" in dormant, \
         "扫描器连已知的休眠模块都没扫出来 —— 结果不可信"
 
 
@@ -391,16 +389,16 @@ def test_capability_scanner_finds_a_symbol_that_is_live():
 
 
 def test_capability_scanner_reports_a_symbol_that_is_dead():
-    """阴性对照：`VariantCluster` 生产零引用，且扫描器认得出这个 0。
+    """阳性对照（2026-10-30 H 接线后翻转）：`VariantCluster` 现有生产引用方；该用例同时仍钉住「排除定义文件自身自引用」的扫描器语义。
 
     这一条同时钉住「排除定义文件自身」：
     `variant_cluster.py:438` 有 `variant_cluster = VariantCluster()`，
     若没排除自引用，这里会假绿。
     """
     refs = _symbol_referents("VariantCluster", "zeroday_detect/variant_cluster.py")
-    assert not refs, (
-        "zeroday_detect/variant_cluster.py：`VariantCluster` 已有生产引用方 "
-        f"{sorted(refs)}；若这是刚接线的，请摘掉 partial 登记并改报告结论"
+    assert refs, (
+        "zeroday_detect/variant_cluster.py：`VariantCluster` 应已被 "
+        "learn_loop/orchestrator 生产引用 —— 接线被移除了？"
     )
 
 

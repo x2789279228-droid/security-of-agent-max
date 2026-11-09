@@ -71,8 +71,11 @@ ZERODAY = BACKEND / "zeroday_detect"
 
 #: (目标模块文件, 必须被生产代码调用的方法名)
 ANALYSIS_CHAIN = [
-    ("behavior_analyzer.py", "analyze"),
-    ("variant_cluster.py", "add_sample"),
+    # 2026-10-30 H 路线收口: behavior_analyzer.analyze 已被
+    # audit_triage.score_event(_sandbox 分诊) 生产调用, llm_behavior 由
+    # log_ingestion 异步解读调用 —— 从链表移除。
+    # variant_cluster.add_sample 已被 learn_loop/orchestrator §4.5 调用;
+    # find_similar 尚无生产调用方, 保留钉住。
     ("variant_cluster.py", "find_similar"),
 ]
 

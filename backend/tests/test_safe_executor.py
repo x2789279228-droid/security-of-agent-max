@@ -124,7 +124,16 @@ class TestCommandWhitelist:
         assert rule_id == "WIN-002"
 
     def test_windows_powershell_encoded_allowed(self):
-        cmd = "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand dwByAGkAdABlAC0AbwB1AHQA"
+        # R13: 编码命令必须命中解码动作模板 — 旧用例编码任意脚本("write-out"),
+        # 在模板指纹门下不再放行; 改用生产真实形状(kill_session by-name)。
+        import base64
+        script = (
+            'Stop-Process -Name "evil" -Force -ErrorAction SilentlyContinue\n'
+            'taskkill /F /IM "evil" /T 2>$null\n'
+            'Write-Output "Process evil terminated"'
+        )
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        cmd = f"powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}"
         allowed, rule_id, _ = command_whitelist.check(cmd, "windows")
         assert allowed
         assert rule_id == "WIN-004"

@@ -38,7 +38,7 @@ def test_chat_cache_hit_under_budget_exhaustion(monkeypatch):
 
     async def t():
         llm = summary.llm
-        llm._response_cache.clear()
+        monkeypatch.setattr(llm, "_response_cache", {})  # W1-3: 换新 dict, 单例原缓存自动还原
         messages = [{"role": "user", "content": "cache-starvation-probe"}]
         prompt_text = "\n".join(m.get("content", "") for m in messages)
         key = "llmcache:" + hashlib.md5(f"{prompt_text}:0.3".encode("utf-8")).hexdigest()
@@ -60,7 +60,7 @@ def test_chat_fallback_when_over_budget_and_cache_miss(monkeypatch):
 
     async def t():
         llm = summary.llm
-        llm._response_cache.clear()
+        monkeypatch.setattr(llm, "_response_cache", {})  # W1-3: 换新 dict, 单例原缓存自动还原
         monkeypatch.setattr(cost_tracker, "is_over_budget", lambda: True)
         result = await llm.chat([{"role": "user", "content": "no-cache-probe"}])
         assert "fallback" in json.loads(result)

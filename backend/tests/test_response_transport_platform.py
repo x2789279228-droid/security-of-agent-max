@@ -61,11 +61,14 @@ from response_engine.command_whitelist import command_whitelist  # noqa: E402
 
 rr = importlib.import_module("response_engine.response_registry")
 
+# R13: 生产真实形状(response_registry._send_eventlog 精确输出) —
+# 旧脚本形状(New-NetFirewallRule)无任何生产生成点, 且在解码模板门下
+# 不再"任意脚本都能过 WIN-004"。
 PS_SCRIPT = (
-    '$name = "RE_Block_1_2_3_4"\n'
-    'New-NetFirewallRule -DisplayName $name -Direction Inbound '
-    '-Action Block -RemoteAddress 1.2.3.4 -ErrorAction Stop\n'
-    'Write-Output "rule created"'
+    'Write-EventLog -LogName Application -Source "ResponseEngine" '
+    '-EntryType ERROR -EventId 1000 '
+    '-Message "block: 1.2.3.4: c2" '
+    '-ErrorAction SilentlyContinue'
 )
 LINUX_CMD = "iptables -I INPUT -s 1.2.3.4 -j DROP"
 

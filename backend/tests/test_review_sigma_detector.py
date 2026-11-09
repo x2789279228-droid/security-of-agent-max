@@ -359,9 +359,11 @@ class TestQ2ConcurrentTableIsolation:
         seen = []
         orig = PySigmaDetector._ensure_table
 
-        def _spy(self, cols, ev, conn=None):
+        def _spy(self, cols, ev, conn=None, **kwargs):
+            # kwargs: A4 惰性 schema 的 extra_cols(2026-10-30) — 间谍只关心
+            # 连接独占性, 签名需随 _ensure_table 内部签名扩展。
             seen.append(conn)
-            return orig(self, cols, ev, conn=conn)
+            return orig(self, cols, ev, conn=conn, **kwargs)
 
         PySigmaDetector._ensure_table = _spy
         try:

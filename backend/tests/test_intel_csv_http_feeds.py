@@ -81,9 +81,13 @@ def test_parse_plain_url_list():
     assert all(i["ioc_type"] == "url" for i in iocs)
 
 
-def test_legacy_local_csv_semantics_preserved(tmp_path):
+def test_legacy_local_csv_semantics_preserved(tmp_path, monkeypatch):
     """旧 `csv` 本地文件路径的列名回退(value|ioc_value / type|ioc_type)不能被改坏。"""
+    from config import settings
     from threat_intel.stix_taxii import taxii_client
+
+    # R14: 本地 csv 导入受 intel_local_feed_dir 白名单约束 — 测试把白名单指向 tmp_path
+    monkeypatch.setattr(settings, "intel_local_feed_dir", str(tmp_path))
 
     f = tmp_path / "legacy.csv"
     f.write_text(

@@ -70,11 +70,13 @@ def _write_feed(tmp_path, name: str = "unit-csv"):
     return {"feed_type": "csv", "url": str(p), "name": name}
 
 
-def test_intel_counter_moves_on_real_poll_feed(tmp_path):
+def test_intel_counter_moves_on_real_poll_feed(tmp_path, monkeypatch):
     """真实拉一次 CSV 情报源，soc_intel_ioc_total 必须按拉到的条数自增。
 
     修复前该计数器零调用点，无论拉多少次都恒为 0。
     """
+    from config import settings
+    monkeypatch.setattr(settings, "intel_local_feed_dir", str(tmp_path))  # R14 白名单
     from threat_intel.stix_taxii import TaxiiClient
 
     cfg = _write_feed(tmp_path)
@@ -89,12 +91,14 @@ def test_intel_counter_moves_on_real_poll_feed(tmp_path):
     )
 
 
-def test_intel_counter_labels_by_feed_source(tmp_path):
+def test_intel_counter_labels_by_feed_source(tmp_path, monkeypatch):
     """source 标签取自 feed 配置，两个源不能被合并成一个数字。
 
     否则「拉了 MISP 300 条 / CSV 2 条」显示成 302，
     定位不到是哪个源在跑还是哪个源挂了。
     """
+    from config import settings
+    monkeypatch.setattr(settings, "intel_local_feed_dir", str(tmp_path))  # R14 白名单
     from threat_intel.stix_taxii import TaxiiClient
 
     client = TaxiiClient()
@@ -123,12 +127,14 @@ def test_intel_counter_not_incremented_when_feed_missing(tmp_path):
     assert _sample("soc_intel_ioc_total", source="no-such-feed") == before
 
 
-def test_capabilities_endpoint_count_is_no_longer_structurally_zero(tmp_path):
+def test_capabilities_endpoint_count_is_no_longer_structurally_zero(tmp_path, monkeypatch):
     """端到端：走 capabilities.py 自己的解析器，证明 API 字段是真读数。
 
     这一条才是真正的验收点 —— 前端看的是 _parse_metric_values 的输出，
     不是 REGISTRY 的原始样本。只断言计数器自增，证明不了前端那个数字会动。
     """
+    from config import settings
+    monkeypatch.setattr(settings, "intel_local_feed_dir", str(tmp_path))  # R14 白名单
     from threat_intel.stix_taxii import TaxiiClient
 
     asyncio.run(TaxiiClient().poll_feed(_write_feed(tmp_path, name="e2e-feed")))

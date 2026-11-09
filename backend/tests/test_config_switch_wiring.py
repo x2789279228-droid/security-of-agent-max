@@ -179,8 +179,18 @@ def test_settings_field_count_is_unchanged():
     字段数再变说明 config.py 被大改，本文件里所有清单都需要重新核实。
     """
     fields = _settings_fields()
-    assert len(fields) == 357, (
-        f"Settings 字段数从 357 变成 {len(fields)} —— "
+    # 2026-10-29 (R3/R12/R14/R20): +3 = DEMO_MODE(演示路由开关) /
+    #   INTEL_LOCAL_FEED_DIR(本地情报白名单) / TEMPO_URL(Tempo 查询地址出配置)
+    # 2026-10-30 背压复合信号 (PERF-OPT-PLAN Wave 2-1/2-2): +3 =
+    #   KAFKA_CONSUMPTION_EPS(实测消费容量, 0=lag 信号不启用) /
+    #   KAFKA_LAG_ALLOWED_BACKLOG_S(允许积压秒数) / AUDIT_PQ_CAPACITY(PQ 深度容量)
+    # 2026-10-30 H 路线接线开关: +5 = INTEL_LLM_CONTEXT_ENABLED /
+    #   EDR_LLM_CORRELATION_ENABLED / TRAFFIC_PEER_GROUP_ENABLED /
+    #   ZERODAY_LANE_ENABLED / LEARN_VARIANT_CLUSTER_ENABLED
+    #   (REMEDIATION-PLAN 路线 H 收口, 详见 test_h_wiring.py)
+    # 2026-10-30 W31 P1: +1 = REDIS_POOL_MAX_CONNECTIONS(默认 100 击穿 → 500)
+    assert len(fields) == 369, (
+        f"Settings 字段数从 369 变成 {len(fields)} —— "
         "请重新跑全量普查并更新整改报告 §7.1.11"
     )
 
@@ -222,7 +232,13 @@ def test_env_example_parses_and_ships_the_keys_we_care_about():
     # 2026-10-27 路线3: +2 = INTEL_ENRICH_ENABLED / INTEL_ENRICH_TIMEOUT_MS
     #   (富化旁路与拉取解耦, fail-open 契约见 intel_enricher.enrich_event_if_enabled)
     # 2026-10-27 路线2: +1 = SURICATA_ENABLED (IDS 接入启动分支)
-    assert len(shipped) == 164, f"出货键数从 164 变成 {len(shipped)}，出货口径需重估"
+    # 2026-10-29 (R3/R12): +1 = TEMPORAL_PASSWORD(compose fail-closed 必填) +
+    #   SHARED_MEMORY_DEMO_MODE(演示路由开关) − SHARED_MEMORY_INTEL_LOCAL_FEED_DIR
+    #   按需补录。此处以实测出货口径为准。
+    # 2026-10-30 背压复合信号: +3 = KAFKA_CONSUMPTION_EPS /
+    #   KAFKA_LAG_ALLOWED_BACKLOG_S / AUDIT_PQ_CAPACITY (config.py 同日新增,
+    #   默认注释出货, 标定口径见 PERF-OPT-PLAN Wave 2-2)
+    assert len(shipped) == 168, f"出货键数从 168 变成 {len(shipped)}，出货口径需重估"
     for key in ("SHARED_MEMORY_SELF_PLAY_DECOY_RATIO",
                 "SHARED_MEMORY_SELF_PLAY_DEFAULT_ROUNDS",
                 "SHARED_MEMORY_TAXII_PASSWORD",

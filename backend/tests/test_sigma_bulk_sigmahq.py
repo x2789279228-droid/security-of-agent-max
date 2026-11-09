@@ -77,11 +77,24 @@ def test_library_size_at_least_150_all_compiled(detector: PySigmaDetector):
 
 
 def test_bulk_rules_are_shadow_alert_only():
-    """批量导入规则一律影子 + 仅告警 —— 导入即封禁是被禁止的。"""
+    """批量导入规则默认影子 + 仅告警 —— 导入即封禁仍被禁止。
+
+    唯一豁免（B3 终版 2026-11-01）：带**完整转正溯源**的规则可以是执法态 ——
+    `x-soc-promoted-at` + `x-soc-promotion-fp` + `x-soc-promotion-hits`
+    三字段齐全 = 经双门禁引擎(FP=0 + 攻击命中)合法转正；缺任一字段的
+    非影子规则仍视为"直接翻标志"而失败。
+    """
     bad = []
+    promoted = 0
     for f in _bulk_files():
         d = yaml.safe_load(f.read_text(encoding="utf-8"))
         if d.get("x-soc-shadow") is not True:
+            has_provenance = all(
+                d.get(k) is not None for k in
+                ("x-soc-promoted-at", "x-soc-promotion-fp", "x-soc-promotion-hits"))
+            if has_provenance:
+                promoted += 1
+                continue  # 带溯源的合法转正(见 docstring)
             bad.append(f"{f.name}: x-soc-shadow={d.get('x-soc-shadow')}")
         if d.get("x-soc-action") not in (None, "alert"):
             bad.append(f"{f.name}: x-soc-action={d.get('x-soc-action')}")

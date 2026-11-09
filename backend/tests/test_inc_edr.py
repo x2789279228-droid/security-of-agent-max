@@ -67,7 +67,7 @@ def test_edr_adapter_ingest_normalizes():
     """edr_adapter.ingest 对 dict 事件归一化(不抛错, 可本地判定源类型)。"""
     from edr_fusion.edr_adapter import EdrAdapter
     adapter = EdrAdapter()
-    asyncio.get_event_loop().run_until_complete(adapter.stop())  # 确保无后台
+    asyncio.run(adapter.stop())  # 确保无后台
     # 直接验证事件可被 ingest 链路处理(内部会持久化，这里仅确认不因输入结构崩溃)
     # 用真实 ingest 会触发 DB; 改用内部解析路径: 事件 dict → source 判定
     src = adapter._resolve_source(EDR_INGEST_EVENT) if hasattr(adapter, "_resolve_source") else "auto"

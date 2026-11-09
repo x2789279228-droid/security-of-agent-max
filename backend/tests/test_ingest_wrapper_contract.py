@@ -130,7 +130,7 @@ def test_produce_raw_batch_accepts_all_real_wrappers(monkeypatch):
 
     class _FakeProducer:
         def send(self, topic, key=None, value=None, headers=None):
-            fut = asyncio.get_event_loop().create_future()
+            fut = asyncio.get_running_loop().create_future()
             sent.append((topic, key, value))
             fut.set_result(type("MD", (), {"topic": topic, "partition": 0,
                                            "offset": len(sent)})())

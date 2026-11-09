@@ -16,9 +16,14 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_taxii_poll_parses_indicators():
+def test_taxii_poll_parses_indicators(monkeypatch):
     """TAXII objects 解析为 IOC(含 ip/domain/hash)。"""
     from threat_intel.stix_taxii import TaxiiClient
+
+    # R14 起出网 URL 过 SSRF 校验 — 本测试的 mock 服务器在 loopback,
+    # 测试期显式放行(生产不受影响; 不给 net_guard 加任何后门开关)。
+    import net_guard
+    monkeypatch.setattr(net_guard, "validate_submittable_url", lambda u, **k: u)
 
     async def scenario():
         m = await MockExternalServers().start()
@@ -36,9 +41,12 @@ def test_taxii_poll_parses_indicators():
     assert iocs
 
 
-def test_misp_poll_parses_attributes():
+def test_misp_poll_parses_attributes(monkeypatch):
     """MISP attributes 解析为 IOC。"""
     from threat_intel.stix_taxii import TaxiiClient
+
+    import net_guard
+    monkeypatch.setattr(net_guard, "validate_submittable_url", lambda u, **k: u)
 
     async def scenario():
         m = await MockExternalServers().start()

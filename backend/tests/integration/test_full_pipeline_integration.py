@@ -130,9 +130,9 @@ async def _produce(stack, topic: str, payload: bytes) -> None:
 
 async def _poll_until(fn, timeout_s: float, interval: float = 1.0):
     """轮询直到 fn() 为真值或超时, 返回 fn() 最终结果。"""
-    deadline = asyncio.get_event_loop().time() + timeout_s
+    deadline = asyncio.get_running_loop().time() + timeout_s
     result = None
-    while asyncio.get_event_loop().time() < deadline:
+    while asyncio.get_running_loop().time() < deadline:
         result = await fn() if asyncio.iscoroutinefunction(fn) else fn()
         if result:
             return result

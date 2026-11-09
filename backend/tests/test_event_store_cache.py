@@ -1,4 +1,7 @@
-"""EventStore 热缓存一致性：失效广播、TTL 兜底、代次防回写、先提交后失效。"""
+"""EventStore 热缓存一致性：失效广播、TTL 兜底、代次防回写、先提交后失效。
+
+W1-3 核查注: 本文件每个用例 `EventStore()` 全新实例, 无单例污染(此前审计
+把"操作 _hot_cache"误判为全局泄漏 — 实例是局部的, 无需还原 fixture)。"""
 import inspect
 
 import pytest

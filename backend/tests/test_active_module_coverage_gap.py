@@ -75,6 +75,11 @@ def _load_scanner():
 REGISTERED: dict[str, str] = {
     # 2026-10-21: `response_engine.ttl_manager` 已由
     # tests/test_m1_response_boundary.py 覆盖，并从零覆盖登记表移除。
+    # 2026-10-30 H 路线收口: `zeroday_detect.llm_behavior` 已有接线测试
+    # 覆盖(挂 log_ingestion 异步解读) —— 但接线≠覆盖, 实测它仍在零覆盖面,
+    # 如实登记(见下方条目)。
+    "zeroday_detect.llm_behavior":
+        "LLM 沙箱行为解读 —— 2026-10-30 H 接线(log_ingestion 异步)后仍零测试覆盖",
     "protocol_parser.tls_parser":
         "TLS 协议解析（C2 会话证据的来源）—— 零覆盖",
     "protocol_parser.dissector":
@@ -118,8 +123,8 @@ REGISTERED: dict[str, str] = {
         "阶段事件 —— 零覆盖",
     "stats_counter":
         "统计计数 —— 零覆盖",
-    "user_store":
-        "用户存储 —— 零覆盖",
+    # 2026-10-29 (R7): user_store 补了事件循环阻塞测试(test_auth_no_event_loop_block)
+    # → 已移出零覆盖登记表
     # 2026-10-27: ip2region 官方绑定 (vendored 第三方, Apache-2.0) —
     # 由 geo_ip 动态导入的离线 IP 地理库, 第三方检索器不纳入测试覆盖度量
     "ip2region":

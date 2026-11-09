@@ -212,7 +212,8 @@ UNWATCHED: dict[str, str] = {
     "soc_sigma_engine_degraded_total": "Sigma 引擎降级, Grafana 告警待 provision",
     # ── 审计控制面（metrics.py 第 50~94 行整组）──
     "soc_audit_cache_hit_total": "审计缓存命中率，PR2 面板尚未 provision",
-    "soc_audit_complete_total": "审计完成数，无面板",
+    # 2026-10-30 J 清零: soc_audit_complete_total 已有消费方
+    # (alerts.yml SocSLOAuditCompletionStall SLO 告警), 从本表移除。
     "soc_audit_inflight": "审计在途数，无面板",
     "soc_audit_lane_admit_total": "审计车道准入数，无面板",
     "soc_audit_pq_dequeue_total": "审计优先队列出队数，无面板",
