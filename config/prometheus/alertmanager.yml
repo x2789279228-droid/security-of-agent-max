@@ -1,0 +1,12 @@
+# J 清零(2026-10-30): Alertmanager 最小路由
+# 生产收件人(webhook/邮件)由部署环境叠加, 本文件只保证路由/分组/静默骨架。
+route:
+  receiver: default
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: default
+    # 无后端时的空接收器: 告警在 AM UI(127.0.0.1:9093) 可见、可静默
+    # 生产叠加: webhooks: [{ url: ... }]

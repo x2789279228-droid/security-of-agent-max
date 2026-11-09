@@ -9,6 +9,12 @@ global:
 rule_files:
   - /etc/prometheus/alerts.yml
 
+# J 清零(2026-10-30): 告警路由到 Alertmanager(9093)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: soc-backend
     metrics_path: /metrics

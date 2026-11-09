@@ -94,6 +94,18 @@ groups:
           summary: 审计优先级队列任务丢失
           description: payload 先于 ZSET 成员过期，任务不可恢复；reason={{ $labels.reason }}
 
+      - alert: SocAuditPqAccountingGap
+        expr: abs(soc_audit_pq_accounting_gap) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 审计 PQ 三角账目不闭合
+          description: >
+            gap = enqueue - dequeue - lost - depth 已持续 >5 达 10 分钟，
+            存在未计数的损耗/绕行路径（PERF-OPT-PLAN Wave 0-4）；
+            排查方向：pop 路径是否绕过 inc_audit_pq_dequeue / 死信是否漏计。
+
       - alert: SocKafkaConsumerRestarts
         expr: increase(soc_kafka_consumer_restarts_total[10m]) > 5
         for: 0m
@@ -176,3 +188,31 @@ groups:
         annotations:
           summary: 60s 窗口去重命中占比过高
           description: 近 15 分钟重复事件占比 {{ $value | humanizePercentage }} —— 上游在重复发送或去重窗口异常。
+
+  # ── J 清零(2026-10-30): 服务级 SLO 告警(Alertmanager 路由目标) ──
+  # 口径与 PERF-2 标定一致: 单 worker 稳态 8 eps(@1675 规则), 60s 允许积压。
+  - name: soc-slo
+    interval: 30s
+    rules:
+      - alert: SocSLOConsumptionLag
+        expr: sum(soc_kafka_lag) > 480
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 消费积压越过 SLO(kafka_consumption_eps=8 × 60s 容忍窗)
+          description: 集群 Kafka lag 超过 480 条持续 5 分钟；按 PERF-2 标定口径扩 worker 或排查检测热点。
+      - alert: SocSLOAuditCompletionStall
+        expr: increase(soc_audit_complete_total[30m]) == 0 and increase(soc_ingest_received_total[30m]) > 100
+        labels:
+          severity: critical
+        annotations:
+          summary: 审计完成率 SLO 停摆
+          description: 30 分钟内有接入(>100)但零审计完成 —— 审计车道阻塞或 LLM 全降级。
+      - alert: SocSLOApprovalLatency
+        expr: histogram_quantile(0.95, rate(soc_response_approval_seconds_bucket[30m])) > 600
+        labels:
+          severity: warning
+        annotations:
+          summary: 审批时延 SLO 超限
+          description: 响应审批 p95 > 10 分钟。

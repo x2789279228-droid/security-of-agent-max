@@ -67,18 +67,23 @@ TOK="$(curl -s -X POST "${BACKEND}/api/auth/login" -H 'Content-Type: application
   -d "{\"username\":\"admin\",\"password\":\"${PW}\"}" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
 [ -n "$TOK" ] || fail "登录失败 — 校对 .env SHARED_MEMORY_ADMIN_PASSWORD"
 curl -sf -X POST "${BACKEND}/api/demo/seed" -H "Authorization: Bearer ${TOK}" >/dev/null \
-  && say "种子已灌 (demo_seed)" || say "⚠️ demo/seed 失败(不阻断, 剧本可裸跑)"
+  && say "种子已灌 (demo_seed)" || say "⚠️ demo/seed 失败 — 后端需以 SHARED_MEMORY_DEMO_MODE=true 启动(R12 起演示路由按需挂载)"
 
 # ── 5. 持续攻击流量 (后台容器, 多地域源 IP 池) ──
 say "=== 5/5 起持续攻击流量 (≈${TRAFFIC_EPS} eps, 多地域源) ==="
 INTERVAL="$(awk "BEGIN{printf \"%.4f\", 1/${TRAFFIC_EPS}}")"
 docker rm -f demo-traffic 2>/dev/null || true
-docker run -d --name demo-traffic --network host \
-  -v "$(pwd):/workspace" -w /workspace python:3.11-slim \
-  python log_simulator.py --mode continuous --interval "${INTERVAL}" \
-  --api "${BACKEND}" >/dev/null 2>&1 \
-  && say "流量容器已起 (demo-traffic, interval=${INTERVAL}s)" \
-  || say "⚠️ 流量容器启动失败 — 可手动: python log_simulator.py --help"
+# R12: 传 JWT(匿名接入已 fail-closed); 不再全吞输出 — 启动失败时打印容器日志尾部
+if [ -z "${TOK}" ]; then
+  say "⚠️ 未取得 admin JWT — 演示流量无法通过数据源认证, 跳过流量注入"
+else
+  docker run -d --name demo-traffic --network host \
+    -v "$(pwd):/workspace" -w /workspace python:3.11-slim \
+    python log_simulator.py --mode continuous --interval "${INTERVAL}" \
+    --api "${BACKEND}" --token "${TOK}" >/dev/null 2>&1 \
+    && say "流量容器已起 (demo-traffic, interval=${INTERVAL}s)" \
+    || { say "⚠️ 流量容器启动失败 — 最近日志:"; docker logs --tail 20 demo-traffic 2>&1 || true; }
+fi
 
 say ""
 say "═══════════════ 演出就绪 ═══════════════"

@@ -89,7 +89,12 @@ public class BehaviorAnomalyJob {
                                 .setHeaderProvider(new TraceIdHeaderProvider())
                                 .build()
                 )
-                .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
+                // J 清零(2026-10-30): AT_LEAST_ONCE → EXACTLY_ONCE —— 与其余 5 个作业
+                // 对齐。修复前: 故障恢复可重复告警, 且消费端 kafka_consumer 以
+                // read_committed 读取(_handle_behavior_alert 无幂等去重键) → 重复告警
+                // 直达响应编排器, 可能重复触发处置。transactionalIdPrefix 原本就
+                // 已设置(soc-behavior), 只在 EXACTLY_ONCE 下才生效。
+                .setDeliveryGuarantee(DeliveryGuarantee.EXACTLY_ONCE)
                 .setTransactionalIdPrefix("soc-behavior")
                 .build();
 
