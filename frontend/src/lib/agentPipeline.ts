@@ -39,6 +39,20 @@ export const STAGE_COLORS: Record<string, string> = {
   response: '#34c759',
 }
 
+/**
+ * 每个岗位的一句话职责 —— 舞台页 Agent 卡片用。
+ * 目的：让非安全专业的观众也能看懂「这一步是谁在干什么」，
+ * 而不是只看到六个技术名词。
+ */
+export const STAGE_DUTIES: Record<string, string> = {
+  decomposer: '拆解事件，定审核深度与子任务',
+  tool_builder: '选取证工具，映射参数',
+  executor: '调用工具取证，形成威胁断言',
+  reviewer: '独立复核，检查矛盾与缺口',
+  cad_verify: '穿透验证，不采信 Agent 自述',
+  response: '按策略执行，高危动作走审批',
+}
+
 export type StageCellStatus = 'idle' | 'running' | 'success' | 'error' | 'timeout'
 
 export interface RelayState {

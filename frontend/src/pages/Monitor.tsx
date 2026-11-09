@@ -521,7 +521,7 @@ export default function Monitor({ kiosk = false }: { kiosk?: boolean }) {
         <div className="flex min-w-0 flex-col gap-3">
 
       {/* ── 多 Agent 审查接力 ── */}
-      <div className="flex items-center justify-between mb-4 border-b border-ink/80 pb-3">
+      <div className="rule-double mb-4 flex items-center justify-between pb-3">
         <div className="flex items-baseline gap-4">
           <h2 className="text-[16px] font-semibold tracking-tight text-ink">
             多 Agent 审查接力

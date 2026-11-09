@@ -28,6 +28,10 @@ export const ROUTES = {
   SCREEN: '/screen',
   // 系统全景海报（一屏读懂 · 会呼吸的架构图）
   POSTER: '/poster',
+  // AI 分析 Copilot（2026-11 传智杯 AI Web 改造：对话式安全分析）
+  COPILOT: '/copilot',
+  // 接入台（2026-11 传智杯 AI Web 改造：日志注入窗口 · 攻击剧本库）
+  INGEST: '/ingest',
 } as const
 
 /** 守望签名 — 暮青 → 灰青 → 松绿 → 柿黄 */

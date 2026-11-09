@@ -8,6 +8,7 @@
  */
 import { memo, useState, type CSSProperties } from 'react'
 import type { RowComponentProps } from 'react-window'
+import { useNavigate } from 'react-router-dom'
 import {
   EVENT_META,
   SEVERITY_META,
@@ -71,6 +72,23 @@ function TraceId({ traceId }: { traceId: string }) {
       className="font-mono text-[11px] text-ink-faint underline decoration-dan underline-offset-2 hover:text-ink"
     >
       {copied ? '已复制' : `trace ${traceId.slice(0, 8)}…`}
+    </button>
+  )
+}
+
+/** 「追问 AI」— 带事件上下文跳 Copilot（2026-11 传智杯 AI Web 改造） */
+function AskAiLink({ eid }: { eid: number }) {
+  const navigate = useNavigate()
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        navigate(`/copilot?event=${eid}`)
+      }}
+      title="带着这条告警的上下文去问 AI Copilot"
+      className="cursor-pointer border border-line px-1 text-[10px] text-accent transition-colors hover:border-accent/50 hover:bg-accent/5"
+    >
+      追问 AI
     </button>
   )
 }
@@ -273,6 +291,7 @@ const Inner = memo(function Inner({
               )}
               {d.source && <span className="border border-line px-1">{d.source}</span>}
               {typeof d.trace_id === 'string' && d.trace_id && <TraceId traceId={d.trace_id} />}
+              {eid > 0 && evt.type === 'security_event' && <AskAiLink eid={eid} />}
               {isThoughtSelectable(evt) && (
                 <span className="border border-line px-1">思维链</span>
               )}

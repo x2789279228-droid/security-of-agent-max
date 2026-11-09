@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { PageFrame } from '../components/common/PageFrame'
+import { ErrorState } from '../components/common/AsyncState'
+import { EmptyState } from '../components/common/EmptyState'
 import { api } from '../lib/api'
 import { StatBand } from '../components/common/StatBand'
 
@@ -116,23 +118,14 @@ export default function Sandbox() {
           </article>
         ))}
         {loadError && (
-          <div className="mx-6 my-4 border border-warn/40 bg-warn/5 px-5 py-4 text-center">
-            <p className="text-[13px] text-warn">加载失败:{loadError}</p>
-            <button
-              onClick={() => setRefreshKey((k) => k + 1)}
-              className="mt-2 border border-line px-3 py-1.5 text-[11px] text-ink transition-colors hover:border-accent hover:text-accent"
-            >
-              重试
-            </button>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
-              后端不可达已与「暂无数据」区分;可点上方「演示补给」一键灌入演示数据。
-            </p>
-          </div>
+          <ErrorState
+            message={loadError}
+            hint="后端不可达已与「暂无数据」区分；可点上方「演示补给」一键灌入演示数据。"
+            onRetry={() => setRefreshKey((k) => k + 1)}
+          />
         )}
-        {tasks.length === 0 && (
-          <div className="px-6 py-20 text-center text-[13px] text-ink-faint">
-            暂无沙箱任务
-          </div>
+        {!loadError && tasks.length === 0 && (
+          <EmptyState art="radar" title="暂无沙箱任务" hint="提交样本或等待沙箱接入后，这里会显示动静态行为与判定。" />
         )}
       </div>
     </PageFrame>

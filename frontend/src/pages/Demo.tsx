@@ -7,7 +7,7 @@ import { ThoughtTypewriter } from '../components/demo/ThoughtTypewriter'
 import { SealSlam } from '../components/demo/SealSlam'
 import { DemoSupplyCard } from '../components/demo/DemoSupplyCard'
 import { SCENES, MODE_BADGE } from '../lib/demoScript'
-import { STAGE_LABELS, AGENT_RELAY_STAGES, type AgentRelayStage } from '../lib/agentPipeline'
+import { AgentCards } from '../components/demo/AgentCards'
 import { ROUTES } from '../lib/constants'
 
 /**
@@ -57,56 +57,54 @@ function SceneRail({ state }: { state: ReturnType<typeof useDemoDirector>['state
   )
 }
 
-// ── 中栏:接力可视化(导演状态驱动,合成信号同样点亮)──
-function RelayStage({ stages }: { stages: ReturnType<typeof useDemoDirector>['state']['stages'] }) {
-  const activeIdx = AGENT_RELAY_STAGES.findIndex((s) => stages[s].status === 'running')
-  const frac = activeIdx >= 0 ? (activeIdx + 0.5) / AGENT_RELAY_STAGES.length : 0
-  return (
-    <div className="relative">
-      <div className="absolute left-0 right-0 top-[22px] h-px bg-[#2a323c]" aria-hidden />
-      <motion.div
-        className="absolute top-[19px] h-[7px] w-[7px] rounded-full bg-[#d9b36a]"
-        style={{ boxShadow: '0 0 12px rgba(201,165,116,0.8)' }}
-        animate={{ left: `calc(${frac * 100}% - 3px)` }}
-        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        aria-hidden
-      />
-      <div className="relative grid grid-cols-6">
-        {AGENT_RELAY_STAGES.map((stage: AgentRelayStage) => {
-          const cell = stages[stage]
-          const color =
-            cell.status === 'success'
-              ? '#5da583'
-              : cell.status === 'running'
-                ? '#d9b36a'
-                : cell.status === 'error' || cell.status === 'timeout'
-                  ? '#e05a4e'
-                  : '#33475a'
-          return (
-            <div key={stage} className="flex flex-col items-center gap-2.5">
-              <span
-                className={`relative mt-[14px] flex h-4 w-4 items-center justify-center rounded-full border-2 transition-colors ${
-                  cell.status === 'running' ? 'animate-pulse' : ''
-                }`}
-                style={{ borderColor: color, background: cell.status === 'idle' ? 'transparent' : color }}
-              />
-              <span
-                className="text-center font-mono text-[10px] leading-tight tracking-[0.14em]"
-                style={{ color: cell.status === 'idle' ? '#6e7a88' : '#a7b4bd' }}
-              >
-                {STAGE_LABELS[stage] ?? stage}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
+// ── 中栏:六个岗位接力（AgentCards 承载，见 components/demo/AgentCards.tsx）──
 
 export default function Demo() {
   const navigate = useNavigate()
   const { state, start, startRehearsal, togglePause, skipScene, reset } = useDemoDirector()
+
+  // ── 舞台/录制模式（?stage=1&autoplay=1）──
+  // 不新建页面：URL 参数控制"干净舞台"，默认行为完全不变。
+  // 用途：录屏 / 投屏 / 现场演示时隐藏左右技术面板、隐藏鼠标与底栏。
+  const [{ stageMode, autoplay }] = useState(() => {
+    const q = new URLSearchParams(window.location.search)
+    const stage = q.get('stage') === '1'
+    return { stageMode: stage, autoplay: stage && q.get('autoplay') !== '0' }
+  })
+
+  // 延迟一拍再开演：React StrictMode 会"挂载→清理→再挂载"，
+  // 直接同步调用会被导演 hook 的卸载清理清掉时间轴，表现为永远停在第一幕。
+  useEffect(() => {
+    if (!autoplay) return
+    const t = window.setTimeout(() => startRehearsal(), 60)
+    return () => window.clearTimeout(t)
+  }, [autoplay, startRehearsal])
+
+  useEffect(() => {
+    if (!stageMode) return
+    const el = document.documentElement
+    el.dataset.stage = '1'
+    return () => {
+      delete el.dataset.stage
+    }
+  }, [stageMode])
+
+  useEffect(() => {
+    if (!stageMode) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        e.preventDefault()
+        togglePause()
+      } else if (e.key === 'r' || e.key === 'R') {
+        reset()
+        startRehearsal()
+      } else if (e.key === 'Escape') {
+        navigate(ROUTES.MONITOR)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [stageMode, togglePause, reset, startRehearsal, navigate])
 
   // ── 结案 → 作战大屏 接力(阶段 6)──
   // 印章落定即开始 5s 倒计时,倒计时走完自动移交 /screen;
@@ -165,7 +163,11 @@ export default function Demo() {
 
   return (
     <PageTransition>
-      <div className="stage-voice flex min-h-screen flex-col bg-[#0f1216] font-sans text-[#e9edf2]">
+      <div
+        className={`stage-voice flex min-h-screen flex-col bg-[#0f1216] font-sans text-[#e9edf2] ${
+          stageMode ? 'cursor-none select-none' : ''
+        }`}
+      >
         {/* ── 顶栏 ── */}
         <header className="flex h-14 shrink-0 items-center gap-5 border-b border-[#2a323c] px-6">
           <span className="font-serif text-[18px] font-semibold tracking-[-0.02em]">守望</span>
@@ -181,39 +183,46 @@ export default function Demo() {
           {state.degradedNote && (
             <span className="hidden truncate font-mono text-[10px] text-[#e4c489] md:inline">{state.degradedNote}</span>
           )}
-          <div className="ml-auto flex items-center gap-2">
-            {state.running && !state.finished && (
-              <>
+          {!stageMode && (
+            <div className="ml-auto flex items-center gap-2">
+              {state.running && !state.finished && (
+                <>
+                  <button
+                    onClick={togglePause}
+                    className="border border-[#2a323c] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#e9edf2] transition-colors"
+                  >
+                    {state.paused ? '▶ 继续' : '⏸ 暂停'}
+                  </button>
+                  <button
+                    onClick={skipScene}
+                    disabled={state.paused}
+                    className="border border-[#2a323c] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#e9edf2] transition-colors disabled:opacity-40"
+                  >
+                    ⏭ 跳过本幕
+                  </button>
+                </>
+              )}
+              {(state.running || state.finished) && (
                 <button
-                  onClick={togglePause}
+                  onClick={reset}
                   className="border border-[#2a323c] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#e9edf2] transition-colors"
                 >
-                  {state.paused ? '▶ 继续' : '⏸ 暂停'}
+                  ↺ 重演
                 </button>
-                <button
-                  onClick={skipScene}
-                  disabled={state.paused}
-                  className="border border-[#2a323c] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#e9edf2] transition-colors disabled:opacity-40"
-                >
-                  ⏭ 跳过本幕
-                </button>
-              </>
-            )}
-            {(state.running || state.finished) && (
+              )}
               <button
-                onClick={reset}
-                className="border border-[#2a323c] px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#a7b4bd] hover:border-[#d9b36a]/50 hover:text-[#e9edf2] transition-colors"
+                onClick={() => navigate(ROUTES.MONITOR)}
+                className="border border-[#d9b36a]/40 px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#d9b36a] hover:bg-[#263041] transition-colors"
               >
-                ↺ 重演
+                退出
               </button>
-            )}
-            <button
-              onClick={() => navigate(ROUTES.MONITOR)}
-              className="border border-[#d9b36a]/40 px-3 py-1.5 font-mono text-[10px] tracking-[0.18em] uppercase text-[#d9b36a] hover:bg-[#263041] transition-colors"
-            >
-              退出
-            </button>
-          </div>
+            </div>
+          )}
+          {stageMode && (
+            <span className="ml-auto font-mono text-[10px] tracking-[0.16em] uppercase text-[#6e7a88]">
+              空格暂停 · R 重演 · Esc 退出
+            </span>
+          )}
         </header>
 
         {/* ── 开场(未开演)── */}
@@ -258,7 +267,11 @@ export default function Demo() {
 
         {/* ── 舞台(开演后)── */}
         {!notStarted && (
-          <div className="relative grid flex-1 grid-cols-[280px_1fr_300px] gap-6 overflow-hidden p-6">
+          <div
+            className={`relative grid flex-1 gap-6 overflow-hidden p-6 ${
+              stageMode ? 'grid-cols-[280px_1fr]' : 'grid-cols-[280px_1fr_300px]'
+            }`}
+          >
             {/* 左:幕次目录 */}
             <aside className="overflow-y-auto">
               <SceneRail state={state} />
@@ -281,6 +294,9 @@ export default function Demo() {
                         {currentScene.num} · {currentScene.title}
                       </p>
                       <p className="mt-1 font-serif text-[22px] font-semibold text-[#e9edf2]">{currentScene.caption}</p>
+                      <p className="mt-2 max-w-[46rem] text-[13px] leading-relaxed text-[#8fa0ad]">
+                        {currentScene.keyLine}
+                      </p>
                     </>
                   )}
 
@@ -310,6 +326,9 @@ export default function Demo() {
                         <p className="mt-2 text-[13px] leading-relaxed text-[#6e7a88]">
                           {state.event?.message ?? '内部主机疑似与 C2 服务器周期性通信'}
                         </p>
+                        <p className="mt-3 border-t border-[#e05a4e]/20 pt-3 font-mono text-[11px] tracking-[0.04em] text-[#c9a574]/90">
+                          周期 60s · 出站约 3KB/次 · 目的 IP 无备案 · 命中外联基线（演练口径）
+                        </p>
                       </motion.div>
                     )}
 
@@ -333,12 +352,37 @@ export default function Demo() {
                       </div>
                     )}
 
-                    {/* 幕 3:接力管线 */}
-                    {state.sceneIdx === 2 && <RelayStage stages={state.stages} />}
+                    {/* 幕 3:六个岗位接力（卡片化，非技术观众也能看懂谁在干什么） */}
+                    {state.sceneIdx === 2 && <AgentCards stages={state.stages} />}
 
-                    {/* 幕 4:思维链打字机(签名时刻①) */}
+                    {/* 幕 4:思维链打字机（签名时刻①）——放大版 + 证据注脚 */}
                     {state.sceneIdx === 3 && (
-                      <ThoughtTypewriter steps={state.steps} paused={state.paused} className="mx-auto w-full max-w-[38rem]" />
+                      <div className="mx-auto w-full max-w-[54rem]">
+                        <div className="mb-4 flex items-center justify-between border-b border-[#2a323c] pb-3">
+                          <p className="font-mono text-[10px] tracking-[0.24em] uppercase text-[#d9b36a]">
+                            证据链 · 逐步判断
+                          </p>
+                          <p className="font-mono text-[10px] tabular-nums text-[#6e7a88]">
+                            已出现 {state.steps.length} 步
+                          </p>
+                        </div>
+                        <ThoughtTypewriter steps={state.steps} paused={state.paused} large className="w-full" />
+                        <div className="mt-5 flex flex-wrap gap-2 border-t border-[#2a323c] pt-4">
+                          {[
+                            '证据 3 条 · 均可回查',
+                            '情报 / 资产 / 知识 三源交叉',
+                            'CAD 穿透验证 2/2',
+                            '综合置信 0.91',
+                          ].map((chip) => (
+                            <span
+                              key={chip}
+                              className="border border-[#d9b36a]/30 bg-[#d9b36a]/[0.06] px-2.5 py-1 font-mono text-[10px] tracking-[0.08em] text-[#d9c08a]"
+                            >
+                              {chip}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
                     {/* 幕 5:处置 */}
@@ -356,6 +400,18 @@ export default function Demo() {
                             <p className="mt-2 font-mono text-[11px] text-[#6e7a88]">
                               {state.response.blocked ? '动作已执行 · 可回滚' : '等待人工审批 · 工单已建立'}
                             </p>
+                            <div className="mt-4 grid grid-cols-3 gap-2 border-t border-[#5da583]/20 pt-3">
+                              {[
+                                ['策略', '高危 → 审批'],
+                                ['动作', state.response.blocked ? '阻断出站' : '转人工'],
+                                ['回滚', state.response.blocked ? '可撤销' : '工单跟踪'],
+                              ].map(([k, v]) => (
+                                <div key={k}>
+                                  <p className="font-mono text-[10px] tracking-[0.16em] uppercase text-[#6e7a88]">{k}</p>
+                                  <p className="mt-1 font-serif text-[14px] text-[#c9d6cf]">{v}</p>
+                                </div>
+                              ))}
+                            </div>
                           </motion.div>
                         ) : (
                           <div className="skeleton h-28 !bg-[#263041]" />
@@ -363,9 +419,32 @@ export default function Demo() {
                       </div>
                     )}
 
-                    {/* 幕 6:等待落印(印章为全屏 overlay) */}
+                    {/* 幕 6:结案摘要 + 落印（印章为全屏 overlay） */}
                     {state.sceneIdx === 5 && !state.finished && (
-                      <p className="text-center font-serif text-[15px] italic text-[#6e7a88]">案卷归档中……</p>
+                      <div className="mx-auto w-full max-w-[36rem] border border-[#2a323c] bg-[#14222f] p-6">
+                        <p className="font-mono text-[10px] tracking-[0.24em] uppercase text-[#d9b36a]">结案摘要</p>
+                        <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
+                          {[
+                            ['事件', state.eventId ? `#${state.eventId} · C2_BEACON` : '#— · C2_BEACON'],
+                            ['判定', state.response?.blocked ? '威胁 · 已阻断' : '威胁 · 转人工'],
+                            ['证据', `${state.steps.length} 步思维链 · 3 条可回查证据`],
+                            ['动作', state.response?.blocked ? '阻断出站 · 可回滚' : '生成处置工单'],
+                          ].map(([k, v]) => (
+                            <div key={k} className="flex flex-col gap-1">
+                              <dt className="font-mono text-[10px] tracking-[0.18em] uppercase text-[#6e7a88]">{k}</dt>
+                              <dd className="font-serif text-[15px] text-[#e8eee9]">{v}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <div className="mt-5 border-t border-[#2a323c] pt-4">
+                          <p className="text-[12px] leading-relaxed text-[#8fa0ad]">
+                            处置报告、审批留痕与回滚凭证正在归档 —— 印章即将落定。
+                          </p>
+                          <p className="mt-2 font-mono text-[10px] tracking-[0.14em] text-[#c9a574]">
+                            演练口径 · 数据来自本场剧本，不冒充生产流水线
+                          </p>
+                        </div>
+                      </div>
                     )}
                     {state.finished && state.seal && (
                       <div className="text-center">
@@ -394,38 +473,42 @@ export default function Demo() {
               </AnimatePresence>
             </main>
 
-            {/* 右:事件档案 + 模式说明 */}
-            <aside className="flex flex-col gap-4 overflow-y-auto">
-              <div className="border border-[#2a323c] bg-[#14222f] p-5">
-                <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#6e7a88]">事件档案</p>
-                <dl className="mt-3 space-y-2 text-[12px]">
-                  {[
-                    ['事件', state.eventId ? `#${state.eventId} · C2_BEACON` : '—'],
-                    ['源', '192.168.1.105(内网)'],
-                    ['目的', '23.129.64.33(外部)'],
-                    ['严重度', 'critical'],
-                  ].map(([k, v]) => (
-                    <div key={k} className="flex justify-between gap-3">
-                      <dt className="font-mono text-[10px] tracking-[0.18em] uppercase text-[#6e7a88]">{k}</dt>
-                      <dd className="font-mono tabular-nums text-[#c9d6cf]">{v}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
+            {/* 右:事件档案 + 模式说明（舞台模式隐藏，避免技术说明抢占画面） */}
+            {!stageMode && (
+              <aside className="flex flex-col gap-4 overflow-y-auto">
+                <div className="border border-[#2a323c] bg-[#14222f] p-5">
+                  <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#6e7a88]">事件档案</p>
+                  <dl className="mt-3 space-y-2 text-[12px]">
+                    {[
+                      ['事件', state.eventId ? `#${state.eventId} · C2_BEACON` : '—'],
+                      ['源', '192.168.1.105(内网)'],
+                      ['目的', '23.129.64.33(外部)'],
+                      ['严重度', 'critical'],
+                    ].map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-3">
+                        <dt className="font-mono text-[10px] tracking-[0.18em] uppercase text-[#6e7a88]">{k}</dt>
+                        <dd className="font-mono tabular-nums text-[#c9d6cf]">{v}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
 
-              <div className="border border-[#2a323c] bg-[#14222f] p-5">
-                <p className="font-mono text-[10px] tracking-[0.26em] uppercase text-[#6e7a88]">数据源口径</p>
-                <ul className="mt-3 space-y-2.5 text-[12px] leading-relaxed text-[#a7b4bd]">
-                  <li><b className="text-[#7fd4a8]">实时</b> — 事件经真实流水线,SSE 驱动画面</li>
-                  <li><b className="text-[#e5b96b]">降级</b> — 某幕事件超时,合成信号推进(徽章常驻,不伪装)</li>
-                  <li><b className="text-[#d9bc8b]">演练</b> — 纯前端时间轴,无后端,供录屏</li>
-                </ul>
-                <p className="mt-3 border-t border-[#2a323c] pt-3 text-[11px] leading-relaxed text-[#6e7a88]">
-                  流水线:Decomposer → Tool Builder → Executor → Reviewer → CAD → Response;
-                  CAD 为独立监督位,不参与内容生产。
-                </p>
-              </div>
-            </aside>
+                <details className="border border-[#2a323c] bg-[#14222f] p-5">
+                  <summary className="cursor-pointer font-mono text-[10px] tracking-[0.26em] uppercase text-[#6e7a88] [&::-webkit-details-marker]:hidden">
+                    演示口径说明（点开）
+                  </summary>
+                  <ul className="mt-3 space-y-2.5 text-[12px] leading-relaxed text-[#a7b4bd]">
+                    <li><b className="text-[#7fd4a8]">实时</b> — 事件经真实流水线,SSE 驱动画面</li>
+                    <li><b className="text-[#e5b96b]">降级</b> — 某幕事件超时,合成信号推进(徽章常驻,不伪装)</li>
+                    <li><b className="text-[#d9bc8b]">演练</b> — 纯前端时间轴,无后端,供录屏使用</li>
+                  </ul>
+                  <p className="mt-3 border-t border-[#2a323c] pt-3 text-[11px] leading-relaxed text-[#6e7a88]">
+                    流水线:Decomposer → Tool Builder → Executor → Reviewer → CAD → Response;
+                    CAD 为独立监督位,不参与内容生产。
+                  </p>
+                </details>
+              </aside>
+            )}
 
             {/* 结案印章 overlay(签名时刻②;终幕操作区住在 overlay 内) */}
             <AnimatePresence>
@@ -464,8 +547,9 @@ export default function Demo() {
           </div>
         )}
 
-        {/* ── 底部进度 ── */}
-        <footer className="flex h-9 shrink-0 items-stretch border-t border-[#2a323c]">
+        {/* ── 底部进度（舞台模式隐藏：左栏已承担幕次导航，避免重复）── */}
+        {!stageMode && (
+          <footer className="flex h-9 shrink-0 items-stretch border-t border-[#2a323c]">
           {SCENES.map((scene, i) => {
             const status = state.sceneStatus[scene.id]
             return (
@@ -488,7 +572,8 @@ export default function Demo() {
               </div>
             )
           })}
-        </footer>
+          </footer>
+        )}
       </div>
     </PageTransition>
   )

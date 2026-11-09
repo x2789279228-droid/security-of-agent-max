@@ -1,18 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { HealthGauge } from '../ui/HealthGauge'
 import { KpiStat } from '../ui/KpiStat'
 import { LiveBadge } from '../ui/LiveBadge'
 import { WatchShift } from '../ui/WatchShift'
 import AgentRelayStrip from './AgentRelayStrip'
-import ActiveRelayCards from './ActiveRelayCards'
+import ActiveRelayCards, { relayFromHydration } from './ActiveRelayCards'
 import AttackGeoMap from './AttackGeoMap'
 import LedgerPanel from './LedgerPanel'
 import ThoughtChainPanel from './ThoughtChainPanel'
 import ToolAnomalyBanner from './ToolAnomalyBanner'
+import IdleScenarioCard from './IdleScenarioCard'
 import { useWallKeepalive } from '../../hooks/useWallKeepalive'
 import { severityOf, useEventStreamStore, getLastActivityTs, type StreamEvent, type StreamStatus } from '../../lib/eventStream'
-import type { RelayState } from '../../lib/agentPipeline'
+import { deriveRelaysMemo, type RelayState } from '../../lib/agentPipeline'
 import type { StatsResponse } from '../../types/stats'
 
 /**
@@ -96,6 +97,13 @@ export interface BattleScreenProps {
 
 const CRITICAL_FLASH_COOLDOWN_MS = 3000
 
+/** 兼容两种载荷：Monitor 传入的 raw hydration 或已转换的 RelayState */
+function toRelay(r: unknown): RelayState {
+  const o = r as Record<string, unknown> | null
+  if (o && typeof o.eventId === 'number' && o.stages) return o as unknown as RelayState
+  return relayFromHydration(o ?? {})
+}
+
 export default function BattleScreen(props: BattleScreenProps) {
   const {
     services, serviceDetails, streamStatus, visible, typeCounts, bufferCount,
@@ -104,6 +112,33 @@ export default function BattleScreen(props: BattleScreenProps) {
   } = props
 
   const arrivalTick = useEventStreamStore((s) => s.arrivalTick)
+  const buffer = useEventStreamStore((s) => s.buffer)
+
+  // ── 空闲态判定：没有进行中的审查时，主舞台切"最近一次完整处置"剧本卡 ──
+  // 空闲卡可一键打开最近一次思维链；一旦有活跃接力，自动切回现场思维链。
+  const activeFromStream = useMemo(() => deriveRelaysMemo(buffer).active, [buffer])
+  const activeFromHydration = useMemo(
+    () => (hydrated || []).map(toRelay).filter((r) => r.eventId > 0),
+    [hydrated],
+  )
+  const recentRelays = useMemo(
+    () => (hydratedRecent || []).map(toRelay).filter((r) => r.eventId > 0),
+    [hydratedRecent],
+  )
+  const hasActive = activeFromStream.length > 0 || activeFromHydration.length > 0
+  const [idleDetail, setIdleDetail] = useState<number | null>(null)
+  useEffect(() => {
+    if (hasActive) setIdleDetail(null)
+  }, [hasActive])
+  const showIdleCard = !hasActive && idleDetail == null
+  const handleSelect = (eventId: number) => {
+    setIdleDetail(eventId)
+    onSelectEvent(eventId)
+  }
+  const handleClose = () => {
+    setIdleDetail(null)
+    onCloseThought()
+  }
 
   // 幕布续命:断流宽限期后切入回放;徽章明示口径
   const replayActive = useWallKeepalive(streamStatus)
@@ -163,6 +198,7 @@ export default function BattleScreen(props: BattleScreenProps) {
     .slice(0, 8)
 
   const securityPending = Math.max(0, Number(stats?.security_pending ?? 0) || 0)
+  const completedAudits = Math.max(0, Number(stats?.audit_llm?.completed ?? 0) || 0)
 
   return (
     <div className="stage-voice fixed inset-0 z-[70] flex flex-col bg-[#0f1216] text-[#e9edf2]">
@@ -247,7 +283,7 @@ export default function BattleScreen(props: BattleScreenProps) {
           {/* 攻击态势图 — 离线 IP 地理 + 攻击弧线 (ip2region 全离线, 答辩机无外呼)。
               2026-10-27 布局: 取代左栏独立的速率面板 (RelayStrip 内已含 RateHistogram,
               同屏重复); 弹性高度吸收左栏余量, 保证 1080p 零滚动下 KPI+账本不被裁切 */}
-          <BattlePanel tab="攻击态势 · 来源地理" className="flex min-h-0 flex-1 flex-col px-3 pb-2 pt-5">
+          <BattlePanel tab="攻击态势 · 来源地理" className="battle-geo-panel flex min-h-0 flex-1 flex-col px-3 pb-2 pt-5">
             <div className="min-h-0 flex-1">
               <AttackGeoMap />
             </div>
@@ -257,19 +293,36 @@ export default function BattleScreen(props: BattleScreenProps) {
           <BattlePanel tab="作战指标 · 队列" className="shrink-0 px-4 pb-4 pt-5">
             <div className="flex flex-col gap-3 overflow-hidden">
               <div style={{ marginLeft: 0 }}>
-                <KpiStat
-                  label="待处理队列"
-                  value={securityPending}
-                  tone={securityPending > 0 ? 'alert' : 'neutral'}
-                  size="wall"
-                  live={securityPending > 0}
-                  hint={securityPending > 0 ? '待审查 · 优先消化' : '队列已清空'}
-                />
-                {securityPending > 0 && (
-                  <div className="mt-1 flex items-center gap-2" aria-hidden>
-                    <span className="h-[3px] w-16 bg-[#e05a4e]" />
-                    <span className="font-mono text-[10px] tracking-[0.24em] uppercase text-[#e05a4e]">rupture</span>
-                  </div>
+                {securityPending > 0 ? (
+                  <>
+                    <KpiStat
+                      label="待处理队列"
+                      value={securityPending}
+                      tone="alert"
+                      size="wall"
+                      live
+                      hint="待审查 · 优先消化"
+                    />
+                    <div className="mt-1 flex items-center gap-2" aria-hidden>
+                      <span className="h-[3px] w-16 bg-[#e05a4e]" />
+                      <span className="font-mono text-[10px] tracking-[0.24em] uppercase text-[#e05a4e]">rupture</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <KpiStat
+                      label="累计闭环"
+                      value={completedAudits}
+                      tone="accent"
+                      size="lg"
+                      hint="已完成审计 · 队列已清空"
+                    />
+                    <div className="mt-3 border-t border-line pt-3">
+                      <p className="font-mono text-[11px] tracking-[0.16em] uppercase text-[#78889a]">
+                        待处理 0 · 值班正常
+                      </p>
+                    </div>
+                  </>
                 )}
               </div>
               {/* 2026-10-27: 已分析/累计两枚 KPI 让位给账本 —— 入队/落库/幂等
@@ -300,15 +353,26 @@ export default function BattleScreen(props: BattleScreenProps) {
                 className="absolute -top-[12px] left-4 border border-[#d9b36a]/45 bg-[#0f1216] px-3 py-0.5 font-mono text-[11px] tracking-[0.3em] uppercase text-[#d9b36a]"
                 aria-hidden
               >
-                思维链 · 主舞台
+                {showIdleCard ? '值班主舞台 · 最近一次完整处置' : '思维链 · 主舞台'}
               </span>
-              <div className="wall-zoom min-h-0 flex-1 overflow-auto">
-                <ThoughtChainPanel
-                  eventId={selectedEventId}
-                  onClose={onCloseThought}
-                  onJumpEvent={onSelectEvent}
-                  idleHint={idleHint}
-                />
+              <div className={`min-h-0 flex-1 ${showIdleCard ? 'overflow-hidden' : 'wall-zoom overflow-auto'}`}>
+                {showIdleCard ? (
+                  <IdleScenarioCard
+                    recent={recentRelays}
+                    stats={stats}
+                    idleHint={idleHint}
+                    onDemo={onDemo}
+                    demoBusy={demoBusy}
+                    onOpenChain={handleSelect}
+                  />
+                ) : (
+                  <ThoughtChainPanel
+                    eventId={selectedEventId}
+                    onClose={handleClose}
+                    onJumpEvent={handleSelect}
+                    idleHint={idleHint}
+                  />
+                )}
               </div>
             </section>
           </div>
@@ -319,7 +383,7 @@ export default function BattleScreen(props: BattleScreenProps) {
               hydrated={hydrated}
               hydratedRecent={hydratedRecent}
               selectedEventId={selectedEventId}
-              onSelect={onSelectEvent}
+              onSelect={handleSelect}
               onDemo={onDemo}
               demoBusy={demoBusy}
             />
@@ -351,7 +415,7 @@ export default function BattleScreen(props: BattleScreenProps) {
                   return (
                     <button
                       key={e.id}
-                      onClick={() => e.seq > 0 && onSelectEvent(e.seq)}
+                      onClick={() => e.seq > 0 && handleSelect(e.seq)}
                       className="group flex shrink-0 items-center gap-2.5 border border-transparent px-1.5 py-[7px] text-left [transform-style:preserve-3d] hover:border-[#2a323c] hover:bg-[#203349]"
                     >
                       <motion.span
@@ -435,3 +499,4 @@ export default function BattleScreen(props: BattleScreenProps) {
     </div>
   )
 }
+

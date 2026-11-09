@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { PageFrame, tabOn, tabOff } from '../components/common/PageFrame'
+import { ErrorState } from '../components/common/AsyncState'
+import { EmptyState } from '../components/common/EmptyState'
 import { api } from '../lib/api'
 import { StatBand } from '../components/common/StatBand'
 
@@ -112,22 +114,25 @@ export default function Intel() {
               ))}
               {loadError && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center">
-                    <p className="text-[13px] text-warn">加载失败:{loadError}</p>
-                    <button
-                      onClick={() => setRefreshKey((k) => k + 1)}
-                      className="mt-2 border border-line px-3 py-1.5 text-[11px] text-ink transition-colors hover:border-accent hover:text-accent"
-                    >
-                      重试
-                    </button>
-                    <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">后端不可达已与「暂无数据」区分;可点上方「演示补给」一键灌入演示数据。</p>
+                  <td colSpan={6}>
+                    <ErrorState
+                      className="!py-8"
+                      message={loadError}
+                      hint="后端不可达已与「暂无数据」区分；可点上方「演示补给」一键灌入演示数据。"
+                      onRetry={() => setRefreshKey((k) => k + 1)}
+                    />
                   </td>
                 </tr>
               )}
-              {iocs.length === 0 && (
+              {!loadError && iocs.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-20 text-center text-[13px] text-ink-faint">
-                    暂无 IOC 数据
+                  <td colSpan={6}>
+                    <EmptyState
+                      className="!py-10"
+                      art="radar"
+                      title="暂无 IOC 数据"
+                      hint="接入情报源或等待调度拉取后，这里会显示可检索的 IOC。"
+                    />
                   </td>
                 </tr>
               )}
@@ -172,9 +177,7 @@ export default function Intel() {
             </div>
           ))}
           {feeds.length === 0 && (
-            <div className="px-6 py-20 text-center text-[13px] text-ink-faint">
-              暂未配置情报源
-            </div>
+            <EmptyState art="inbox" title="暂未配置情报源" hint="到后端配置免费情报源后，这里会显示各源拉取状态。" />
           )}
         </div>
       )}

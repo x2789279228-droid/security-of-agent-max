@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { PageFrame } from '../components/common/PageFrame'
+import { LoadingState, ErrorState } from '../components/common/AsyncState'
+import { EmptyState } from '../components/common/EmptyState'
 import { CountUp, DrawBar } from '../motion/primitives'
 import { api, type BenchmarkReports, type BenchmarkReport } from '../lib/api'
 
@@ -197,12 +199,7 @@ export default function Benchmark() {
   if (state.loading) {
     return (
       <PageFrame title="评测战绩" hint="定量证据链 — 消融 · 对抗 · 回放 · 压测。">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="skeleton h-28" />
-          ))}
-        </div>
-        <div className="mt-6 skeleton h-64" />
+        <LoadingState rows={5} label="正在读取评测报告…" />
       </PageFrame>
     )
   }
@@ -210,12 +207,19 @@ export default function Benchmark() {
   if (state.error || !state.data) {
     return (
       <PageFrame title="评测战绩" hint="定量证据链 — 消融 · 对抗 · 回放 · 压测。">
-        <div className="border border-line bg-paper px-8 py-16 text-center">
-          <p className="text-[18px] font-bold text-ink">暂无评测数据</p>
-          <p className="mt-2 text-[13px] text-ink-faint">
-            {state.error || '未找到评测结果文件'} — 请先运行 backend/eval_datasets 下的评测脚本生成 docs/benchmark 结果。
-          </p>
-        </div>
+        {state.error ? (
+          <ErrorState
+            message={state.error}
+            hint="请确认后端 /api/benchmark 可用，或重新运行评测脚本生成 docs/benchmark 报告。"
+            onRetry={() => window.location.reload()}
+          />
+        ) : (
+          <EmptyState
+            art="folder"
+            title="暂无评测数据"
+            hint="未找到评测结果文件 — 请先运行 backend/eval_datasets 下的评测脚本生成 docs/benchmark 结果。"
+          />
+        )}
       </PageFrame>
     )
   }

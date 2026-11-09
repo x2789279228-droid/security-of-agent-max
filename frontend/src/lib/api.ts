@@ -847,6 +847,60 @@ export const api = {
     fetchJSON<{ deleted: Record<string, number> }>('/demo/seed/clear', { method: 'POST' }),
   demoSeedStatus: () =>
     fetchJSON<Record<string, number>>('/demo/seed/status'),
+
+  // ── Copilot 对话式安全助手(2026-11 传智杯 AI Web 改造)──
+  // 问答本体走 streamSse.consumeSseStream(POST-SSE),这里只管能力自省
+  copilotCapabilities: () =>
+    fetchJSON<{
+      model: string
+      vision_enabled: boolean
+      vision_model: string
+      rag_available: boolean
+      over_budget: boolean
+      budget?: Record<string, unknown>
+    }>('/copilot/capabilities'),
+
+  // ── 接入台:剧本/手动注入(2026-11 传智杯 AI Web 改造)──
+  scenarios: () =>
+    fetchJSON<{
+      scenarios: {
+        name: string
+        title: string
+        description: string
+        count: number
+        severity_summary: Record<string, number>
+      }[]
+    }>('/logs/scenarios'),
+  ingestScenario: (name: string) =>
+    fetchJSON<{
+      session_id: string
+      scenario: string
+      title?: string
+      status?: string
+      produced?: number
+      count?: number
+      event_ids: (string | number)[]
+    }>(`/logs/scenario/${encodeURIComponent(name)}`, { method: 'POST' }),
+  ingestManual: (log: Record<string, unknown>, sessionId = '') =>
+    fetchJSON<{ session_id: string; status?: string; event_ids: (string | number)[] }>('/logs/manual', {
+      method: 'POST',
+      body: JSON.stringify({ message: log, session_id: sessionId }),
+    }),
+  ingestManualBatch: (logs: Record<string, unknown>[], sessionId = '') =>
+    fetchJSON<{ session_id: string; status?: string; produced?: number; count?: number; event_ids: (string | number)[] }>('/logs/manual/batch', {
+      method: 'POST',
+      body: JSON.stringify({ logs, session_id: sessionId }),
+    }),
+  kafkaStatus: () =>
+    fetchJSON<{
+      enabled: boolean
+      bootstrap: string
+      producer_active: boolean
+      topics: Record<string, string>
+      consumer_stats: Record<string, unknown>
+      flink?: Record<string, unknown>
+    }>('/kafka/status'),
+  healthCheck: () => fetchJSON<{ status: string }>('/health'),
 }
 
 export interface BenchmarkReport {

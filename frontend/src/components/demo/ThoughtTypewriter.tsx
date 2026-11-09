@@ -18,7 +18,17 @@ const STATUS_TONE: Record<string, { chip: string; text: string }> = {
   blocked: { chip: 'border-[#e05a4e]/50 text-[#e8887c]', text: 'text-[#d6bab4]' },
 }
 
-function StepRow({ step, titleChars, bodyChars }: { step: ThoughtStep; titleChars: number; bodyChars: number }) {
+function StepRow({
+  step,
+  titleChars,
+  bodyChars,
+  large = false,
+}: {
+  step: ThoughtStep
+  titleChars: number
+  bodyChars: number
+  large?: boolean
+}) {
   const tone = STATUS_TONE[step.status] ?? STATUS_TONE.success
   const title = step.title.slice(0, titleChars)
   const body = step.summary.slice(0, bodyChars)
@@ -33,7 +43,7 @@ function StepRow({ step, titleChars, bodyChars }: { step: ThoughtStep; titleChar
         <span className={`border px-1.5 py-px font-mono text-[10px] tracking-[0.14em] uppercase ${tone.chip}`}>
           {step.status}
         </span>
-        <span className="text-[16px] font-bold text-[#e8eee9]">
+        <span className={`font-bold text-[#e8eee9] ${large ? 'text-[19px] leading-snug' : 'text-[16px]'}`}>
           {title}
           {!done && <span className="ml-px inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-warn" aria-hidden />}
         </span>
@@ -42,7 +52,7 @@ function StepRow({ step, titleChars, bodyChars }: { step: ThoughtStep; titleChar
         )}
       </p>
       {body && (
-        <p className={`mt-1 max-w-[36rem] text-[14px] leading-relaxed ${tone.text}`}>
+        <p className={`mt-1 leading-relaxed ${large ? 'max-w-[48rem] text-[15px]' : 'max-w-[36rem] text-[14px]'} ${tone.text}`}>
           {body}
           {!done && <span className="ml-px inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-warn/70" aria-hidden />}
         </p>
@@ -55,10 +65,13 @@ export function ThoughtTypewriter({
   steps,
   paused,
   className,
+  large = false,
 }: {
   steps: ThoughtStep[]
   paused: boolean
   className?: string
+  /** 舞台页放大字号用（演示字幕/录屏可读性） */
+  large?: boolean
 }) {
   // 释放进度:已完整展示的步数 + 当前步的 title/body 已显字符数
   const [progress, setProgress] = useState({ doneSteps: 0, titleChars: 0, bodyChars: 0 })
@@ -98,10 +111,10 @@ export function ThoughtTypewriter({
 
   return (
     <div className={className}>
-      <div className="flex flex-col gap-4">
+      <div className={`flex flex-col ${large ? 'gap-5' : 'gap-4'}`}>
         {visible.map((step, i) => {
           if (i < progress.doneSteps) {
-            return <StepRow key={step.stepId || i} step={step} titleChars={Infinity} bodyChars={Infinity} />
+            return <StepRow key={step.stepId || i} step={step} titleChars={Infinity} bodyChars={Infinity} large={large} />
           }
           const bodyShown = Math.max(0, progress.bodyChars)
           const waiting = progress.bodyChars < 0
@@ -111,6 +124,7 @@ export function ThoughtTypewriter({
               step={step}
               titleChars={waiting ? step.title.length : progress.titleChars}
               bodyChars={waiting ? 0 : bodyShown}
+              large={large}
             />
           )
         })}

@@ -14,4 +14,20 @@ export default defineConfig({
     strictPort: true,
     proxy: { '/api': BACKEND_PROXY },
   },
+  build: {
+    // 2026-11 传智杯 AI Web 改造:vendor 手动分包 —— react 系/markdown(仅 Copilot 用)/
+    // 图表系各自独立,业务代码改动不再打爆整块 vendor 缓存;首屏只加载 react 系。
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('react-markdown') || id.includes('remark-') || id.includes('unified') || id.includes('micromark') || id.includes('mdast') || id.includes('hast') || id.includes('rehype') || id.includes('parse5') || id.includes('property-information') || id.includes('vfile') || id.includes('unist')) return 'markdown'
+          if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-vendor') || id.includes('internmap')) return 'charts'
+          if (id.includes('framer-motion') || id.includes('motion-dom') || id.includes('motion-utils')) return 'motion'
+          if (id.includes('react') || id.includes('scheduler')) return 'react'
+          return 'vendor'
+        },
+      },
+    },
+  },
 })

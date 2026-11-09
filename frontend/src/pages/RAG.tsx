@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageTransition } from '../components/common/PageTransition'
 import { QualityPanel } from '../components/rag/QualityPanel'
@@ -54,6 +55,7 @@ function Collapse({ title, children, defaultOpen = false }: { title: string; chi
 }
 
 export default function RAG() {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<Tab>('search')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -287,6 +289,17 @@ export default function RAG() {
                   {result.transform?.lexical_first && <span className="ml-2">精确词优先</span>}
                   {(result.transform?.keywords || []).length > 0 && (
                     <span className="ml-2">扩展 {result.transform.keywords.slice(0, 6).join(' / ')}</span>
+                  )}
+                  {/* Copilot 入口:带着这些引用生成流式回答(2026-11 传智杯 AI Web 改造) */}
+                  {query.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/copilot?mode=rag&q=${encodeURIComponent(query.trim())}`)}
+                      className="ml-3 cursor-pointer rounded-none border border-accent/40 px-2.5 py-1 text-[11px] text-accent transition-colors hover:bg-accent/5"
+                      title="到 AI Copilot 用这些知识库引用生成带标注的回答"
+                    >
+                      生成带引用的回答 →
+                    </button>
                   )}
                 </p>
                 {(result.chunks || []).map((chunk: any, i: number) => (

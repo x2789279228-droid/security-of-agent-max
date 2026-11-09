@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { NAV_GROUPS, groupOf } from '../../layouts/nav'
 import { useAuthStore } from '../../stores/authStore'
 import { resolvedMode, setThemePref } from '../../lib/themeMode'
+import { hiddenAdvancedCountInGroup, visibleNavGroups } from '../../lib/navPrefs'
+import { useNavExpert } from '../../hooks/useNavExpert'
 import { Logo } from '../brand/Logo'
 
 /**
@@ -15,11 +17,14 @@ export function TopNav() {
   const location = useLocation()
   const navigate = useNavigate()
   const { username, token, logout } = useAuthStore()
+  const { expert, setExpert } = useNavExpert()
   const [openGroup, setOpenGroup] = useState<string | null>(null)
   const navRef = useRef<HTMLElement>(null)
   const mode = resolvedMode(location.pathname)
 
   const currentGroup = groupOf(location.pathname)?.title ?? null
+  // 简洁模式默认只呈现值班主线；高级能力收进专家模式（不删页面，命令面板仍可达）
+  const groups = visibleNavGroups(expert, location.pathname)
 
   // 点击外部 / Esc 收起下拉
   useEffect(() => {
@@ -62,9 +67,11 @@ export function TopNav() {
 
         {/* 四篇章页签 */}
         <div className="flex min-w-0 items-center gap-0.5" role="menubar">
-          {NAV_GROUPS.map((group) => {
+          {groups.map((group) => {
             const active = groupActive(group.title)
             const expanded = openGroup === group.title
+            const sourceGroup = NAV_GROUPS.find((g) => g.title === group.title) ?? group
+            const hidden = hiddenAdvancedCountInGroup(sourceGroup, location.pathname)
             return (
               <div key={group.title} className="relative">
                 <button
@@ -114,6 +121,23 @@ export function TopNav() {
                         )}
                       </NavLink>
                     ))}
+                    {group.items.length === 0 && (
+                      <p className="px-4 py-2.5 text-[12px] text-ink-faint">
+                        本篇章均为高级能力，已收起
+                      </p>
+                    )}
+                    {hidden > 0 && (
+                      <div className="mt-1 border-t border-line pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setExpert(true)}
+                          className="flex w-full items-center justify-between px-4 py-2 text-left text-[12px] text-ink-soft transition-colors hover:bg-inset hover:text-ink"
+                        >
+                          <span>已隐藏 {hidden} 项高级能力</span>
+                          <span className="text-[11px] text-accent">开启专家模式</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -135,6 +159,21 @@ export function TopNav() {
           <kbd className="hidden rounded border border-line px-1 font-mono text-[10px] md:inline">
             Ctrl K
           </kbd>
+        </button>
+
+        {/* 简洁 / 专家模式切换 */}
+        <button
+          type="button"
+          onClick={() => setExpert(!expert)}
+          title={expert ? '切回简洁导航（只保留值班主线）' : '显示高级能力（自博弈/知识库/评测/反钓鱼/全景）'}
+          aria-pressed={expert}
+          className={`flex h-8 items-center rounded-[4px] px-2 font-mono text-[11px] transition-colors ${
+            expert
+              ? 'bg-accent/10 text-accent hover:bg-accent/15'
+              : 'text-ink-faint hover:bg-inset hover:text-ink'
+          }`}
+        >
+          {expert ? '专家' : '简洁'}
         </button>
 
         {/* 主题切换 */}
@@ -177,3 +216,4 @@ export function TopNav() {
     </header>
   )
 }
+

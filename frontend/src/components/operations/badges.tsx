@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion'
 import { ALERT, ACCENT, SIGNAL, WARN, INK_FAINT } from '../../lib/semanticColors'
 import type { CaseStatus, CasePriority, OrderType } from '../../types/operations'
+import { EmptyState as CommonEmptyState, type EmptyArt } from '../common/EmptyState'
+import { LoadingState } from '../common/AsyncState'
 
 /** 守望徽章：soft chip = 文本色 + 1 层 12~15% 底色 + inset 细描边 */
 const mixPct = (v: string, pct: number) => `color-mix(in srgb, ${v} ${pct}%, transparent)`
@@ -136,12 +138,26 @@ export function SlaBadge({ deadline, breached }: { deadline: string | null; brea
   )
 }
 
+/** 旧 emoji 图标 → 统一线条小图（保持各 Tab 调用点不变） */
+const ICON_ART: Record<string, EmptyArt> = {
+  '📡': 'radar',
+  '📊': 'radar',
+  '🔍': 'search',
+  '💡': 'search',
+  '🖥️': 'folder',
+  '📜': 'folder',
+  '🗂️': 'folder',
+  '🧩': 'folder',
+  '📝': 'folder',
+  '📐': 'folder',
+  '📋': 'inbox',
+}
+
+/**
+ * @deprecated 新代码请直接用 components/common/EmptyState 或 AsyncState。
+ * 这里保留旧签名，统一委托给公共空态；旧的「⏳ 加载中」调用自动升级为骨架屏。
+ */
 export function EmptyState({ icon, title, hint }: { icon?: string; title: string; hint?: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-20 text-center rounded-xl border border-line">
-      {icon && <span className="mb-3 text-2xl opacity-60" aria-hidden>{icon}</span>}
-      <p className="text-sm font-medium text-ink">{title}</p>
-      {hint && <p className="text-xs text-ink-faint mt-1 font-light">{hint}</p>}
-    </div>
-  )
+  if (icon === '⏳' || title.includes('加载')) return <LoadingState />
+  return <CommonEmptyState art={ICON_ART[icon ?? ''] ?? 'inbox'} title={title} hint={hint} />
 }

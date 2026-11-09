@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageTransition } from '../components/common/PageTransition'
 import ThoughtChainPanel from '../components/monitor/ThoughtChainPanel'
@@ -26,6 +27,13 @@ const CAUSAL_VERDICT_LABEL: Record<string, string> = {
   not_identifiable: '不可识别',
   insufficient_data: '数据不足',
   unknown: '无法判定',
+}
+
+/* v9 印章化裁决 chip 的语气查表（数据驱动，不写 === 链 —— 整改 §三.1 的教训：
+   五种判定不能被三元链压回二元）。只有「因果支持」（平台认定攻击成立）给警示红，
+   其余四种证据不足/不可判定一律中性 —— 落不到表里的取值也走中性并显示原值。 */
+const CAUSAL_VERDICT_TONE: Record<string, string> = {
+  causal_support: 'text-alert',
 }
 
 const EVENT_PRESETS = [
@@ -101,6 +109,7 @@ function Collapse({ title, children, defaultOpen = false }: { title: string; chi
 }
 
 export default function SecurityAudit() {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<Tab>('inject')
   const [eventJson, setEventJson] = useState(JSON.stringify(EVENT_PRESETS[0].value, null, 2))
   const [sessionId, setSessionId] = useState('')
@@ -443,6 +452,17 @@ export default function SecurityAudit() {
                       {pipelineData.pipeline_result.threat_type}
                     </span>
                   )}
+                  {/* Copilot 入口:让 AI 解读此审计结论(2026-11 传智杯 AI Web 改造) */}
+                  {pipelineEventId != null && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/copilot?event=${pipelineEventId}`)}
+                      className="cursor-pointer rounded-none border border-accent/40 px-3 py-1.5 text-accent transition-colors hover:bg-accent/5"
+                      title="到 AI Copilot 带着事件上下文与审计结论追问"
+                    >
+                      让 AI 解读 →
+                    </button>
+                  )}
                 </div>
                 {pipelineData.pipeline_result?.final_verdict?.final_summary && (
                   <Collapse title="审计报告摘要" defaultOpen>
@@ -504,7 +524,12 @@ export default function SecurityAudit() {
                       <p className="font-medium text-ink">
                         [{c.pattern_name}] conf={c.confidence}
                         {c.causal_verdict && (
-                          <span className="ml-2 font-sans text-[10px] px-1.5 py-0.5 border border-line">
+                          /* v9 印章化裁决 chip:语气按 CAUSAL_VERDICT_TONE 查表(见上注释) */
+                          <span
+                            className={`seal-chip ml-2 align-[1px] !text-[10px] ${
+                              CAUSAL_VERDICT_TONE[c.causal_verdict] ?? 'text-ink-soft'
+                            }`}
+                          >
                             {CAUSAL_VERDICT_LABEL[c.causal_verdict] ?? c.causal_verdict}
                           </span>
                         )}

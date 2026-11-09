@@ -61,6 +61,9 @@ class Timeline {
 
   push(at: number, fn: () => void) {
     this.items.push({ at, fn })
+    // 状态机会在回调里追加"延迟完成"项（可能早于队列中已有时间点）；
+    // 必须保持按时间排序，否则 setTimeout 只盯 items[0]，早到的完成项会被漏掉。
+    this.items.sort((a, b) => a.at - b.at)
     if (!this.paused) this.tick()
   }
 
@@ -187,11 +190,16 @@ export function useDemoDirector() {
   const responseRef = useRef<DirectorState['response']>(null)
   const droppedRef = useRef(0)
   const bufferLastIdRef = useRef(0)
+  /** 本幕进入时刻（基于导演时间轴）——用于 minSceneMs 最短停留 */
+  const sceneEnteredAtRef = useRef(0)
+  /** 已触发完成的本幕（防止 reviewer end + audit_complete 双触发） */
+  const sceneDoneRef = useRef<Partial<Record<SceneId, boolean>>>({})
 
   // ── 幕次推进 ──
   const enterScene = useCallback((idx: number) => {
     if (idx >= SCENES.length) return
     sceneIdxRef.current = idx
+    sceneEnteredAtRef.current = timelineRef.current.now()
     const def = SCENES[idx]
     setState((s) => ({
       ...s,
@@ -199,8 +207,9 @@ export function useDemoDirector() {
       sceneStatus: { ...s.sceneStatus, [def.id]: 'playing' },
     }))
     if (def.id === 'verdict') {
-      // 结案:短停顿后落印
-      timelineRef.current.push(timelineRef.current.now() + 900, () => {
+      // 结案：按最短停留决定落印时刻（演练模式允许放慢，留出收尾镜头）
+      const hold = modeRef.current === 'rehearsal' ? Math.max(900, def.minSceneMs) : 900
+      timelineRef.current.push(timelineRef.current.now() + hold, () => {
         setState((s) => ({ ...s, finished: true, seal: sealFrom(responseRef.current) }))
         finishedRef.current = true
       })
@@ -232,14 +241,36 @@ export function useDemoDirector() {
     }
   }, [])
 
+  /**
+   * 完成一幕。
+   *
+   * 演练模式：如果信号到得比 minSceneMs 早，就等到最短停留时间再切幕 ——
+   * 否则第 1 幕会在一两秒内闪过去，观众什么都看不清。实时/降级模式行为不变。
+   * 同幕的完成信号（reviewer end / audit_complete 等）只生效一次。
+   */
   const completeScene = useCallback((sceneId: SceneId, simulated: boolean) => {
-    setState((s) => ({
-      ...s,
-      sceneStatus: { ...s.sceneStatus, [sceneId]: 'done' },
-      sceneSimulated: simulated ? { ...s.sceneSimulated, [sceneId]: true } : s.sceneSimulated,
-    }))
+    if (sceneDoneRef.current[sceneId]) return
     const idx = SCENES.findIndex((d) => d.id === sceneId)
-    if (idx === sceneIdxRef.current) enterScene(idx + 1)
+    if (idx < 0) return
+    sceneDoneRef.current[sceneId] = true
+
+    const finish = () => {
+      if (sceneIdxRef.current !== idx) return
+      setState((s) => ({
+        ...s,
+        sceneStatus: { ...s.sceneStatus, [sceneId]: 'done' },
+        sceneSimulated: simulated ? { ...s.sceneSimulated, [sceneId]: true } : s.sceneSimulated,
+      }))
+      enterScene(idx + 1)
+    }
+
+    const minMs = modeRef.current === 'rehearsal' ? (SCENES[idx].minSceneMs || 0) : 0
+    const remain = minMs - (timelineRef.current.now() - sceneEnteredAtRef.current)
+    if (remain > 0) {
+      timelineRef.current.push(timelineRef.current.now() + remain, finish)
+    } else {
+      finish()
+    }
   }, [enterScene])
 
   // ── 信号消费(三模共用)──
@@ -271,7 +302,10 @@ export function useDemoDirector() {
             stages: { ...s.stages, [sig.stage]: { status: nextStatus, simulated: cell.simulated || simulated } },
           }
         })
-        if (sig.stage === 'reviewer' && sig.phase === 'end' && sceneIdxRef.current === 2) {
+        // 接力幕何时算完成：实时模式在复核者结束即可推进（不等响应）；
+        // 演练模式等六个岗位全部点亮后再进推理幕，避免第 3 幕只有半条流水线。
+        const relayDoneStage = modeRef.current === 'rehearsal' ? 'response' : 'reviewer'
+        if (sig.phase === 'end' && sig.stage === relayDoneStage && sceneIdxRef.current === 2) {
           completeScene('relay', simulated)
         }
         break
@@ -291,8 +325,8 @@ export function useDemoDirector() {
         responseRef.current = { blocked: sig.blocked, summary: sig.summary, simulated }
         setState((s) => ({ ...s, response: responseRef.current }))
         if (sceneIdxRef.current === 4) {
-          setState((s) => ({ ...s, sceneStatus: { ...s.sceneStatus, respond: 'done' } }))
-          enterScene(5)
+          // 走 completeScene 让「最短停留」生效：高危动作要留时间给观众看清审批语义
+          completeScene('respond', simulated)
         }
         break
       case 'audit_complete':
@@ -302,7 +336,7 @@ export function useDemoDirector() {
         setState((s) => ({ ...s, degradedNote: sig.note }))
         break
     }
-  }, [completeScene, enterScene])
+  }, [completeScene])
 
   const applySignalRef = useRef(applySignal)
   applySignalRef.current = applySignal
@@ -330,11 +364,15 @@ export function useDemoDirector() {
       const elapsed = timelineRef.current.now()
       setState((s) => ({ ...s, elapsedMs: elapsed }))
       // 推理幕:审计流程已推进到本幕、步骤流停歇 1.6s → 进入处置
+      // 演练模式额外要求本幕已停留 minSceneMs，让思维链有机会铺满（否则一闪而过）
+      const inSceneMs = timelineRef.current.now() - sceneEnteredAtRef.current
+      const reasonMinMs = SCENES[3]?.minSceneMs ?? 0
       if (
         sceneIdxRef.current === 3 &&
         stepsRef.current.length > 0 &&
         Date.now() - lastStepAtRef.current > 1600 &&
-        elapsed > 4000
+        elapsed > 4000 &&
+        (modeRef.current !== 'rehearsal' || inSceneMs >= reasonMinMs)
       ) {
         setState((s) => ({ ...s, sceneStatus: { ...s.sceneStatus, reason: 'done' } }))
         enterScene(4)
@@ -353,6 +391,8 @@ export function useDemoDirector() {
     eventIdRef.current = null
     modeRef.current = 'live'
     lastStepAtRef.current = 0
+    sceneEnteredAtRef.current = 0
+    sceneDoneRef.current = {}
     seenStepIdsRef.current = new Set()
     stepsRef.current = []
     responseRef.current = null

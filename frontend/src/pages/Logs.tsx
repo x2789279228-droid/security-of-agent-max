@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageFrame } from '../components/common/PageFrame'
+import { LoadingState, ErrorState } from '../components/common/AsyncState'
+import { EmptyState } from '../components/common/EmptyState'
 import { EventDossier } from '../components/logs/EventDossier'
 import AttackConstellation from '../components/logs/AttackConstellation'
 import { CountUp } from '../motion/primitives'
@@ -411,13 +413,19 @@ export default function Logs() {
             </span>
           </div>
           {loading ? (
-            <div className="text-center text-sm text-ink-faint py-20">加载中 …</div>
+            <LoadingState rows={5} />
           ) : error ? (
-            <div className="text-center text-sm text-alert py-20">{error}</div>
+            <ErrorState message={error} onRetry={() => load(true, 0)} />
           ) : filtered.length === 0 ? (
-            <div className="py-20 text-center text-sm text-ink-faint">
-              {search || severity ? '没有符合筛选条件的日志' : '暂无日志，等待事件接入 …'}
-            </div>
+            <EmptyState
+              art={search || severity ? 'search' : 'inbox'}
+              title={search || severity ? '没有符合筛选条件的日志' : '暂无日志'}
+              hint={
+                search || severity
+                  ? '调整筛选条件或清空搜索后再试。'
+                  : '等待事件接入，或到「感知中心」灌入演示数据。'
+              }
+            />
           ) : (
             <div className="overflow-hidden">
               <div className="overflow-x-auto">

@@ -882,3 +882,132 @@ body {
 }
 
 /* ===== TopNav（样式走 token 类，无独立块） ===== */
+
+/* ===== 舞台录制模式（/demo?stage=1） =====
+   录屏/投屏时隐藏鼠标与滚动条；只影响显式带参数的舞台页，产品页不受影响。 */
+html[data-stage='1'],
+html[data-stage='1'] body {
+  cursor: none;
+}
+html[data-stage='1'] ::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ===== 大屏短屏降级（1366×768 等） =====
+   大屏按 1920×1080 设计；高度不足时隐藏地理态势面板，避免左栏面板挤压重叠。 */
+@media (max-height: 900px) {
+  .battle-geo-panel {
+    display: none !important;
+  }
+}
+
+/* ===== v9 · 浅色氛围层（2026-11 传智杯 AI Web 改造） =====
+   原则：只加「氛围」不加「行为」—— 全部是背景/描边/字距级的装饰 token，
+   不新增 keyframes（动效语义仍归 v6 层管），battle 暗肤一律不受影响
+   （用 html:not([data-mode="battle"]) 限定作用域）。
+   灵感：绘图室的台面 —— 有层次的浅灰空间，而不是纯白文档。 */
+
+/* 台面洗染：工作页背景从纯平 #f5f7fa 变成带纵深的两段洗染。
+   极低对比（≤3%），投影仪/录屏下给页面「体积感」；暗肤不生效。 */
+html:not([data-mode="battle"]) .page-shell {
+  background:
+    radial-gradient(120% 68% at 18% -8%, rgba(14, 116, 144, 0.045), transparent 58%),
+    radial-gradient(90% 55% at 96% 112%, rgba(30, 41, 59, 0.035), transparent 60%),
+    linear-gradient(180deg, #f7f9fb 0%, var(--color-surface) 240px);
+}
+
+/* 编辑部双细线：页头下的「卷二」分隔（1px 墨 + 1px 发丝，间距 2px）。
+   用于 PageFrame 头部分隔与面板组之间，替代单 border-b 的文档感。 */
+.rule-double {
+  position: relative;
+}
+html:not([data-mode="battle"]) .rule-double::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 3px;
+  border-top: 1px solid var(--color-ink);
+  border-bottom: 1px solid var(--color-line);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* 面板头微标签：mono 大写 + 两侧发丝线（用于区块标题，替代孤立小字） */
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  user-select: none;
+}
+html:not([data-mode="battle"]) .panel-head::before,
+html:not([data-mode="battle"]) .panel-head::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, var(--color-line), transparent);
+}
+html:not([data-mode="battle"]) .panel-head::after {
+  background: linear-gradient(90deg, transparent, var(--color-line));
+}
+
+/* 印章化语义 chip：用于裁决/结论/状态 —— 1.5px 描边 + 字距 + 微圆角，
+   克制版「盖章」：不旋转不晕影，暗肤下退化为普通 chip（描边仍在）。 */
+.seal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1.5px solid currentColor;
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1.6;
+  user-select: none;
+}
+.seal-chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+html:not([data-mode="battle"]) .seal-chip {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+/* 卡片 hover：顶缘强调发丝（比位移更「编辑部」的悬停反馈，与 .card-interactive 叠用） */
+html:not([data-mode="battle"]) .card-interactive {
+  position: relative;
+}
+html:not([data-mode="battle"]) .card-interactive::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--color-accent);
+  opacity: 0;
+  transition: opacity 180ms ease;
+  pointer-events: none;
+}
+html:not([data-mode="battle"]) .card-interactive:hover::before {
+  opacity: 0.8;
+}
+
+/* Copilot 流式区：纸面案卷微纹理（1px 点阵，≤4% 可见度），暗肤不生效 */
+html:not([data-mode="battle"]) .copilot-md table {
+  background: var(--color-paper);
+}

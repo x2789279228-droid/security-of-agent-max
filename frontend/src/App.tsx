@@ -23,6 +23,9 @@ const Benchmark = lazy(() => import('./pages/Benchmark'))
 const Demo = lazy(() => import('./pages/Demo'))
 const Screen = lazy(() => import('./pages/Screen'))
 const Poster = lazy(() => import('./pages/Poster'))
+// 2026-11 传智杯 AI Web 改造:对话式安全分析 + 接入台(剧本注入/手动录日志)
+const Copilot = lazy(() => import('./pages/Copilot'))
+const Ingest = lazy(() => import('./pages/Ingest'))
 
 function PageLoader() {
   return (
@@ -83,8 +86,12 @@ export default function App() {
         <Route path={ROUTES.DEMO} element={page(<Demo />)} />
         <Route element={<RootLayout />}>
           <Route index element={page(<Home />)} />
+          {/* 接入台:剧本注入/手动录日志(值班主线第一站,对齐"01 接入") */}
+          <Route path={ROUTES.INGEST} element={page(<Ingest />)} />
           <Route path={ROUTES.LOGS} element={page(<Logs />)} />
           <Route path={ROUTES.MONITOR} element={page(<Monitor />)} />
+          {/* AI 分析 Copilot:对话式安全分析(流式 + 知识引用 + 截图研判) */}
+          <Route path={ROUTES.COPILOT} element={page(<Copilot />)} />
           <Route path={ROUTES.SECURITY_AUDIT} element={page(<SecurityAudit />)} />
           <Route path={ROUTES.RESPONSE} element={page(<Response />)} />
           <Route path={ROUTES.OPERATIONS} element={page(<Operations />)} />

@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { PageFrame } from '../components/common/PageFrame'
+import { ErrorState } from '../components/common/AsyncState'
+import { EmptyState } from '../components/common/EmptyState'
 import { api } from '../lib/api'
 import { StatBand } from '../components/common/StatBand'
 
@@ -125,22 +127,25 @@ export default function Traffic() {
             ))}
             {loadError && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center">
-                  <p className="text-[13px] text-warn">加载失败:{loadError}</p>
-                  <button
-                    onClick={() => setRefreshKey((k) => k + 1)}
-                    className="mt-2 border border-line px-3 py-1.5 text-[11px] text-ink transition-colors hover:border-accent hover:text-accent"
-                  >
-                    重试
-                  </button>
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">后端不可达已与「暂无数据」区分;可点上方「演示补给」一键灌入演示数据。</p>
+                <td colSpan={7}>
+                  <ErrorState
+                    className="!py-8"
+                    message={loadError}
+                    hint="后端不可达已与「暂无数据」区分；可点上方「演示补给」一键灌入演示数据。"
+                    onRetry={() => setRefreshKey((k) => k + 1)}
+                  />
                 </td>
               </tr>
             )}
-            {filtered.length === 0 && (
+            {!loadError && filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-20 text-center text-[13px] text-ink-faint">
-                  暂无流量数据
+                <td colSpan={7}>
+                  <EmptyState
+                    className="!py-10"
+                    art="radar"
+                    title="暂无流量数据"
+                    hint="等待 NDR 抓包/回放数据接入，或到「感知中心」使用演示补给。"
+                  />
                 </td>
               </tr>
             )}
