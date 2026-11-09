@@ -479,7 +479,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Trivy (fs)
         # 2026-11-10: @master 浮动引用不可复现(上游行为随日变化, 本地同库
-        # 全仓复扫 0 CRITICAL) —— pin 到稳定 tag
+        # 全仓复扫 0 CRITICAL) —— pin 到稳定 tag; ignorefile 显式传参
         uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: fs
@@ -487,6 +487,7 @@ jobs:
           format: table
           severity: 'CRITICAL'
           ignore-unfixed: true
+          ignorefile: .trivyignore
           exit-code: '1'          # 仅 Critical 阻断
       - name: 留存全量结果
         if: always()
