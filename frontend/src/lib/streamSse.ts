@@ -109,7 +109,7 @@ async function raiseForResponse(res: Response): Promise<never> {
 }
 
 export interface ConsumeSseOptions {
-  /** 相对于 /api 的路径，如 '/copilot/stream' */
+  /** 完整路径（含 /api 前缀），调用方传字面量 —— 前后端契约守卫才能对账 */
   path: string
   body: unknown
   signal?: AbortSignal
@@ -122,7 +122,7 @@ export interface ConsumeSseOptions {
  */
 export async function consumeSseStream(opts: ConsumeSseOptions): Promise<void> {
   const token = localStorage.getItem('sm_token')
-  const res = await fetch(`/api${opts.path}`, {
+  const res = await fetch(opts.path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

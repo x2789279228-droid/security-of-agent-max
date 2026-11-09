@@ -69,6 +69,10 @@ RATE_LIMIT_WHITELIST = (
     "/api/causal",
     # MCP Guard 观测(调用本身用 /guard/call,见 FORCED)
     "/api/guard",
+    # MCP 协议端点(JSON-RPC 2.0; tools/call 是长时治理调用, 不落共桶限流)
+    "/api/mcp",
+    # Copilot 对话流(SSE 长连接 + capabilities 高频探测, 2026-11 AI Web 改造)
+    "/api/copilot",
     # 可观测性 / Agent 轨迹(Monitor 首屏高频 hydration)
     "/api/agent-traces",
     "/api/observability",

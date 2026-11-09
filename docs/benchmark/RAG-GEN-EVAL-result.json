@@ -1,0 +1,361 @@
+{
+  "mode": "generation_faithfulness",
+  "retrieval": "bm25_top5(与 lexical 基线同层)",
+  "queries_n": 20,
+  "faithfulness_mean": 0.9875,
+  "abstain_rate": 0.05,
+  "failure_totals": {
+    "invalid_reference": 0,
+    "unsupported_claim": 1,
+    "wrong_conclusion": 0
+  },
+  "llm_model": "MiniMax-M3",
+  "queries": [
+    {
+      "id": "Q001",
+      "query": "暴力破解怎么检测",
+      "category": "technique",
+      "answer": "- 在登录接口检测短时间高频访问，例如同一 URL 在 5 分钟内请求超过 5 次，并经 Flink 窗口确认，以发现密码喷洒或凭证填充。  \n- 在 SSH 等服务检测登录失败集中出现、叠加暴力破解的特征。  \n- 高置信命中建议执行 `block_ip`；聚合候选应先转为告警，避免仅凭高频访问直接封禁。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1110",
+        "KB-M1027",
+        "KB-INT-CAPEC",
+        "KB-T1568",
+        "KB-OPS-PHISHING"
+      ]
+    },
+    {
+      "id": "Q002",
+      "query": "password spraying credential stuffing 防护",
+      "category": "technique",
+      "answer": "password spraying 与 credential stuffing 属于 T1110 暴力破解（Brute Force），可通过 SIG-001 登录接口高频访问检测（URL 聚合 >5 次/5 分钟，需 Flink 窗口确认）及 SIG-007 SSH 端口叠加登录失败检测。  \n高置信命中建议执行 block_ip，聚合候选先转告警，并结合登录防爆破限流。  \n关联 M1036 账户使用策略与 M1027 口令策略，强制口令长度、复杂度、历史与轮换策略，并启用 MFA。  \n避免盲目周期改密，优先采用“长度＋泄露库比对”，以防诱发弱口令模式。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 4,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1110",
+        "KB-M1027",
+        "KB-T1003",
+        "KB-M1042",
+        "KB-INT-ATTACK"
+      ]
+    },
+    {
+      "id": "Q003",
+      "query": "T1110 相关的缓解措施",
+      "category": "mitigation",
+      "answer": "T1110 的相关缓解包括 **M1027 口令策略**、**M1036 账户使用策略**及登录防爆破限流，并可结合 MFA 提高暴力破解成本。平台可监测 **SIG-001** 登录接口高频访问和 **SIG-007** SSH 端口叠加登录失败特征，高置信命中时建议 `block_ip`，聚合候选先转告警。配置口令策略时应避免盲目强制周期改密，现行 NIST 建议以长度和泄露库比对为主。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1110",
+        "KB-M1027",
+        "KB-M1017",
+        "KB-M1054",
+        "KB-M1018"
+      ]
+    },
+    {
+      "id": "Q004",
+      "query": "PowerShell encoded command 执行攻击",
+      "category": "technique",
+      "answer": "该攻击可归类为 **T1059 命令与脚本解释器 (Command and Scripting Interpreter)**，攻击者滥用 PowerShell 执行恶意载荷。检测可从 EDR 进程事件（Sysmon EventID 1）的 `command_line` 特征入手，重点审查 PowerShell 编码执行（`-EncodedCommand`）。平台使用锚定正则构建默认拒绝的命令白名单。缓解方面，应按最小权限配置 PowerShell Constrained Language Mode 等软件配置，以削减该攻击面。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 4,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1059",
+        "KB-M1054",
+        "KB-PLAT-DRYRUN",
+        "KB-INT-ATTACK",
+        "KB-T1505"
+      ]
+    },
+    {
+      "id": "Q005",
+      "query": "mimikatz lsass 凭证转储检测",
+      "category": "technique",
+      "answer": "依据[证据1]，可将 Mimikatz 访问 LSASS 内存按 **T1003 操作系统凭证转储**检测：重点采集进程访问 `lsass.exe` 的 Sysmon EventID 10，并关注 `GrantedAccess 0x1010`；同时检测 `reg save` 转储 SAM/SECURITY 注册表 hive。  \n依据[证据2]，实施 **M1042 凭证访问防御**，启用 Credential Guard、LSASS 保护（RunAsPPL），并对 `lsass.exe` 访问类事件配置高保真 EDR 遥测，以便在转储得手前发现。  \n命中后依据[证据1]立即轮换可能泄露的凭",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1003",
+        "KB-M1042",
+        "KB-T1078",
+        "KB-T1087",
+        "KB-T1110"
+      ]
+    },
+    {
+      "id": "Q006",
+      "query": "C2 beacon 周期性外联怎么发现",
+      "category": "technique",
+      "answer": "通过时序分析外联流量，识别固定间隔、近似等间隔的周期性 beacon。结合 JA3/TLS 指纹异常、DNS 长随机子域等行为特征，并用 Feodo/URLhaus 的 C2 IP/URL 黑名单进行情报富化；命中后形成 C2_BEACON 标签，接入“端口扫描→C2”CEP 攻击链告警。[证据1][证据2]",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1071",
+        "KB-PLAT-CEP",
+        "KB-T1046",
+        "KB-T1041",
+        "KB-INT-CAPEC"
+      ]
+    },
+    {
+      "id": "Q007",
+      "query": "数据外泄的时序特征",
+      "category": "technique",
+      "answer": "数据外泄的时序特征包括：外发流量突增、上行流量远超基线，以及外传时段异常。平台可将近似同一时间窗口内的 EDR 进程事件与网络流量进行跨源关联，以识别复用 C2 通道的数据外泄行为（T1041）。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 2,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1041",
+        "KB-M1057",
+        "KB-PLAT-CEP",
+        "KB-T1048",
+        "KB-T1083"
+      ]
+    },
+    {
+      "id": "Q008",
+      "query": "webshell 检测规则",
+      "category": "technique",
+      "answer": "针对 **T1505.003 Web Shell (Server Software Component: Web Shell)**，检测信号包括：上传目录出现可执行文件、POST 请求包含 `eval`/`base64_decode` 特征，以及新增异常脚本文件哈希。  \n平台 web 攻击规则覆盖命令注入与 WebShell 投递路径，demo 中包含 WebShell 用例。  \n针对 **T1027 混淆 (Obfuscated Files or Information)**，`normalization.py` 在匹配视图层执行受限 3 轮解码、稳定即停并支持 `%uXXXX`，可覆盖",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 4,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1505",
+        "KB-PLAT-NORMALIZATION",
+        "KB-T1027",
+        "KB-PLAT-FEEDBACK",
+        "KB-PLAT-SHADOW"
+      ]
+    },
+    {
+      "id": "Q009",
+      "query": "Log4Shell CVE-2021-44228",
+      "category": "technique",
+      "answer": "Log4Shell（CVE-2021-44228）是 **T1190 利用面向公众的应用（Exploit Public-Facing Application）**的典型案例，通过暴露在互联网的应用漏洞获取初始访问。[证据1]  \n在 ATT&CK 平台中，可通过 Sigma 规则标签、事件 `techniques` 字段或导入的官方 ATT&CK 数据关联 T1190。[证据2]  \nIOC 类型 `cve` 采用小写精确匹配，因此应写成 `cve-2021-44228`。[证据4]  \n若该事件命中 CISA KEV，应提级处置；但提供的证据不能单独确认其 KEV 收录状态。[证据1]",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 4,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1190",
+        "KB-INT-ATTACK",
+        "KB-INT-CAPEC",
+        "KB-INT-IOCTYPES",
+        "KB-INT-MISP"
+      ]
+    },
+    {
+      "id": "Q010",
+      "query": "有效账户滥用怎么排查",
+      "category": "technique",
+      "answer": "1. 围绕 **T1078 有效账户**，重点检测异常时段登录、异地登录及账户行为基线偏离。  \n2. 若怀疑凭证转储后横向移动，将活动与 **T1003** 联合分析。  \n3. 同步检查 **T1136 创建账户**、**T1098 账户操纵**相关迹象，包括 Windows EventID 4720/4728/4732，以及 Linux 的 useradd/usermod 和 `/etc/passwd` 异常写入。  \n4. 确认滥用后，立即禁用账户并吊销全量会话。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 4,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-M1018",
+        "KB-T1078",
+        "KB-INT-CAPEC",
+        "KB-T1098",
+        "KB-T1136"
+      ]
+    },
+    {
+      "id": "Q011",
+      "query": "横向移动 SMB RDP 检测",
+      "category": "technique",
+      "answer": "横向移动中的 SMB/RDP 可归入 **T1021 远程服务横移**。重点检测单源对多主机的认证尝试、非常规时段的服务访问，以及 Pass-the-Hash（pth）特征（EventID 4624，LogonType 9）。可结合横向移动 CEP 链与跨源关联 `lateral_move` 覆盖，并对 DNS/代理服务器等共享资源设置白名单以防误报。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1021",
+        "KB-PLAT-CEP",
+        "KB-T1003",
+        "KB-T1087",
+        "KB-T1568"
+      ]
+    },
+    {
+      "id": "Q012",
+      "query": "schtasks 计划任务持久化",
+      "category": "technique",
+      "answer": "schtasks 计划任务持久化对应证据1中的 **T1053 计划任务/作业 (Scheduled Task/Job)**。攻击者可利用系统任务调度实现持久化或远程执行，Sysmon EventID 1 中出现带远程路径的 `schtasks /create` 是强信号。Linux 侧可关注 `/etc/cron.*` 与 systemd timer 的异常写入。证据未提供具体处置或清除步骤，无法据此进一步回答。",
+      "abstain": false,
+      "faithfulness": 0.75,
+      "claim_count": 4,
+      "unsupported_count": 1,
+      "evidence_ids": [
+        "KB-T1053",
+        "KB-T1136",
+        "KB-INT-ATTACK",
+        "KB-OPS-SELFPPLAY",
+        "KB-T1078"
+      ]
+    },
+    {
+      "id": "Q013",
+      "query": "钓鱼邮件检测通道有哪些",
+      "category": "technique",
+      "answer": "根据证据1，平台反钓鱼检测有 6 个通道：邮件头伪造与可解释性规则、BEC 话术、网站克隆、短信、二维码（quinjacking）、附件宏。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 1,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1566",
+        "KB-OPS-PHISHING",
+        "KB-M1017",
+        "KB-T1041",
+        "KB-M1057"
+      ]
+    },
+    {
+      "id": "Q014",
+      "query": "DGA 域名 fast-flux 检测",
+      "category": "technique",
+      "answer": "可依据 **T1568 动态解析 (Dynamic Resolution)** 检测 DGA/fast-flux，重点监测高频 NXDOMAIN、DGA 随机域熵值和新注册域名访问。数据源可使用 Suricata EVE 的 DNS 记录及 `dns.query` 字段。证据未提供具体阈值、域名生成算法或 fast-flux 独立判定规则，无法根据提供的证据回答更详细的实现参数。",
+      "abstain": true,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1568",
+        "KB-INT-REPUTATION",
+        "KB-INT-IOCTYPES",
+        "KB-OPS-PHISHING",
+        "KB-PLAT-NORMALIZATION"
+      ]
+    },
+    {
+      "id": "Q015",
+      "query": "双重 URL 编码绕过怎么处理",
+      "category": "technique",
+      "answer": "将双重 URL 编码纳入检测输入规范化：使用 `normalization.py` 执行“受限 3 轮解码+稳定即停”，并支持 `%uXXXX`。规则匹配应查看统一解码后的规范化视图，原始事件保持不变，从而以单条规则覆盖双重编码载荷，无需逐条编写编码变体。该方式属于对 T1027 混淆 (Obfuscated Files or Information) 的检测，可将对抗保持率从 0.438 修复。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1027",
+        "KB-PLAT-NORMALIZATION",
+        "KB-INT-CAPEC",
+        "KB-M1036",
+        "KB-INT-IOCTYPES"
+      ]
+    },
+    {
+      "id": "Q016",
+      "query": "内网端口扫描告警",
+      "category": "technique",
+      "answer": "内网端口扫描告警对应 **T1046 网络服务发现 (Network Service Discovery)**，典型特征是单源短时间对多目标、多端口发起 SYN 探测，或出现非常见端口探测序列。平台可通过 SIG-00x 端口扫描规则检测，并由 CEP 关联“端口扫描→C2”攻击链；链告警证据量决定严重度。需核验是否属于资产扫描器或漏扫任务并加入白名单，以控制误报。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1046",
+        "KB-PLAT-CEP",
+        "KB-T1595",
+        "KB-T1071",
+        "KB-T1110"
+      ]
+    },
+    {
+      "id": "Q017",
+      "query": "net user 账户枚举",
+      "category": "technique",
+      "answer": "net user 属于账户发现（T1087），可通过 EDR 进程事件的 command_line 匹配 net.exe 或 group.exe 捕获。单独出现属于侦察活动；与 T1021 或 T1003 串联时，则构成完整入侵链。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 2,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1087",
+        "KB-M1017",
+        "KB-M1018",
+        "KB-T1098",
+        "KB-T1136"
+      ]
+    },
+    {
+      "id": "Q018",
+      "query": "勒索软件前兆指标",
+      "category": "technique",
+      "answer": "勒索软件前兆指标包括：海量文件写入、进程批量文件 I/O，以及删除影子副本命令 `vssadmin delete shadows`。[证据1]  \n“进程批量文件 IO + 影子副本删除命令”属于高置信勒索前兆，应直接触发主机隔离预案；相关技术为证据中的 **T1486 数据破坏勒索 (Data Encrypted for Impact)**。[证据1]",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 2,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1486",
+        "KB-M1049",
+        "KB-M1054",
+        "KB-PLAT-FEEDDIALECT",
+        "KB-PLAT-CASE"
+      ]
+    },
+    {
+      "id": "Q019",
+      "query": "外网资产漏洞利用初始访问",
+      "category": "technique",
+      "answer": "外网资产漏洞利用获取初始访问，对应 **MITRE ATT&CK T1190（利用面向公众的应用）**。典型案例包括 Log4Shell（CVE-2021-44228）和 Confluence OGNL 注入；若命中 CISA KEV 目录，应提升严重度并优先处置。",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 2,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1190",
+        "KB-INT-ATTACK",
+        "KB-T1078",
+        "KB-PLAT-KEV",
+        "KB-T1595"
+      ]
+    },
+    {
+      "id": "Q020",
+      "query": "T1595 主动扫描和内网扫描区别",
+      "category": "technique",
+      "answer": "T1595 主动扫描针对互联网暴露资产开展主动侦察，如漏洞扫描和爬虫指纹识别；T1046 网络服务发现则是在已进入内网后进行端口扫描与服务枚举，通常是横向移动的前置动作。核心区别在于目标侧：前者扫描外部资产，后者发现内网服务。[证据1][证据2]",
+      "abstain": false,
+      "faithfulness": 1.0,
+      "claim_count": 3,
+      "unsupported_count": 0,
+      "evidence_ids": [
+        "KB-T1595",
+        "KB-T1046",
+        "KB-INT-SIGMAHQ",
+        "KB-OPS-WORKORDER",
+        "KB-PLAT-CEP"
+      ]
+    }
+  ],
+  "version": {
+    "evaluated_at": "2026-11-09",
+    "corpus_fingerprint": "9256c09cc629",
+    "golden_fingerprint": "3e309924f88d",
+    "evaluator": "generation_faithfulness_v1"
+  }
+}

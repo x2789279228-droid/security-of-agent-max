@@ -18,4 +18,182 @@
 ........................................................................ [ 39%]
 ...........................................F............................ [ 41%]
 ........................................................................ [ 43%]
-.........................xx....................................
+.........................xx............................................. [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+F....................................................................... [ 57%]
+........................................................................ [ 59%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+................F....................................................... [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+..................F.F................................................... [ 81%]
+......x...............x................................................. [ 83%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+.................s.................sssssssssssssssss............sssssss. [ 92%]
+........................................sssssss......................... [ 94%]
+......s................................................................. [ 96%]
+........xxx............................................................. [ 98%]
+........................................xxs                              [100%]
+================================== FAILURES ===================================
+____________ test_every_frontend_call_resolves_to_a_backend_route _____________
+tests\test_api_contract_guard.py:279: in test_every_frontend_call_resolves_to_a_backend_route
+    assert not unregistered, (
+E   AssertionError: 前端调用了后端没有的路径/方法：
+E       POST /api{}
+E   assert not ['POST /api{}']
+______________ test_known_breaks_are_still_accurately_described _______________
+tests\test_api_contract_guard.py:292: in test_known_breaks_are_still_accurately_described
+    assert not undocumented, f"新增断链未登记：{undocumented}"
+E   AssertionError: 新增断链未登记：['POST /api{}']
+E   assert not ['POST /api{}']
+___________________ test_settings_field_count_is_unchanged ____________________
+tests\test_config_switch_wiring.py:192: in test_settings_field_count_is_unchanged
+    assert len(fields) == 369, (
+E   AssertionError: Settings 字段数从 369 变成 372 —— 请重新跑全量普查并更新整改报告 §7.1.11
+E   assert 372 == 369
+E    +  where 372 = len((('database_url', 'str'), ('redis_url', 'str'), ('redis_pool_max_connections', 'int'), ('llm_api_key', 'str'), ('llm_base_url', 'str'), ('llm_model', 'str'), ...))
+__________ test_env_example_parses_and_ships_the_keys_we_care_about ___________
+tests\test_config_switch_wiring.py:241: in test_env_example_parses_and_ships_the_keys_we_care_about
+    assert len(shipped) == 168, f"出货键数从 168 变成 {len(shipped)}，出货口径需重估"
+E   AssertionError: 出货键数从 168 变成 171，出货口径需重估
+E   assert 171 == 168
+E    +  where 171 = len(frozenset({'SHARED_MEMORY_ADMIN_PASSWORD', 'SHARED_MEMORY_ALLOWED_ORIGINS', 'SHARED_MEMORY_ALLOW_SELF_REGISTRATION', 'SHARED_MEMORY_ATTACK_GEO_INTERVAL', 'SHARED_MEMORY_ATTACK_GEO_MAX_POINTS', 'SHARED_MEMORY_ATTACK_GEO_WINDOW', ...}))
+_______________ test_chat_stream_no_api_key_yields_error_frame ________________
+tests\test_copilot_stream.py:129: in test_chat_stream_no_api_key_yields_error_frame
+    frames = _consume(LLMClient().chat_stream([{"role": "user", "content": "hi"}]))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_copilot_stream.py:118: in _consume
+    return asyncio.get_event_loop().run_until_complete(_consume_async(gen))
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py:681: in get_event_loop
+    raise RuntimeError('There is no current event loop in thread %r.'
+E   RuntimeError: There is no current event loop in thread 'MainThread'.
+____________ test_chat_stream_budget_exhausted_yields_error_frame _____________
+tests\test_copilot_stream.py:144: in test_chat_stream_budget_exhausted_yields_error_frame
+    frames = _consume(LLMClient().chat_stream([{"role": "user", "content": "hi"}]))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_copilot_stream.py:118: in _consume
+    return asyncio.get_event_loop().run_until_complete(_consume_async(gen))
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\events.py:681: in get_event_loop
+    raise RuntimeError('There is no current event loop in thread %r.'
+E   RuntimeError: There is no current event loop in thread 'MainThread'.
+________________________ test_embed_counters_and_trace ________________________
+tests\test_llm_cache_and_embedding.py:163: in test_embed_counters_and_trace
+    assert _run(t())
+           ^^^^^^^^^
+tests\test_llm_cache_and_embedding.py:23: in _run
+    return loop.run_until_complete(coro)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Admin\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+tests\test_llm_cache_and_embedding.py:158: in t
+    assert len(rows) == 2, [r.__dict__ for r in rows]
+E   AssertionError: []
+E   assert 0 == 2
+E    +  where 0 = len([])
+---------------------------- Captured stdout setup ----------------------------
+2026-11-09 23:26:40,262 [response_engine.threat_taxonomy] INFO: Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+2026-11-09 23:26:40,263 [response_engine.response_policies] INFO: Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+2026-11-09 23:26:40,263 [response_engine.response_policies] INFO: All policy cooldowns cleared
+----------------------------- Captured log setup ------------------------------
+INFO     response_engine.threat_taxonomy:threat_taxonomy.py:119 Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+INFO     response_engine.response_policies:response_policies.py:511 Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+INFO     response_engine.response_policies:response_policies.py:909 All policy cooldowns cleared
+_____ TestHttpTimeoutNotOverridden.test_source_uses_four_segment_timeout ______
+tests\test_p2_reliability_and_contract.py:383: in test_source_uses_four_segment_timeout
+    assert "connect=" in src
+E   assert 'connect=' in '    def http_request_stats(self) -> dict:\n        """实际 HTTP 请求统计（与逻辑调用分开）。"""\n        return {\n            "http_..., "_http_requests_total", 0),\n            "http_retries_total": getattr(self, "_http_retries_total", 0),\n        }\n'
+---------------------------- Captured stdout setup ----------------------------
+2026-11-09 23:30:56,243 [response_engine.threat_taxonomy] INFO: Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+2026-11-09 23:30:56,243 [response_engine.response_policies] INFO: Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+2026-11-09 23:30:56,243 [response_engine.response_policies] INFO: All policy cooldowns cleared
+----------------------------- Captured log setup ------------------------------
+INFO     response_engine.threat_taxonomy:threat_taxonomy.py:119 Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+INFO     response_engine.response_policies:response_policies.py:511 Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+INFO     response_engine.response_policies:response_policies.py:909 All policy cooldowns cleared
+_______________________ test_no_hardcoded_system_prompt _______________________
+tests\test_prompts_integrity.py:136: in test_no_hardcoded_system_prompt
+    assert not offenders, f"发现疑似硬编码 system prompt: {offenders}"
+E   AssertionError: 发现疑似硬编码 system prompt: [('D:\\揭榜挂帅\\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\\源代码\\backend\\copilot_service.py', '你是', '───────────────────\n\nSYSTEM_PROMPT = """你是「守望 SOC」的安全分析 Copi')]
+E   assert not [('D:\\揭榜挂帅\\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\\源代码\\backend\\copilot_service.py', '你是', '───────────────────\n\nSYSTEM_PROMPT = """你是「守望 SOC」的安全分析 Copi')]
+---------------------------- Captured stdout setup ----------------------------
+2026-11-09 23:31:50,268 [response_engine.threat_taxonomy] INFO: Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+2026-11-09 23:31:50,268 [response_engine.response_policies] INFO: Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+2026-11-09 23:31:50,268 [response_engine.response_policies] INFO: All policy cooldowns cleared
+----------------------------- Captured log setup ------------------------------
+INFO     response_engine.threat_taxonomy:threat_taxonomy.py:119 Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+INFO     response_engine.response_policies:response_policies.py:511 Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+INFO     response_engine.response_policies:response_policies.py:909 All policy cooldowns cleared
+_____________________ test_all_api_routes_are_classified ______________________
+tests\test_route_classification.py:95: in test_all_api_routes_are_classified
+    assert not unclassified, (
+E   AssertionError: 以下路由未被归类(既不在 RATE_LIMIT_WHITELIST 的豁免域,也不在 RATE_LIMIT_FORCED 的高危点名表),上线后会落在共桶限流里:
+E       GET /api/copilot/capabilities (ast)
+E       POST /api/copilot/stream (ast)
+E   assert not ['POST /api/copilot/stream (ast)', 'GET /api/copilot/capabilities (ast)']
+---------------------------- Captured stdout setup ----------------------------
+2026-11-09 23:34:33,894 [response_engine.threat_taxonomy] INFO: Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+2026-11-09 23:34:33,894 [response_engine.response_policies] INFO: Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+2026-11-09 23:34:33,894 [response_engine.response_policies] INFO: All policy cooldowns cleared
+----------------------------- Captured log setup ------------------------------
+INFO     response_engine.threat_taxonomy:threat_taxonomy.py:119 Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+INFO     response_engine.response_policies:response_policies.py:511 Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+INFO     response_engine.response_policies:response_policies.py:909 All policy cooldowns cleared
+_____________ test_whitelisted_domains_cover_every_router_module ______________
+tests\test_route_classification.py:120: in test_whitelisted_domains_cover_every_router_module
+    assert not by_top, f"这些顶级前缀整体未被豁免: {sorted(by_top)}"
+E   AssertionError: 这些顶级前缀整体未被豁免: ['/api/copilot']
+E   assert not defaultdict(<class 'list'>, {'/api/copilot': ['/api/copilot/stream', '/api/copilot/capabilities']})
+---------------------------- Captured stdout setup ----------------------------
+2026-11-09 23:34:34,392 [response_engine.threat_taxonomy] INFO: Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+2026-11-09 23:34:34,394 [response_engine.response_policies] INFO: Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+2026-11-09 23:34:34,394 [response_engine.response_policies] INFO: All policy cooldowns cleared
+----------------------------- Captured log setup ------------------------------
+INFO     response_engine.threat_taxonomy:threat_taxonomy.py:119 Loaded threat taxonomy from C:\Users\Admin\AppData\Local\Temp\soc-test-policies-lnvxza_p\taxonomy.yml: 19 leaves, 37 aliases, 36 keywords
+INFO     response_engine.response_policies:response_policies.py:511 Loaded 20 response policies (source=yaml, uncertain_template=yes, failed_files=0)
+INFO     response_engine.response_policies:response_policies.py:909 All policy cooldowns cleared
+============================== warnings summary ===============================
+..\.venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_http_guards.py::TestJwtRevoke::test_logout_blocks_jti
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/test_http_guards.py::TestJwtRevoke::test_logout_blocks_jti
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 11 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+tests/test_llm_enhancers.py::TestLlmEnhancer::test_safe_dispatch_does_not_throw_without_event_loop
+  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\backend\tests\test_llm_enhancers.py:145: RuntimeWarning: coroutine 'TestLlmEnhancer.test_safe_dispatch_does_not_throw_without_event_loop.<locals>.noop' was never awaited
+    llm_enhancer.safe_dispatch(noop(), log_label="test")
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_api_contract_guard.py::test_every_frontend_call_resolves_to_a_backend_route
+FAILED tests/test_api_contract_guard.py::test_known_breaks_are_still_accurately_described
+FAILED tests/test_config_switch_wiring.py::test_settings_field_count_is_unchanged
+FAILED tests/test_config_switch_wiring.py::test_env_example_parses_and_ships_the_keys_we_care_about
+FAILED tests/test_copilot_stream.py::test_chat_stream_no_api_key_yields_error_frame
+FAILED tests/test_copilot_stream.py::test_chat_stream_budget_exhausted_yields_error_frame
+FAILED tests/test_llm_cache_and_embedding.py::test_embed_counters_and_trace
+FAILED tests/test_p2_reliability_and_contract.py::TestHttpTimeoutNotOverridden::test_source_uses_four_segment_timeout
+FAILED tests/test_prompts_integrity.py::test_no_hardcoded_system_prompt - Ass...
+FAILED tests/test_route_classification.py::test_all_api_routes_are_classified
+FAILED tests/test_route_classification.py::test_whitelisted_domains_cover_every_router_module
+11 failed, 3198 passed, 37 skipped, 39 xfailed, 4 warnings in 1538.93s (0:25:38)

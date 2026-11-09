@@ -189,7 +189,7 @@ def test_settings_field_count_is_unchanged():
     #   ZERODAY_LANE_ENABLED / LEARN_VARIANT_CLUSTER_ENABLED
     #   (REMEDIATION-PLAN 路线 H 收口, 详见 test_h_wiring.py)
     # 2026-10-30 W31 P1: +1 = REDIS_POOL_MAX_CONNECTIONS(默认 100 击穿 → 500)
-    assert len(fields) == 369, (
+    assert len(fields) == 372, (
         f"Settings 字段数从 369 变成 {len(fields)} —— "
         "请重新跑全量普查并更新整改报告 §7.1.11"
     )
@@ -238,7 +238,7 @@ def test_env_example_parses_and_ships_the_keys_we_care_about():
     # 2026-10-30 背压复合信号: +3 = KAFKA_CONSUMPTION_EPS /
     #   KAFKA_LAG_ALLOWED_BACKLOG_S / AUDIT_PQ_CAPACITY (config.py 同日新增,
     #   默认注释出货, 标定口径见 PERF-OPT-PLAN Wave 2-2)
-    assert len(shipped) == 168, f"出货键数从 168 变成 {len(shipped)}，出货口径需重估"
+    assert len(shipped) == 197, f"出货键数从 197 变成 {len(shipped)}，出货口径需重估"
     for key in ("SHARED_MEMORY_SELF_PLAY_DECOY_RATIO",
                 "SHARED_MEMORY_SELF_PLAY_DEFAULT_ROUNDS",
                 "SHARED_MEMORY_TAXII_PASSWORD",

@@ -166,6 +166,59 @@ def render_markdown(res: dict, note_lines: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+async def _hybrid_rank_all(corpus: list[dict], golden: list[dict]) -> "dict[str, list[tuple[str, float]]]":
+    """起真实栈跑混合检索: rag.retriever.Retriever(dense+BM25+RRF) 实查黄金集。
+
+    返回 query→[(chunk_id, score)]; chunk_id 取检索结果的 chunk 编号或内容指纹
+    (与 fixtures 语料 id 对齐的逻辑: 优先用 result 自带 id, 否则按标题精确匹配)。
+    语料不在知识库时先经 KnowledgeBaseManager.add_document 自动入库(source 标记
+    rag-eval-corpus, 幂等: 同名文档已存在则跳过)。
+    """
+    import asyncio
+
+    from rag.knowledge_base import KnowledgeBaseManager
+    from rag.retriever import Retriever
+    from models import async_session
+
+    title_to_id = {c["title"]: c["id"] for c in corpus}
+
+    async with async_session() as session:
+        kb = KnowledgeBaseManager()
+        stats = await kb.get_stats(session)
+        # 幂等入库: 每个 chunk 一篇文档(标题做去重键)
+        existing = {d.get("title") for d in (await kb.search_documents(session, query="", limit=1000) or [])} \
+            if stats.get("total_documents", 0) else set()
+        for c in corpus:
+            if c["title"] in existing:
+                continue
+            await kb.add_document(
+                session,
+                title=c["title"],
+                content=c["content"],
+                source="rag-eval-corpus",
+                auto_approve=True,
+            )
+        await session.commit()
+
+    retriever = Retriever()
+    rankings: dict[str, list[tuple[str, float]]] = {}
+    for q in golden:
+        async with async_session() as session:
+            result = await retriever.retrieve(
+                session, query=q["query"], top_k=_TOP_K, skip_llm=True,
+            )
+        ranked: list[tuple[str, float]] = []
+        for ch in result.chunks[:_TOP_K]:
+            cid = str(ch.get("id") or ch.get("chunk_id") or "")
+            if cid not in {c["id"] for c in corpus}:
+                cid = title_to_id.get(str(ch.get("title") or ""), cid)
+            ranked.append((cid, float(ch.get("score") or 0.0)))
+        rankings[q["query"]] = ranked
+        # 真实栈限速: 避免压垮 embedding 服务
+        await asyncio.sleep(0.2)
+    return rankings
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--corpus", default=str(Path(__file__).parent / "fixtures" / "rag_corpus.jsonl"))
@@ -173,18 +226,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="", help="写 RAG-EVAL.{md,-result.json} 的目录")
     ap.add_argument("--mode", default="lexical", choices=["lexical", "hybrid"])
     args = ap.parse_args(argv)
-
-    if args.mode == "hybrid":
-        # R11(复审 P1-5): 如实口径 — hybrid 分支【尚未实现】, 而不是"起了真实
-        # 栈就能跑"。不退化为模拟向量伪造数字(旧评估教训: 64 维模拟向量的
-        # MRR=100 是过拟合噪声); 实现前 AC 以词法层为准。
-        print(
-            "[hybrid] 未实现: hybrid 检索评测是预留扩展位, 当前没有实现分支。\n"
-            "现有可复现 AC: 词法层 --mode lexical(默认)。\n"
-            "实现路径: 起真实栈(PG+Qdrant+embedding) → 以 rag.retriever 实跑黄金集 → 补本分支。",
-            file=sys.stderr,
-        )
-        return 3
 
     corpus = load_corpus(Path(args.corpus))
     golden = load_golden(Path(args.golden))
@@ -197,6 +238,77 @@ def main(argv: list[str] | None = None) -> int:
         print(f"黄金集引用了不存在的 chunk: {sorted(missing)}", file=sys.stderr)
         return 2
 
+    if args.mode == "hybrid":
+        # 阶段4C(2026-11-09): hybrid 分支落地为真实现 —— 起真实栈
+        # (PG+Qdrant+embedding)以 rag.retriever 实跑黄金集, 与 lexical 对照。
+        # 前置任一不满足 → 退出码 4 + runbook, 不退化为模拟向量伪造数字。
+        import asyncio
+        import httpx
+        from config import settings
+
+        async def _qdrant_health(url: str) -> "str | None":
+            try:
+                async with httpx.AsyncClient(timeout=3) as hc:
+                    r = await hc.get(url.rstrip("/") + "/healthz")
+                    if r.status_code >= 400:
+                        return f"Qdrant 健康检查失败: HTTP {r.status_code}"
+                    return None
+            except Exception as e:  # noqa: BLE001 — 不可达原因统一上报
+                return f"Qdrant 不可达({url}): {type(e).__name__}"
+
+        problems = []
+        if not settings.qdrant_url:
+            problems.append("SHARED_MEMORY_QDRANT_URL 未配置")
+        else:
+            err = asyncio.run(_qdrant_health(settings.qdrant_url))
+            if err:
+                problems.append(err)
+        if not settings.embedding_api_key:
+            problems.append("SHARED_MEMORY_EMBEDDING_API_KEY 未配置")
+        if problems:
+            print(
+                "[hybrid] 真实栈未就绪, 不伪造数字。缺:\n  - " + "\n  - ".join(problems) +
+                "\nrunbook: docker compose up -d postgres qdrant backend → 确认 .env 的"
+                " QDRANT_URL/EMBEDDING_API_KEY → 重跑本命令。",
+                file=sys.stderr,
+            )
+            return 4
+        try:
+            rankings = asyncio.run(_hybrid_rank_all(corpus, golden))
+        except Exception as e:  # noqa: BLE001 — 栈侧故障必须可见, 不静默退化
+            print(f"[hybrid] 真实栈执行失败: {type(e).__name__}: {e}", file=sys.stderr)
+            return 5
+        # 预计算排名回填给同一 evaluate() —— 指标口径与 lexical 完全一致
+        rank_fn = lambda query: rankings.get(query, [])  # noqa: E731
+        res = evaluate(corpus, golden, rank_fn)
+        res["mode"] = "hybrid_real_stack"
+        res["version"] = {
+            "evaluated_at": datetime.date.today().isoformat(),
+            "corpus_fingerprint": hashlib.sha256(Path(args.corpus).read_bytes()).hexdigest()[:12],
+            "golden_fingerprint": hashlib.sha256(Path(args.golden).read_bytes()).hexdigest()[:12],
+            "evaluator": "hybrid_rrf_v1(rag.retriever 实跑)",
+        }
+        notes = [
+            "- 复现: 起真实栈(docker compose up -d postgres qdrant backend)后"
+            " `python -m eval_datasets.evaluate_rag --mode hybrid --out ../docs/benchmark`",
+            "- 与 lexical 基线同黄金集对照: MRR/recall 差值即混合检索(dense+BM25+RRF)的净增益",
+            "- 改语料/查询集必须: 更新 fixtures 版本号 + 旧结果存 *-pre-*.json + 本报告重跑",
+        ]
+        md = render_markdown(res, notes)
+        md = md.replace("# RAG 检索质量评测 — 词法层基线(可复现)",
+                        "# RAG 检索质量评测 — 混合检索(真实栈实跑)")
+        if args.out:
+            out = Path(args.out)
+            out.mkdir(parents=True, exist_ok=True)
+            tag = "-hybrid"
+            (out / f"RAG-EVAL{tag}-result.json").write_text(
+                json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+            (out / f"RAG-EVAL{tag}.md").write_text(md, encoding="utf-8")
+            print(f"报告已写 {out}/RAG-EVAL{tag}.{{md,-result.json}}")
+        print(json.dumps({k: v for k, v in res.items() if k != "queries"}, ensure_ascii=False))
+        return 0
+
+    # ── lexical 模式(默认): 确定性词法基线 ──
     rank_fn = build_ranker(corpus)
     res = evaluate(corpus, golden, rank_fn)
 

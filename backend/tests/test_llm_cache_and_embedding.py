@@ -41,7 +41,10 @@ def test_chat_cache_hit_under_budget_exhaustion(monkeypatch):
         monkeypatch.setattr(llm, "_response_cache", {})  # W1-3: 换新 dict, 单例原缓存自动还原
         messages = [{"role": "user", "content": "cache-starvation-probe"}]
         prompt_text = "\n".join(m.get("content", "") for m in messages)
-        key = "llmcache:" + hashlib.md5(f"{prompt_text}:0.3".encode("utf-8")).hexdigest()
+        # 2026-11-09: digest 纳入 model(视觉/非视觉缓存隔离) —— 测试侧同步公式
+        key = "llmcache:" + hashlib.md5(
+            f"{prompt_text}:0.3:{llm.model}".encode("utf-8")
+        ).hexdigest()
         await llm._cache_set(key, "CACHED_CONTENT")
 
         monkeypatch.setattr(cost_tracker, "is_over_budget", lambda: True)
@@ -104,7 +107,7 @@ def test_enhance_discards_fallback_payload(monkeypatch):
 
 # ── 3. embed() 计数器 + trace 落库 ──
 
-def test_embed_counters_and_trace(monkeypatch):
+def test_embed_counters_and_trace(monkeypatch, real_trace_recorder):
     from summary_compression import embedder
     from models import AgentTrace, async_session
 

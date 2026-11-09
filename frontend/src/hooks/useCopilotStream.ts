@@ -205,7 +205,7 @@ export function useCopilotStream() {
       abortRef.current = ctrl
       try {
         await consumeSseStream({
-          path: '/copilot/stream',
+          path: '/api/copilot/stream',
           signal: ctrl.signal,
           body: {
             question: q,
