@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from models import get_session, SecurityEvent, Memory
-from auth import RequireRole, UserInfo
+from auth import RequireRole, UserInfo, get_current_user
 from audit_trail import log_from_request
 from log_ingestion import log_ingestor
 from event_identity import ensure_identity, get_event_id
@@ -107,8 +107,22 @@ def _authenticate_source(request: Request) -> str:
         if not source:
             _ingest_metric("rejected", reason="auth")
             raise HTTPException(403, "Invalid or revoked API key")
-    elif settings.kafka_enabled:
-        logger.warning("[Security] HTTP ingest without API key in Kafka mode — should use Kafka pipeline")
+        return api_key
+    # R12(复审 P1-8 认证倒挂扶正): 修复前"带无效 key 拒绝(403)、完全不带 key
+    # 放行" —— 攻击者只要不发 header 就能绕过数据源认证。现在:
+    #   - 已配置任何数据源密钥 → 无 key 一律 401(fail-closed);
+    #   - 未配置密钥: prod 拒绝(与 source_registry 的 prod 口径一致),
+    #     非 prod 放行 + 一次性 warning(演示/开发兼容, demo_start.bat 依赖)。
+    if source_registry._sources:
+        _ingest_metric("rejected", reason="auth")
+        raise HTTPException(401, "API key required")
+    env_name = (getattr(settings, "env_name", "dev") or "dev").lower()
+    if env_name == "prod":
+        _ingest_metric("rejected", reason="auth")
+        raise HTTPException(401, "API key required (SOURCE_API_KEYS unconfigured in prod)")
+    if not getattr(_authenticate_source, "_anon_warned", False):
+        _authenticate_source._anon_warned = True
+        logger.warning("[Security] HTTP ingest without API key allowed in dev (SOURCE_API_KEYS unconfigured) — prod rejects")
     return api_key
 
 def _stamp_ingest_events(events: list) -> list[dict]:
@@ -358,6 +372,164 @@ async def ingest_log_batch(
         return _overload_response(exc.gate)
     _ingest_metric("accepted", n=len(parsed))
     return {"session_id": session_id, **result}
+
+
+# ── 攻击剧本一键注入（接入台专用，2026-11 传智杯 AI Web 改造）──────────────
+
+async def _run_ingest_pipeline(
+    parsed: list[dict],
+    session_id: str,
+    request: Request,
+    session: AsyncSession,
+    *,
+    source: str,
+):
+    """剧本/手动注入共用的接入管道 —— 与 /logs/ingest/batch 同一套门禁与传输。
+
+    返回 (JSONResponse | dict)：Kafka 路径 202/207/503；直写路径 dict 结果。
+    调用方已通过 JWT 鉴权（operator 及以上），故不要求 X-API-Key ——
+    调用者是登录的值班员而非外部数据源。
+    """
+    from drain import drain
+    if not drain.accepting:
+        return JSONResponse(status_code=503, content={
+            "status": "draining", "detail": "服务正在关闭，不再接受新任务"})
+    _reject_if_body_too_large(request)
+    _reject_if_batch_forbidden(len(parsed))
+    mode = _ingest_mode()
+    if mode == "kafka_unavailable":
+        return _kafka_unavailable_response()
+    denied = await _admit(direct=(mode != "kafka"))
+    if denied is not None:
+        return denied
+
+    if mode == "kafka":
+        produced = await _enqueue_ingest(session_id, "", parsed)
+        event_ids = [get_event_id(d) for d in parsed]
+        if produced <= 0:
+            _ingest_metric("rejected", reason="not_durable", n=len(parsed), source=source)
+            return JSONResponse(status_code=503, content={
+                "status": "not_durable", "produced": produced,
+                "detail": "Kafka 未确认任何日志，未接受"})
+        _ingest_metric("queued", n=len(parsed), source=source)
+        return JSONResponse(status_code=_queued_status_code(), content={
+            "session_id": session_id, "status": "queued",
+            "produced": produced, "count": len(parsed), "event_ids": event_ids})
+
+    from capacity import GateTimeout, IngestCapacityError
+    try:
+        result = await log_ingestor.ingest_batch(session, session_id, parsed)
+    except IngestCapacityError as exc:
+        return _overload_response(exc.reason, accepted=exc.accepted, count=exc.total)
+    except GateTimeout as exc:
+        return _overload_response(exc.gate)
+    _ingest_metric("accepted", n=len(parsed), source=source)
+    return {"session_id": session_id, **result}
+
+
+def _merge_extra(result, extra: dict):
+    """把剧本/手动元信息并进管道响应。
+
+    必须重建 JSONResponse 而不是原地改 body —— Content-Length 在构造时
+    已按原 body 写死，事后换更长的 body 会触发 h11
+    "Too much data for declared Content-Length" 直接断连
+    （nginx 记 202 但浏览器报 Failed to fetch，2026-11-07 E2E 实测）。
+    """
+    if isinstance(result, JSONResponse):
+        payload = json.loads(result.body)
+        payload.update(extra)
+        return JSONResponse(status_code=result.status_code, content=payload)
+    return {**result, **extra}
+
+
+@router.get("/logs/scenarios")
+async def list_scenarios(user: UserInfo = Depends(get_current_user)):
+    """剧本目录（前端接入台卡片数据：名称/描述/事件数/severity 分布）。"""
+    from log_scenarios import scenario_catalog
+    return {"scenarios": scenario_catalog()}
+
+
+@router.post("/logs/scenario/{name}")
+async def ingest_scenario(
+    name: str,
+    request: Request,
+    session: AsyncSession = Depends(_session_unless_queued),
+    user: UserInfo = Depends(RequireRole("operator")),
+):
+    """一键注入攻击剧本。
+
+    每条日志带 inject_source="scenario:<name>" 标记（明示演练来源，不伪装真实流量）。
+    """
+    from log_scenarios import SCENARIOS, build_scenario
+
+    meta = SCENARIOS.get(name)
+    if not meta:
+        raise HTTPException(404, f"Unknown scenario: {name}")
+
+    logs = build_scenario(name) or []
+    if not logs:
+        raise HTTPException(500, f"Scenario {name} generated no logs")
+    for d in logs:
+        if isinstance(d.get("message"), str):
+            d["message"] = _sanitize_value(d["message"])
+    parsed = _stamp_ingest_events(logs)
+
+    session_id = str(uuid.uuid4())
+    result = await _run_ingest_pipeline(parsed, session_id, request, session, source="scenario")
+    return _merge_extra(result, {"scenario": name, "title": meta["title"]})
+
+
+@router.post("/logs/manual")
+async def ingest_manual(
+    req: LogIngestRequest,
+    request: Request,
+    session: AsyncSession = Depends(_session_unless_queued),
+    user: UserInfo = Depends(RequireRole("operator")),
+):
+    """值班员手动录入单条日志（接入台编辑器专用）。
+
+    与外部数据源 /logs/ingest 的差别：JWT 鉴权（无需 X-API-Key），且日志带
+    inject_source="manual:<username>" —— 平台上可审计到"谁手动录的"。
+    """
+    log_data = req.message if isinstance(req.message, dict) else json.loads(req.message)
+    if not isinstance(log_data, dict):
+        raise HTTPException(422, "message 必须是 JSON 对象")
+    if isinstance(log_data.get("message"), str):
+        log_data["message"] = _sanitize_value(log_data["message"])
+    log_data["inject_source"] = f"manual:{user.username}"
+    parsed = _stamp_ingest_events([log_data])
+
+    session_id = req.session_id or str(uuid.uuid4())
+    result = await _run_ingest_pipeline(
+        parsed, session_id, request, session, source="manual")
+    return _merge_extra(result, {"event_ids": [get_event_id(d) for d in parsed]})
+
+
+@router.post("/logs/manual/batch")
+async def ingest_manual_batch(
+    req: LogBatchRequest,
+    request: Request,
+    session: AsyncSession = Depends(_session_unless_queued),
+    user: UserInfo = Depends(RequireRole("operator")),
+):
+    """值班员批量录入（接入台文件上传专用）——口径同 /logs/manual，逐条打标。"""
+    if not req.logs:
+        raise HTTPException(422, "logs 不能为空")
+    parsed = []
+    for item in req.logs:
+        d = item if isinstance(item, dict) else json.loads(item)
+        if not isinstance(d, dict):
+            raise HTTPException(422, "logs 每项必须是 JSON 对象")
+        if isinstance(d.get("message"), str):
+            d["message"] = _sanitize_value(d["message"])
+        d["inject_source"] = f"manual:{user.username}"
+        parsed.append(d)
+    parsed = _stamp_ingest_events(parsed)
+
+    session_id = req.session_id or str(uuid.uuid4())
+    result = await _run_ingest_pipeline(
+        parsed, session_id, request, session, source="manual")
+    return _merge_extra(result, {"event_ids": [get_event_id(d) for d in parsed]})
 
 @router.post("/logs/analyze")
 async def trigger_analysis(

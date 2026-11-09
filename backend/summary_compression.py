@@ -289,6 +289,226 @@ class LLMClient:
                 "error_type": "llm_rate_limited", "retryable": True,
             }, ensure_ascii=False)
 
+    async def chat_stream(self, messages: list[dict], temperature: float = 0.3,
+                          model: str = ""):
+        """流式对话 — 逐 delta 产出帧 dict（Copilot 专用，2026-11 传智杯改造）。
+
+        model: 覆盖默认模型（Copilot 图像理解走独立视觉模型时传入），
+        空 = 用 self.model。
+
+        与 chat() 共享三道门禁（api_key → 日预算 → 限流槽），但有两处刻意不同：
+        - 不走响应缓存：流式答案按会话语境即时生成，相同 prompt 的缓存命中
+          无意义（会话历史不同 → prompt 不同）；
+        - 不做 429/5xx 重试：流式一旦开始已向调用方吐出增量，重试会造成
+          内容重复；交互场景由前端提示后用户手动重发更诚实（明示，不伪装）。
+
+        产出帧协议（dict，由 routers/copilot.py 转 SSE 帧）：
+          {"type": "reasoning", "text": str}   思考增量（网关未拆分思考时无此帧）
+          {"type": "content",   "text": str}   正文增量
+          {"type": "error",     "text": str, "error_type": str, "fallback": True}
+          {"type": "done",      "content": str, "reasoning": str, "usage": {...}}
+
+        reasoning 兼容三种网关口径：delta.reasoning_content（DeepSeek-R1/GLM/
+        MiniMax 流式通用）、delta.reasoning（部分 vLLM）、content 数组内的
+        thinking 分片。HTTP 400 且带 reasoning_effort 时先剥参重发一次
+        （与 chat() 的降级口径一致，此时流尚未开始，重发无害）。
+        """
+        from trace_hook import emit_trace, get_trace_context
+
+        t_start = time.time()
+        prompt_text = "\n".join(m.get("content", "") for m in messages)
+        prompt_tokens = estimate_tokens(prompt_text)
+        ctx = get_trace_context()
+        event_id = int(ctx.get("event_id", 0) or 0)
+
+        def _err(error_type: str, text: str) -> dict:
+            emit_trace(
+                status="degraded", error_type=error_type,
+                model=self.model, prompt_tokens=prompt_tokens,
+                latency_ms=(time.time() - t_start) * 1000,
+            )
+            return {"type": "error", "text": text, "fallback": True,
+                    "error_type": error_type}
+
+        # 门禁 1：未配置 key —— 与 chat() 同口径（诚实降级，不抛异常打断 SSE）
+        if not self.api_key:
+            yield _err("no_api_key", "LLM 未配置，无法流式生成")
+            return
+        # 门禁 2：日预算（只拦真实调用）
+        if cost_tracker.is_over_budget():
+            logger.warning("[CostControl] Daily budget exhausted, stream rejected")
+            yield _err("budget_exhausted", "每日 LLM 预算已用尽，流式生成被降级")
+            return
+
+        await self.ensure_client()
+        payload = {
+            "model": model or self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+            "reasoning_split": True,  # MiniMax-M3: 思考拆到独立字段，不污染正文
+        }
+        effort = (getattr(settings, "llm_reasoning_effort", "") or "").strip()
+        if effort:
+            payload["reasoning_effort"] = effort
+
+        from llm_limiter import LlmSlotTimeout, LlmRateExceeded, get_llm_limiter
+        try:
+            async with get_llm_limiter().acquire(tier="P2"):
+                async for frame in self._chat_stream_http(
+                    payload, prompt_tokens, t_start, event_id, effort,
+                ):
+                    yield frame
+        except LlmSlotTimeout as e:
+            logger.warning("LLM slot timeout (stream): %s", e)
+            yield _err("llm_slot_timeout", "LLM 并发槽超时，请稍后重试")
+        except LlmRateExceeded as e:
+            logger.warning("LLM rate limit (stream): %s", e)
+            yield _err("llm_rate_limited", "LLM 限流中，请稍后重试")
+
+    async def _chat_stream_http(self, payload, prompt_tokens, t_start, event_id, effort):
+        """chat_stream 的 HTTP 执行段（限流槽内调用）。"""
+        from trace_hook import emit_trace
+
+        model_name = str(payload.get("model") or self.model)
+
+        req_payload = dict(payload)
+        req_timeout = float(getattr(settings, "llm_request_timeout_s", 90) or 90)
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        completion_tokens = 0
+        try:
+            resp = await self.client.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                },
+                json=req_payload,
+                timeout=httpx.Timeout(
+                    connect=float(getattr(settings, "llm_connect_timeout_s", 10.0) or 10.0),
+                    read=max(0.05, req_timeout),
+                    write=max(0.05, req_timeout),
+                    pool=max(0.05, req_timeout),
+                ),
+            )
+            # 400 + reasoning_effort：网关不认识该参数 —— 剥掉重发一次
+            #（此刻流尚未开始，无重复输出风险，与 chat() 降级口径一致）
+            if resp.status_code == 400 and effort:
+                req_payload.pop("reasoning_effort", None)
+                resp = await self.client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                    },
+                    json=req_payload,
+                    timeout=httpx.Timeout(
+                        connect=float(getattr(settings, "llm_connect_timeout_s", 10.0) or 10.0),
+                        read=max(0.05, req_timeout),
+                        write=max(0.05, req_timeout),
+                        pool=max(0.05, req_timeout),
+                    ),
+                )
+            if resp.status_code == 429:
+                yield {"type": "error", "text": "LLM 限流（429），请稍后重试",
+                       "fallback": True, "error_type": "rate_limited_429",
+                       "retryable": True}
+                return
+            if resp.status_code >= 500:
+                yield {"type": "error", "text": f"LLM 上游错误 {resp.status_code}",
+                       "fallback": True, "error_type": f"upstream_{resp.status_code}",
+                       "retryable": False}
+                return
+            if resp.status_code != 200:
+                body_snippet = (await resp.aread())[:200].decode("utf-8", errors="replace")
+                logger.warning("LLM stream unexpected status %s: %s",
+                               resp.status_code, body_snippet)
+                yield {"type": "error", "text": f"LLM 流式接口异常 {resp.status_code}",
+                       "fallback": True, "error_type": f"http_{resp.status_code}",
+                       "retryable": False}
+                return
+
+            # 逐行解析 OpenAI 兼容 SSE：`data: {...}` 行，`data: [DONE]` 结束。
+            # 部分网关在事件间夹注释行（`:` 开头）与心跳空行，均跳过。
+            async for line in resp.aiter_lines():
+                if not line or line.startswith(":"):
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                data_str = line[5:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except ValueError:
+                    continue
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                # reasoning 增量：reasoning_content（主流）/ reasoning（部分 vLLM）
+                r = delta.get("reasoning_content") or delta.get("reasoning") or ""
+                if r:
+                    reasoning_parts.append(str(r))
+                    yield {"type": "reasoning", "text": str(r)}
+                c = delta.get("content")
+                if isinstance(c, list):
+                    # content 数组（多模态网关）：取 text 分片
+                    c = "".join(
+                        p.get("text", "") for p in c
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                if c:
+                    content_parts.append(str(c))
+                    completion_tokens += estimate_tokens(str(c))
+                    yield {"type": "content", "text": str(c)}
+
+        except httpx.TimeoutException as e:
+            logger.warning("LLM stream timeout: %s", type(e).__name__)
+            emit_trace(
+                status="degraded", error_type="llm_request_timeout",
+                model=model_name, prompt_tokens=prompt_tokens,
+                latency_ms=(time.time() - t_start) * 1000,
+            )
+            # 已吐出的增量不撤回 —— 补一个 error 帧，前端如实标注"中断"
+            yield {"type": "error", "text": "LLM 流式响应超时中断", "fallback": True,
+                   "error_type": "llm_request_timeout", "retryable": True}
+            return
+        except Exception as e:
+            logger.warning("LLM stream failed: %s", e)
+            emit_trace(
+                status="degraded", error_type=type(e).__name__,
+                model=model_name, prompt_tokens=prompt_tokens,
+                latency_ms=(time.time() - t_start) * 1000,
+            )
+            yield {"type": "error", "text": "LLM 流式响应中断", "fallback": True,
+                   "error_type": type(e).__name__, "retryable": True}
+            return
+
+        content = "".join(content_parts)
+        reasoning = "".join(reasoning_parts)
+        total_tokens = prompt_tokens + completion_tokens
+        cost_tracker.record(
+            total_tokens, event_id=event_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+        emit_trace(
+            status="success",
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            latency_ms=(time.time() - t_start) * 1000,
+        )
+        yield {"type": "done", "content": content, "reasoning": reasoning,
+               "usage": {"prompt_tokens": prompt_tokens,
+                         "completion_tokens": completion_tokens,
+                         "total_tokens": total_tokens}}
+
     @staticmethod
     def _retry_backoff_s(attempt: int) -> float:
         """P2-E-2: 指数退避 + 全抖动（full jitter）。

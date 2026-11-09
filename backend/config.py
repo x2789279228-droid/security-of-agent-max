@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://localhost:5432/shared_memory"
     redis_url: str = "redis://localhost:6379/0"
+    # W31 P1(2026-10-30): redis-py from_url 默认池上限 100 —— enriched 消费
+    # 突发下(pubsub 长连接 + 每事件幂等/缓存/广播)击穿 → MaxConnectionsError
+    # 消费停摆(WAVE3-1-FLINK-DIRECT 实测)。服务端 maxclients=10000, 500 无压力。
+    redis_pool_max_connections: int = 500
 
     # LLM
     llm_api_key: str = ""
@@ -33,6 +37,14 @@ class Settings(BaseSettings):
     llm_model: str = ""
     # Audit 路径默认关掉 thinking/reasoning（网关不认则自动剥离重试）
     llm_reasoning_effort: str = "none"
+    # Copilot 图像理解（2026-11 传智杯 AI Web 改造）：空 = 视觉能力关闭，
+    # Copilot 前端如实置灰并说明原因（明示，不伪装）。需 OpenAI 兼容
+    # 视觉模型（如 glm-4v / gpt-4o-mini / minimax-vl），与 llm_base_url 同网关。
+    llm_vision_model: str = ""
+    # Copilot 会话历史最多带入的对话轮数（防止 prompt 无界膨胀）
+    copilot_history_max_turns: int = 6
+    # Copilot 每次问答检索知识库的引用条数上限
+    copilot_rag_top_k: int = 4
 
     # Embedding
     embedding_api_key: str = ""
@@ -145,7 +157,13 @@ class Settings(BaseSettings):
     # ── OpenTelemetry (标准 trace 体系 → otel-collector → Tempo) ──
     otel_enabled: bool = True
     otel_endpoint: str = "http://otel-collector:4317"
+    # Tempo 查询 API 地址(R20): 此前 3 处硬编码 http://tempo:3200, 换部署拓扑必改代码
+    tempo_url: str = "http://tempo:3200"
     env_name: str = "dev"
+    # 演示模式开关(R12, 复审 P1-8): 只有显式开启才挂载 /api/demo/seed|clear|status。
+    # 修复前 demo 路由无条件挂载在生产路由上, operator 即可灌/清演示数据,
+    # 且退出演示态只能靠人工记得跑 clear。
+    demo_mode: bool = False
     # 日志格式: ""=按 env 自动(prod=json, 其余=text); 显式 "json"|"text" 覆盖
     log_format: str = ""
     # 启动时自动执行 alembic upgrade head（生产/容器部署建议开启;
@@ -296,6 +314,28 @@ class Settings(BaseSettings):
     kafka_producer_restart_max_s: float = 30.0
     kafka_audit_store_concurrency: int = 12
     kafka_fetch_pause_s: float = 0.5
+    # ── 背压复合信号（PERF-OPT-PLAN-2026-10-26 Wave 2-1/2-2）──
+    # 准入闸门(admit_http)的信号从"只看审计内存队列"扩为
+    # max(队列比, Kafka lag 比, PQ 深度比)；Kafka 拉取暂停仍只看审计内存队列
+    # （停拉会加深 lag —— lag 信号只用于拒绝新进入，不用于停拉）。
+    # kafka_consumption_eps: 实测稳态消费容量(events/s)。0=未标定 → lag 信号
+    # 不启用（不许用拍脑袋阈值触发过载拒绝）。标定口径：PERF 压测排空段实测；
+    # PERF-2(2026-10-30) 标定值 = **8 eps**（1675 规则、2CPU 容器、单 worker 稳态
+    # 8.4-8.6 实测取整；2 worker 配对实测 2.08× 近线性）——该规模栈部署时设 8，
+    # 换规则库规模/机器须重标。lag 阈值条数 = eps × 允许积压秒数。
+    kafka_consumption_eps: int = 0
+    kafka_lag_allowed_backlog_s: int = 60
+    # P0/P1 LLM 溢出池(PQ)的深度容量：深度比 = zcard / 该值。
+    audit_pq_capacity: int = 2000
+    # ── H 路线接线开关（REMEDIATION-PLAN 2026-10-30 路线 H，2026-10-30 收口）──
+    # 全部 fail-open：异常只降级为"无该增强"，不阻断主链路。
+    # LLM 类默认关（成本护栏：内部走 llm_enhancer/llm_limiter）；本地计算类默认开。
+    intel_llm_context_enabled: bool = False     # ①IOC 命中后 LLM 威胁上下文摘要
+    edr_llm_correlation_enabled: bool = False   # ②跨源关联结果 LLM 叙事
+    traffic_peer_group_enabled: bool = True     # ③同侪组基线(纯本地计算)
+    zeroday_lane_enabled: bool = True           # ④沙箱行为解读进分诊 lane(同步分析器;
+                                                #   LLM 解读另受 llm 成本护栏)
+    learn_variant_cluster_enabled: bool = True  # ⑤恶意样本变体聚类进学习闭环(本地)
     # 消费侧重试：区分临时故障与永久错误。旧实现是 0.5s+1.0s=1.5s 总等待。
     kafka_retry_initial_s: float = 1.0
     kafka_retry_multiplier: float = 2.0
@@ -327,6 +367,9 @@ class Settings(BaseSettings):
     # 谁就能伪装成合法日志源。现在默认空 = 不预置任何来源（fail-closed）；
     # 演示环境请显式设置（见 .env.example 的示例值），生产必须换成私有密钥。
     source_api_keys: str = ""
+    # 本地情报 csv 导入的白名单目录(R14): 空 = 禁用本地导入(默认, 防任意文件读);
+    # 配置后仅允许该目录内文件(如 /data/feeds)。HTTP 导入请用 csv_http。
+    intel_local_feed_dir: str = ""
 
     # SSH 防火墙适配器 (Linux iptables)
     fw_ssh_host: str = ""
