@@ -1,0 +1,30 @@
+{
+ "generated_at": "2026-10-30",
+ "dataset": "cicids2018_flows",
+ "source_note": "AWS Open Data cse-cic-ids2018 Thursday-01-03-2018(渗透日); CICFlowMeter 数值特征",
+ "classes": {
+  "benign": {
+   "n": 2000,
+   "hit_events": 0,
+   "distinct_rules": 0,
+   "elapsed_s": 39.8,
+   "eps": 50.2,
+   "per_rule_top": {},
+   "label": "benign"
+  },
+  "malicious": {
+   "n": 2000,
+   "hit_events": 0,
+   "distinct_rules": 0,
+   "elapsed_s": 39.7,
+   "eps": 50.4,
+   "per_rule_top": {},
+   "label": "malicious"
+  }
+ },
+ "honesty": [
+  "特征向量语料: Sigma URL/UA 类规则不命中是数据形态事实, 非引擎缺陷",
+  "攻击期事件流不可作良性 FP 语料; B3 良性门禁仍等 24h 真机 Sysmon 基线",
+  "EVTX 面(cicids2018_evtx)复用 E1 管线, 见 replay_edr_public"
+ ]
+}

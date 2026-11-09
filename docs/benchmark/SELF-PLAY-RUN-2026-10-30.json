@@ -1,0 +1,368 @@
+{
+  "match_id": "sp-58b570abf5a1",
+  "status": "completed",
+  "winner": "blue",
+  "metrics": {
+    "rounds": 4,
+    "attacks": 4,
+    "decoys": 4,
+    "tp": 3,
+    "fp": 0,
+    "fn": 1,
+    "tn": 4,
+    "asr": 0.25,
+    "recall": 0.75,
+    "precision": 1.0,
+    "mttd_ms": 3641.0900751749673,
+    "novelty": 0.3583333333333333,
+    "compounding": 0.5,
+    "overlay_hits": 2,
+    "sigma_hits": 1,
+    "fbeta": 0.8125,
+    "blue_score": 0.7075948651631674,
+    "red_score": 0.25,
+    "mttc_ms": 22.43518829345703,
+    "eval_channel": "sim",
+    "novelty_technique": 0.25,
+    "novelty_parameter": 0.5,
+    "novelty_sequence": 0.4166666666666667,
+    "novelty_scenario": 0.25,
+    "candidate_tp": 0,
+    "radar": {
+      "coverage": 0.75,
+      "precision": 1.0,
+      "mttd": 0.2717819849650065,
+      "novelty_response": 0.5,
+      "compounding": 0.5,
+      "robustness": 0.75
+    }
+  },
+  "radar": {
+    "coverage": 0.75,
+    "precision": 1.0,
+    "mttd": 0.2717819849650065,
+    "novelty_response": 0.5,
+    "compounding": 0.5,
+    "robustness": 0.75
+  },
+  "capability": {
+    "level": 1,
+    "technique_recalls": {
+      "T1046": 0.856
+    },
+    "technique_asrs": {
+      "T1046": 0.144
+    },
+    "recent_outcomes": [],
+    "rounds_at_level": 0,
+    "p_level_clear": 0.0,
+    "blue_win_rate": 0.0,
+    "seen_by_level": {
+      "0": [
+        "T1046"
+      ]
+    }
+  },
+  "rounds": [
+    {
+      "round_num": 1,
+      "outcome": "blue_win",
+      "metrics": {
+        "attacks": 1,
+        "decoys": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "tn": 1,
+        "asr": 0.0,
+        "recall": 1.0,
+        "precision": 1.0,
+        "mttd_ms": 10878.399848937988,
+        "novelty": 0.9999999999999999,
+        "compounding": 0.0,
+        "overlay_hits": 0,
+        "sigma_hits": 1,
+        "fbeta": 1.0,
+        "blue_score": 0.8,
+        "red_score": 0.0,
+        "mttc_ms": 0.0,
+        "eval_channel": "sim",
+        "novelty_technique": 1.0,
+        "novelty_parameter": 1.0,
+        "novelty_sequence": 1.0,
+        "novelty_scenario": 1.0,
+        "candidate_tp": 0,
+        "radar": {
+          "coverage": 1.0,
+          "precision": 1.0,
+          "mttd": 0.0,
+          "novelty_response": 0.9999999999999999,
+          "compounding": 0.0,
+          "robustness": 1.0
+        }
+      },
+      "level": 0,
+      "goal": {
+        "technique_id": "T1046",
+        "sub_technique_id": "",
+        "ttp_id": "ttp-t1046-scan",
+        "event_type": "PORT_SCAN",
+        "scenario": "recon",
+        "difficulty": 0,
+        "constraints": {
+          "dst_role": "web",
+          "protocol": "tcp",
+          "kill_chain": "recon",
+          "require_variant": false
+        },
+        "prefer_gap": false,
+        "rationale": "curriculum L0 → ttp-t1046-scan (T1046) p_clear=0.00",
+        "allowed_ttps": [
+          "T1046"
+        ]
+      },
+      "learned": [],
+      "plan": {
+        "rationale": "curriculum L0 goal → ttp-t1046-scan (T1046)",
+        "steps": [
+          {
+            "event": "PORT_SCAN",
+            "mitre_id": "T1046",
+            "evasion": false,
+            "name": "Network Service Discovery"
+          }
+        ]
+      }
+    },
+    {
+      "round_num": 2,
+      "outcome": "red_win",
+      "metrics": {
+        "attacks": 1,
+        "decoys": 1,
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "tn": 1,
+        "asr": 1.0,
+        "recall": 0.0,
+        "precision": 0.0,
+        "mttd_ms": 0.0,
+        "novelty": 0.43333333333333335,
+        "compounding": 0.0,
+        "overlay_hits": 0,
+        "sigma_hits": 0,
+        "fbeta": 0.0,
+        "blue_score": 0.12166666666666667,
+        "red_score": 1.0,
+        "mttc_ms": 0.0,
+        "eval_channel": "sim",
+        "novelty_technique": 0.0,
+        "novelty_parameter": 1.0,
+        "novelty_sequence": 0.6666666666666667,
+        "novelty_scenario": 0.0,
+        "candidate_tp": 0,
+        "radar": {
+          "coverage": 0.0,
+          "precision": 0.0,
+          "mttd": 1.0,
+          "novelty_response": 0.0,
+          "compounding": 0.0,
+          "robustness": 0.0
+        }
+      },
+      "level": 0,
+      "goal": {
+        "technique_id": "T1046",
+        "sub_technique_id": "",
+        "ttp_id": "ttp-t1046-scan",
+        "event_type": "PORT_SCAN",
+        "scenario": "recon",
+        "difficulty": 0,
+        "constraints": {
+          "dst_role": "web",
+          "protocol": "tcp",
+          "kill_chain": "recon",
+          "require_variant": true
+        },
+        "prefer_gap": false,
+        "rationale": "curriculum L0 → ttp-t1046-scan (T1046) p_clear=1.00",
+        "allowed_ttps": [
+          "T1046"
+        ]
+      },
+      "learned": [
+        "SP-70abf5a1-001"
+      ],
+      "plan": {
+        "rationale": "curriculum L0 goal → ttp-t1046-scan (T1046)",
+        "steps": [
+          {
+            "event": "SYN_ENUM",
+            "mitre_id": "T1046",
+            "evasion": true,
+            "name": "Network Service Discovery"
+          }
+        ]
+      }
+    },
+    {
+      "round_num": 3,
+      "outcome": "blue_win",
+      "metrics": {
+        "attacks": 1,
+        "decoys": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "tn": 1,
+        "asr": 0.0,
+        "recall": 1.0,
+        "precision": 1.0,
+        "mttd_ms": 23.836851119995117,
+        "novelty": 0.0,
+        "compounding": 1.0,
+        "overlay_hits": 1,
+        "sigma_hits": 0,
+        "fbeta": 1.0,
+        "blue_score": 0.9495232629776001,
+        "red_score": 0.0,
+        "mttc_ms": 23.836851119995117,
+        "eval_channel": "sim",
+        "novelty_technique": 0.0,
+        "novelty_parameter": 0.0,
+        "novelty_sequence": 0.0,
+        "novelty_scenario": 0.0,
+        "candidate_tp": 0,
+        "radar": {
+          "coverage": 1.0,
+          "precision": 1.0,
+          "mttd": 0.995232629776001,
+          "novelty_response": 1.0,
+          "compounding": 1.0,
+          "robustness": 1.0
+        }
+      },
+      "level": 0,
+      "goal": {
+        "technique_id": "T1046",
+        "sub_technique_id": "",
+        "ttp_id": "ttp-t1046-scan",
+        "event_type": "PORT_SCAN",
+        "scenario": "recon",
+        "difficulty": 0,
+        "constraints": {
+          "dst_role": "web",
+          "protocol": "tcp",
+          "kill_chain": "recon",
+          "require_variant": true
+        },
+        "prefer_gap": false,
+        "rationale": "curriculum L0 → ttp-t1046-scan (T1046) p_clear=0.57",
+        "allowed_ttps": [
+          "T1046"
+        ]
+      },
+      "learned": [],
+      "plan": {
+        "rationale": "curriculum L0 goal → ttp-t1046-scan (T1046)",
+        "steps": [
+          {
+            "event": "SYN_ENUM",
+            "mitre_id": "T1046",
+            "evasion": true,
+            "name": "Network Service Discovery"
+          }
+        ]
+      }
+    },
+    {
+      "round_num": 4,
+      "outcome": "blue_win",
+      "metrics": {
+        "attacks": 1,
+        "decoys": 1,
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "tn": 1,
+        "asr": 0.0,
+        "recall": 1.0,
+        "precision": 1.0,
+        "mttd_ms": 21.033525466918945,
+        "novelty": 0.0,
+        "compounding": 1.0,
+        "overlay_hits": 1,
+        "sigma_hits": 0,
+        "fbeta": 1.0,
+        "blue_score": 0.9495793294906616,
+        "red_score": 0.0,
+        "mttc_ms": 21.033525466918945,
+        "eval_channel": "sim",
+        "novelty_technique": 0.0,
+        "novelty_parameter": 0.0,
+        "novelty_sequence": 0.0,
+        "novelty_scenario": 0.0,
+        "candidate_tp": 0,
+        "radar": {
+          "coverage": 1.0,
+          "precision": 1.0,
+          "mttd": 0.9957932949066162,
+          "novelty_response": 1.0,
+          "compounding": 1.0,
+          "robustness": 1.0
+        }
+      },
+      "level": 0,
+      "goal": {
+        "technique_id": "T1046",
+        "sub_technique_id": "",
+        "ttp_id": "ttp-t1046-scan",
+        "event_type": "PORT_SCAN",
+        "scenario": "recon",
+        "difficulty": 0,
+        "constraints": {
+          "dst_role": "web",
+          "protocol": "tcp",
+          "kill_chain": "recon",
+          "require_variant": true
+        },
+        "prefer_gap": false,
+        "rationale": "curriculum L0 → ttp-t1046-scan (T1046) p_clear=0.73",
+        "allowed_ttps": [
+          "T1046"
+        ]
+      },
+      "learned": [],
+      "plan": {
+        "rationale": "curriculum L0 goal → ttp-t1046-scan (T1046)",
+        "steps": [
+          {
+            "event": "SYN_ENUM",
+            "mitre_id": "T1046",
+            "evasion": true,
+            "name": "Network Service Discovery"
+          }
+        ]
+      }
+    }
+  ],
+  "level": 1,
+  "config": {
+    "rounds": 4,
+    "curriculum": true,
+    "start_level": 0,
+    "inject": false,
+    "wait_audit": false,
+    "wait_audit_s": 8.0,
+    "use_llm": false,
+    "decoy_ratio": 0.2,
+    "persist": false,
+    "persist_kb": false,
+    "match_id": "sp-58b570abf5a1",
+    "diverse_env": false,
+    "env_seed": 0,
+    "background_traffic": false,
+    "eval_channel": "sim"
+  }
+}

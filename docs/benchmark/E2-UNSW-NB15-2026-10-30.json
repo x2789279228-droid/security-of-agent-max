@@ -1,0 +1,30 @@
+{
+ "generated_at": "2026-10-30",
+ "dataset": "unsw_nb15",
+ "source_note": "镜像 InitRoot/UNSW_NB15(官方 SharePoint 需人工下载); 特征编码 CSV, 无 URL/UA 文本",
+ "classes": {
+  "benign": {
+   "n": 30000,
+   "hit_events": 0,
+   "distinct_rules": 0,
+   "elapsed_s": 628.6,
+   "eps": 47.7,
+   "per_rule_top": {},
+   "label": "benign"
+  },
+  "malicious": {
+   "n": 30000,
+   "hit_events": 0,
+   "distinct_rules": 0,
+   "elapsed_s": 622.2,
+   "eps": 48.2,
+   "per_rule_top": {},
+   "label": "malicious"
+  }
+ },
+ "honesty": [
+  "特征向量语料: Sigma URL/UA 类规则不命中是数据形态事实, 非引擎缺陷",
+  "攻击期事件流不可作良性 FP 语料; B3 良性门禁仍等 24h 真机 Sysmon 基线",
+  "EVTX 面(cicids2018_evtx)复用 E1 管线, 见 replay_edr_public"
+ ]
+}

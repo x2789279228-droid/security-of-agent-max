@@ -17,7 +17,7 @@ MRR=0.9917（回归基线语义）。**四个"宣称缺口"变成"有报告、�
 | 路线 | 提交 | 沙箱完成 | 用户环境 AC（runbook） |
 |---|---|---|---|
 | R3 情报全家桶+富化 | `2146d30` | 4 源方言（Feodo/OpenPhish/URLhaus/KEV）+ enricher 双链接线 + 11 测试 | `bash tools/seed-free-intel-feeds.sh`（有网环境拉真实源, 证据截图） |
-| R5 ATT&CK+RAG | `966745f` | evaluate_rag + 60 语料/60 黄金集入库可复现 + technique 告警面透传 + 9 测试 | `python -m eval_datasets.evaluate_rag --mode hybrid`（真实检索栈）；ATT&CK bundle 导入 runbook |
+| R5 ATT&CK+RAG | `966745f` | evaluate_rag + 60 语料/60 黄金集入库可复现 + technique 告警面透传 + 9 测试 | `cd backend && python -m eval_datasets.evaluate_rag`（词法层, 已实测）；**hybrid 模式为预留扩展位, 尚未实现**（`--mode hybrid` 明确退出码 3, 不伪造向量数字）；ATT&CK bundle 导入 runbook |
 | R2 Suricata+pcap | `898875f` | 连接器复活（默认落库处理器）+ app 启动分支 + compose 回放服务 + 评测器 + 5 测试 | MTA pcap 下载 → `soc-suricata-replay` → 评测器（runbook 见模块 docstring） |
 | R1 Atomic | `95e436a` | runner 三模式三道安全闸 + 覆盖对账器 + 8 技术 manifest + 4 测试 | 按 `docs/upgrade/ATOMIC-REDTEAM-RUNBOOK.md` 在测试 VM 执行（检出 ≥60% AC） |
 | R4 字段扩展 | `0c74228` | dns_query/file_hash 四层贯通（含 Avro/Java 契约）+ **实测 116→125** | 第二批 Sysmon 字段（依赖 R1 真实数据源）→ 目标 ≥400 |

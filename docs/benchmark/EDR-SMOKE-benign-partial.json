@@ -1,0 +1,34 @@
+{
+ "generated_at": "2026-10-31",
+ "dataset": "EVTX-ATTACK-SAMPLES (sbousseaden, MIT license)",
+ "files": 1,
+ "per_file_cap": 50000,
+ "elapsed_s": 437.3,
+ "detect_errors": 0,
+ "total_hit_events": 4,
+ "distinct_rules_fired": 3,
+ "per_rule_total": {
+  "C-1130": 3,
+  "C-1126": 2,
+  "C-1485": 1
+ },
+ "per_group": {
+  "benign-sysmon-smoke/(未标技术)": {
+   "files": 1,
+   "records": 1861,
+   "parsed": 1861,
+   "events_with_hits": 4,
+   "distinct_rules": 3,
+   "top_rules": {
+    "C-1130": 3,
+    "C-1126": 2,
+    "C-1485": 1
+   }
+  }
+ },
+ "honesty": [
+  "technique 仅取文件名内嵌编号, 其余按战术目录粒度",
+  "攻击期事件流不得用作良性 FP 语料; 良性 24h Sysmon 基线未采集",
+  "命中含影子规则(shadow) —— 是证据不是执法"
+ ]
+}

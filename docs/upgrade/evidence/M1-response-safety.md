@@ -1,8 +1,8 @@
 # M1 证据：响应安全闭环（第一批）
 
-> 日期：2026-10-21
+> 日期：2026-10-21；**F2 live 演练补录：2026-10-30（见 §6）**
 > 范围：安全默认值、响应边界、审批、SSH、主机遏制、TTL、注册闸门、admit 字段、能力登记表
-> 结论级别：**测试级（fake SSH/Redis）+ 全量回归**；真机 SSH / 真实 Redis 演练仍待做。
+> 结论级别：测试级（fake SSH/Redis）+ 全量回归；**live 级（真实 SSH 靶机 + 真实 Redis）已于 2026-10-30 完成第 4 节 1–3 项演练，见 §6**。
 
 ## 1. 代码变更
 
@@ -72,15 +72,64 @@ python -m pytest tests -q -p no:cacheprovider
 
 ## 4. 尚未验证（必须保留为待办）
 
-1. **真实 soc-firewall 的 live 封禁/隔离**：当前用 fake `_exec` 验证命令与检查链，未连真机。
-2. **真实 Redis TTL 跨进程重启**：当前用 fake Redis 验证注册路径；未做“封禁 → 杀进程 → 重启 → 自动解封”演练。
-3. **post-validator 在真实 iptables 上的输出**：fake 返回固定 stdout；未验证真实 `iptables -L` 解析。
+1. ~~**真实 soc-firewall 的 live 封禁/隔离**~~：✅ 2026-10-30 完成，见 §6 演练 A。
+2. ~~**真实 Redis TTL 跨进程重启**~~：✅ 2026-10-30 完成，见 §6 演练 B。
+3. ~~**post-validator 在真实 iptables 上的输出**~~：✅ 2026-10-30 完成（block 返回 `verified=true`，来自真实 `iptables -L` 解析），见 §6。
 4. **主机遏制的真实 Windows 目标**：当前验证到“命令编码 + 白名单 + 到达 SSH”，未执行真实 PowerShell。
 5. **审批队列的持久化**：`human_approval` 仍是进程内存态，重启丢失。
+   （注：审批的 write-behind 落库与 approve 前先持久化已在 2026-10-27 路线收口，此处指工单全量持久化。）
 
 ## 5. 下一步
 
-1. 搭一个本地 Linux SSH 靶机 + Redis，完成第 4 节 1–3 的 live 演练，并把结果补进本文件。
+1. ~~搭一个本地 Linux SSH 靶机 + Redis，完成第 4 节 1–3 的 live 演练~~ ✅ 2026-10-30 完成（复用运行中栈的 `soc-firewall` 靶机 + `shared-memory-redis`，无需新搭）。
 2. M2 剩余：Redis PQ 原子 pop、spill 追加写、Temporal 版本机制。
 3. M3：版本化标注集 + CI 评估报告。
 4. M4：dormant 二选一 + 默认 compose 收敛。
+
+## 6. F2 live 演练（2026-10-30）—— 真实 SSH 靶机 + 真实 Redis
+
+> 环境：运行中全栈（`shared-memory-backend`，`SHARED_MEMORY_EXECUTION_MODE=live`，
+> `FW_SSH_HOST=soc-firewall`）+ `soc-firewall` 靶机容器（Alpine，sshd+iptables，
+> `FIREWALL_ROOT_PASSWORD` 凭据）+ `shared-memory-redis`。
+> 方式：`docker exec` 独立进程直驱 `response_executor`（组件级 live），
+> 跨进程形态正是生产重启/多 worker 的真实条件。
+> 依据：REMEDIATION-PLAN-2026-10-30 路线 F2。
+
+### 6.1 演练 A：block → 真实 DROP → 跨进程回滚 → 零残留
+
+| 步骤 | 实测（时间本地 UTC+8） |
+|---|---|
+| 基线 | `iptables -L INPUT` 空；containment 存量 216 条 |
+| block（exec 进程①） | `EXEC succeeded=1`，`mode=ssh_firewall_paramiko`，`rule_id=FW-RULE-1429485173`，**`verified=true`（post-validator 解析真实 iptables 输出，关闭第 4 节待办 3）**；回滚记录落 Redis（TTL 604800s=7 天） |
+| 实拍 | `iptables -L INPUT -n`：`DROP 203.0.113.66 … /* FW-RULE-1429485173 */` |
+| 回滚（exec 进程②，跨进程） | 首轮暴露 3 个缺陷（见 6.2），修复后复跑：`ROLLBACK succeeded=1`，`deleted_count=1` |
+| 终态 | `iptables -L INPUT` **零残留**；containment #217 → `rolled_back` |
+
+另证：fail-closed 语义真实生效 —— 回滚进程未接 `safe_executor` Redis 时，
+live 封禁被 `idempotency_unavailable` 拒绝（§9.52），iptables 未被触碰。
+
+### 6.2 演练 A 发现并修复的 3 个真实缺陷（全部当天闭环）
+
+| # | 缺陷（实测形态） | 修复 | 测试 |
+|---|---|---|---|
+| 1 | `_unblock_ip` src_ip 分支：封禁进程退出后合并视图（内存台账+本进程 TTL 索引）缺记录 → 循环零命中 `deleted_count=0`，冗余 `rule_id` 未用于直连扫描 → **规则残留** | 视图零命中且带 `rule_id` 时直连 `ssh_firewall.rollback(rule_id)`（扫描真实 iptables 注释，不依赖任何进程状态） | `test_rollback_cross_process_fix.py` |
+| 2 | `response_registry.rollback` 包装无条件 `success=True`（不抛异常即成功）→ `deleted_count=0` 被计成回滚成功（**虚报**），且 `mark_rolled` 幂等标记被错误打下，后续真实回滚被"already rolled back"短路 | 包装层与 execute 的 P0-2 语义对齐：inner 自报 `success=False` → 外层 False | 同上 |
+| 3 | `_unblock_ip` 与 `ttl_rollback` 均不保证 SSH 已配置/连接（封禁路径有 `_ensure_firewall_connected`，解封没有）→ 任何非 app 进程（重启后的扫描器/运维脚本）解封卡在主机密钥 fail-closed 或“SSH 未连接” | 两处入口统一先 `_ensure_firewall_connected()` | 同上 |
+
+修复验证：3 项新测试 + 回滚面 34 项 + TTL 面 18 项全绿；修复文件同步进容器后，
+**用现场遗留的真实规则复跑回滚成功删除**（`deleted_count=1`、零残留、台账对账）。
+
+### 6.3 演练 B：TTL 双路径（跨进程回收 + 重启自动解封，真实 Redis）
+
+| 路径 | 实测 |
+|---|---|
+| B1 跨进程回收 | exec 进程③封禁 `203.0.113.77`（TTL 60s，注册 `soc:ttl:index`）；到期时旧代码 app 扫描器回收 FAILED（缺陷 3）→ **app 重启吃进修复后代码**，00:20:17 扫描器 `Recovery: FW-RULE-0207373284 key lost → 立即回滚`，`rolled back: 1 lines ['iptables:INPUT']` |
+| B2 重启存活 | 00:19:46 封禁 `203.0.113.88`（TTL 180s）→ 00:19:50 `docker restart shared-memory-backend`（扫描器 stopped→restarted）→ 00:22:49 到期，`Auto-rollback: OK` |
+| 终态 | `iptables -S INPUT | grep DROP` = **0**；containment #218/#219 均 `rolled_back`；TTL 索引仅剩演练 A 的 60min 条目（规则已手工删，到期幂等回收） |
+
+### 6.4 结论
+
+- 第 4 节待办 1–3 全部关闭；`response_engine` 的 live 级证据从 fake 升级为真实 SSH+Redis。
+- `capabilities.yaml` 中 `response_engine` 的“待真机 SSH + Redis TTL 演练后升 verified”条件**已满足**
+  （升级动作与证据链接由 REMEDIATION-PLAN 路线 F 统一收口时执行）。
+- 遗留：第 4 节待办 4（真实 Windows PowerShell 目标）与 5（审批工单全量持久化）仍开放。

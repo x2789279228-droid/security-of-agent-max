@@ -5,7 +5,7 @@
   "mrr": 0.9917,
   "recall_at_5": 1.0,
   "recall_at_10": 1.0,
-  "elapsed_ms": 24.0,
+  "elapsed_ms": 27.1,
   "per_category": {
     "intel": {
       "n": 6,
@@ -1093,5 +1093,12 @@
         "KB-T1027"
       ]
     }
-  ]
+  ],
+  "version": {
+    "evaluated_at": "2026-10-30",
+    "corpus_fingerprint": "9256c09cc629",
+    "golden_fingerprint": "3e309924f88d",
+    "evaluator": "lexical_bm25_v1",
+    "note": "fingerprint 变化即结果不可比; 旧结果须存 *-pre-*.json"
+  }
 }

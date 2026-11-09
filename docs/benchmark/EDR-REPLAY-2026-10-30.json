@@ -1,0 +1,207 @@
+{
+ "generated_at": "2026-10-30",
+ "dataset": "EVTX-ATTACK-SAMPLES (sbousseaden, MIT license)",
+ "files": 270,
+ "per_file_cap": 3000,
+ "elapsed_s": 784.6,
+ "detect_errors": 0,
+ "total_hit_events": 268,
+ "distinct_rules_fired": 135,
+ "per_rule_total": {
+  "C-1422": 24,
+  "C-879": 18,
+  "C-1485": 16,
+  "C-1602": 16,
+  "C-959": 14,
+  "C-1542": 11,
+  "C-1349": 11,
+  "C-1377": 10,
+  "C-697": 9,
+  "C-1433": 9,
+  "C-1440": 6,
+  "C-808": 6,
+  "C-452": 6,
+  "C-1169": 5,
+  "C-439": 5,
+  "C-1102": 5,
+  "C-954": 5,
+  "C-486": 4,
+  "C-1590": 4,
+  "C-1452": 4,
+  "C-536": 4,
+  "C-966": 4,
+  "C-759": 4,
+  "C-1445": 4,
+  "C-1476": 4,
+  "C-1411": 4,
+  "C-470": 3,
+  "C-1473": 3,
+  "C-1296": 3,
+  "C-1252": 3
+ },
+ "per_group": {
+  "Command and Control/(未标技术)": {
+   "files": 6,
+   "records": 1969,
+   "parsed": 1969,
+   "events_with_hits": 1,
+   "distinct_rules": 1,
+   "top_rules": {
+    "C-1442": 1
+   }
+  },
+  "Credential Access/(未标技术)": {
+   "files": 38,
+   "records": 29852,
+   "parsed": 29852,
+   "events_with_hits": 43,
+   "distinct_rules": 20,
+   "top_rules": {
+    "C-879": 18,
+    "C-1485": 9,
+    "C-486": 4,
+    "C-470": 3,
+    "C-1422": 2
+   }
+  },
+  "Credential Access/T1098": {
+   "files": 1,
+   "records": 1,
+   "parsed": 1,
+   "events_with_hits": 0,
+   "distinct_rules": 0,
+   "top_rules": {}
+  },
+  "Defense Evasion/(未标技术)": {
+   "files": 35,
+   "records": 429,
+   "parsed": 429,
+   "events_with_hits": 24,
+   "distinct_rules": 16,
+   "top_rules": {
+    "C-1169": 5,
+    "C-1452": 4,
+    "C-1473": 3,
+    "C-1485": 3,
+    "C-1422": 3
+   }
+  },
+  "Defense Evasion/T1186": {
+   "files": 1,
+   "records": 2,
+   "parsed": 2,
+   "events_with_hits": 0,
+   "distinct_rules": 0,
+   "top_rules": {}
+  },
+  "Discovery/(未标技术)": {
+   "files": 11,
+   "records": 172,
+   "parsed": 172,
+   "events_with_hits": 0,
+   "distinct_rules": 0,
+   "top_rules": {}
+  },
+  "EVTX-ATTACK-SAMPLES-master/(未标技术)": {
+   "files": 1,
+   "records": 7,
+   "parsed": 7,
+   "events_with_hits": 1,
+   "distinct_rules": 1,
+   "top_rules": {
+    "C-1497": 1
+   }
+  },
+  "Execution/(未标技术)": {
+   "files": 34,
+   "records": 541,
+   "parsed": 541,
+   "events_with_hits": 63,
+   "distinct_rules": 46,
+   "top_rules": {
+    "C-959": 13,
+    "C-1433": 8,
+    "C-1445": 4,
+    "C-1296": 3,
+    "C-966": 3
+   }
+  },
+  "Lateral Movement/(未标技术)": {
+   "files": 47,
+   "records": 1288,
+   "parsed": 1288,
+   "events_with_hits": 32,
+   "distinct_rules": 27,
+   "top_rules": {
+    "C-1440": 6,
+    "C-1422": 6,
+    "C-808": 6,
+    "C-954": 3,
+    "C-1541": 3
+   }
+  },
+  "Other/(未标技术)": {
+   "files": 2,
+   "records": 744,
+   "parsed": 744,
+   "events_with_hits": 3,
+   "distinct_rules": 6,
+   "top_rules": {
+    "C-1592": 1,
+    "C-330": 1,
+    "C-1307": 1,
+    "C-334": 1,
+    "C-1422": 1
+   }
+  },
+  "Persistence/(未标技术)": {
+   "files": 22,
+   "records": 411,
+   "parsed": 411,
+   "events_with_hits": 35,
+   "distinct_rules": 16,
+   "top_rules": {
+    "C-1349": 11,
+    "C-452": 6,
+    "C-1377": 5,
+    "C-1485": 3,
+    "C-1422": 2
+   }
+  },
+  "Privilege Escalation/(未标技术)": {
+   "files": 65,
+   "records": 1139,
+   "parsed": 1139,
+   "events_with_hits": 66,
+   "distinct_rules": 36,
+   "top_rules": {
+    "C-1602": 16,
+    "C-1422": 8,
+    "C-697": 8,
+    "C-1542": 5,
+    "C-1377": 4
+   }
+  },
+  "Privilege Escalation/T1178": {
+   "files": 1,
+   "records": 3,
+   "parsed": 3,
+   "events_with_hits": 0,
+   "distinct_rules": 0,
+   "top_rules": {}
+  },
+  "emotet/(未标技术)": {
+   "files": 6,
+   "records": 6,
+   "parsed": 6,
+   "events_with_hits": 0,
+   "distinct_rules": 0,
+   "top_rules": {}
+  }
+ },
+ "honesty": [
+  "technique 仅取文件名内嵌编号, 其余按战术目录粒度",
+  "攻击期事件流不得用作良性 FP 语料; 良性 24h Sysmon 基线未采集",
+  "命中含影子规则(shadow) —— 是证据不是执法"
+ ]
+}

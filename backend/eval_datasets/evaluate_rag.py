@@ -8,19 +8,20 @@
     fixtures/rag_golden_queries.json 60 查询), 任何人在仓库根一条命令复现;
   - lexical 模式用平台**自己的** rag.lexical.tokenize 切词(评的就是平台
     真实词法层) + 标准 BM25 排序, 零网络/零 embedding API/确定性;
-  - hybrid 模式需真实检索栈(PG+Qdrant+embedding 服务), 本环境不可用时
-    退出码 3 并打印 runbook —— 不伪造数字;
+  - hybrid 模式是**预留扩展位, 尚未实现**(R11, 2026-10-29): 退出码 3 并
+    如实说明 —— 不伪造数字, 也不宣称"起了真实栈就能跑";
   - 报告保留改前改后: 语料/查询集版本变化时旧结果 JSON 保留为 *-pre-*.json。
 
 用法:
     python -m eval_datasets.evaluate_rag --out ../docs/benchmark
-    python -m eval_datasets.evaluate_rag --mode hybrid   # 需真实检索栈
 """
 from __future__ import annotations
 
 import argparse
 import collections
 import json
+import hashlib
+import datetime
 import math
 import sys
 import time
@@ -165,21 +166,22 @@ def render_markdown(res: dict, note_lines: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--corpus", default=str(Path(__file__).parent / "fixtures" / "rag_corpus.jsonl"))
     ap.add_argument("--golden", default=str(Path(__file__).parent / "fixtures" / "rag_golden_queries.json"))
     ap.add_argument("--out", default="", help="写 RAG-EVAL.{md,-result.json} 的目录")
     ap.add_argument("--mode", default="lexical", choices=["lexical", "hybrid"])
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.mode == "hybrid":
-        # 诚实失败: 真实检索栈不可用时明说, 不退化为模拟向量伪造数字
-        # (旧评估的教训: 64 维模拟向量产出的 MRR=100 是过拟合噪声)。
+        # R11(复审 P1-5): 如实口径 — hybrid 分支【尚未实现】, 而不是"起了真实
+        # 栈就能跑"。不退化为模拟向量伪造数字(旧评估教训: 64 维模拟向量的
+        # MRR=100 是过拟合噪声); 实现前 AC 以词法层为准。
         print(
-            "[hybrid] 需要真实检索栈(PG+Qdrant+embedding 服务)。\n"
-            "runbook: 1) docker compose up -d  2) 导入 rag_corpus.jsonl 入 knowledge_base\n"
-            "         3) 以 rag.retriever 实跑本黄金集 —— 评测器接口不变。",
+            "[hybrid] 未实现: hybrid 检索评测是预留扩展位, 当前没有实现分支。\n"
+            "现有可复现 AC: 词法层 --mode lexical(默认)。\n"
+            "实现路径: 起真实栈(PG+Qdrant+embedding) → 以 rag.retriever 实跑黄金集 → 补本分支。",
             file=sys.stderr,
         )
         return 3
@@ -197,6 +199,19 @@ def main() -> int:
 
     rank_fn = build_ranker(corpus)
     res = evaluate(corpus, golden, rank_fn)
+
+    # E5(2026-10-30): 版本化指纹 —— 检索质量数字从此可归因到具体语料/查询集/评估器版本
+    # (改任一 fingerprint, 结果即不可比; 报告头部自动携带)
+    def _fp(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+    res["version"] = {
+        "evaluated_at": datetime.date.today().isoformat(),
+        "corpus_fingerprint": _fp(Path(__file__).parent / "fixtures" / "rag_corpus.jsonl"),
+        "golden_fingerprint": _fp(Path(__file__).parent / "fixtures" / "rag_golden_queries.json"),
+        "evaluator": "lexical_bm25_v1",
+        "note": "fingerprint 变化即结果不可比; 旧结果须存 *-pre-*.json",
+    }
+
     notes = [
         "- 复现: `python -m eval_datasets.evaluate_rag --out ../docs/benchmark`",
         "- 升级 hybrid: 按上 runbook 起真实栈后 `--mode hybrid` 并保留 lexical 结果对照",

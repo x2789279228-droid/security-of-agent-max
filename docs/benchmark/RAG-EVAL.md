@@ -3,7 +3,7 @@
 - 语料: 60 chunks (fixtures/rag_corpus.jsonl, 提交入库)
 - 黄金集: 60 条查询 (fixtures/rag_golden_queries.json, 四类意图)
 - 排序器: 平台 rag.lexical.tokenize + BM25(k1=1.5,b=0.75), 确定性
-- 指标: **MRR=0.9917** / recall@5=1.0 / recall@10=1.0 (24.0ms)
+- 指标: **MRR=0.9917** / recall@5=1.0 / recall@10=1.0 (27.1ms)
 
 > 口径声明: 本报告评的是**词法召回层**的可复现基线 —— hybrid/embedding
 > 模式复用同一黄金集, 需真实检索栈(PG+Qdrant+embedding 服务), 运行命令

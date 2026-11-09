@@ -1,0 +1,389 @@
+{
+ "generated_at": "2026-10-30",
+ "total": 46,
+ "scored": 43,
+ "known_gaps": 3,
+ "passed": 43,
+ "accuracy": 1.0,
+ "groups": {
+  "grounding": {
+   "n": 12,
+   "pass": 12,
+   "acc": 1.0
+  },
+  "behavior": {
+   "n": 9,
+   "pass": 9,
+   "acc": 1.0
+  },
+  "triage": {
+   "n": 6,
+   "pass": 6,
+   "acc": 1.0
+  },
+  "triage_analysis_completeness": {
+   "n": 1,
+   "pass": 1,
+   "acc": 1.0
+  },
+  "degrade": {
+   "n": 8,
+   "pass": 8,
+   "acc": 1.0
+  },
+  "budget": {
+   "n": 4,
+   "pass": 4,
+   "acc": 1.0
+  },
+  "sigma_shadow": {
+   "n": 2,
+   "pass": 2,
+   "acc": 1.0
+  },
+  "stabilize": {
+   "n": 1,
+   "pass": 1,
+   "acc": 1.0
+  }
+ },
+ "rows": [
+  {
+   "id": "clean_ssh_bruteforce",
+   "group": "grounding",
+   "expect": "grounded",
+   "got": "grounded",
+   "score": 0.9,
+   "pass": true
+  },
+  {
+   "id": "clean_c2_beacon",
+   "group": "grounding",
+   "expect": "grounded",
+   "got": "grounded",
+   "score": 0.9,
+   "pass": true
+  },
+  {
+   "id": "clean_sqli",
+   "group": "grounding",
+   "expect": "grounded",
+   "got": "grounded",
+   "score": 0.9,
+   "pass": true
+  },
+  {
+   "id": "no_quote_but_ids_valid",
+   "group": "grounding",
+   "expect": "grounded",
+   "got": "grounded",
+   "score": 0.9,
+   "pass": true
+  },
+  {
+   "id": "fabricated_event_id",
+   "group": "grounding",
+   "expect": "ungrounded",
+   "got": "ungrounded",
+   "score": 0.825,
+   "pass": true
+  },
+  {
+   "id": "all_quotes_fabricated",
+   "group": "grounding",
+   "expect": "ungrounded",
+   "got": "ungrounded",
+   "score": 0.5,
+   "pass": true
+  },
+  {
+   "id": "phantom_ip",
+   "group": "grounding",
+   "expect": "ungrounded",
+   "got": "ungrounded",
+   "score": 0.825,
+   "pass": true
+  },
+  {
+   "id": "cross_source_conflict",
+   "group": "grounding",
+   "expect": "ungrounded",
+   "got": "ungrounded",
+   "score": 0.8833,
+   "pass": true
+  },
+  {
+   "id": "partially_traceable_exfil",
+   "group": "grounding",
+   "expect": "partially_grounded",
+   "got": "partially_grounded",
+   "score": 0.7,
+   "pass": true
+  },
+  {
+   "id": "zero_evidence_no_ip",
+   "group": "grounding",
+   "expect": "ungrounded",
+   "got": "ungrounded",
+   "score": 0.9,
+   "pass": true
+  },
+  {
+   "id": "zero_evidence_with_ip",
+   "group": "grounding",
+   "expect": "ungrounded",
+   "got": "ungrounded",
+   "score": 0.75,
+   "pass": true
+  },
+  {
+   "id": "kb_supported_bruteforce",
+   "group": "grounding",
+   "expect": "grounded",
+   "got": "grounded",
+   "score": 1.0,
+   "pass": true
+  },
+  {
+   "id": "overclaim_chinese_natural_language",
+   "group": "grounding",
+   "expect": "ungrounded",
+   "got": "grounded",
+   "score": 0.9
+  },
+  {
+   "id": "identical_repeat",
+   "group": "behavior",
+   "expect": "logged",
+   "got": "logged",
+   "pass": true
+  },
+  {
+   "id": "neighbouring_ip_same_class",
+   "group": "behavior",
+   "expect": "logged",
+   "got": "logged",
+   "pass": true
+  },
+  {
+   "id": "baseline_spans_hours",
+   "group": "behavior",
+   "expect": "logged",
+   "got": "logged",
+   "pass": true
+  },
+  {
+   "id": "off_hours_only",
+   "group": "behavior",
+   "expect": "confirm",
+   "got": "confirm",
+   "pass": true
+  },
+  {
+   "id": "caller_uses_new_tool",
+   "group": "behavior",
+   "expect": "confirm",
+   "got": "confirm",
+   "pass": true
+  },
+  {
+   "id": "non_exact_tool_match",
+   "group": "behavior",
+   "expect": "confirm",
+   "got": "confirm",
+   "pass": true
+  },
+  {
+   "id": "new_ip_class_public",
+   "group": "behavior",
+   "expect": "deny",
+   "got": "deny",
+   "pass": true
+  },
+  {
+   "id": "numeric_zscore_outlier",
+   "group": "behavior",
+   "expect": "deny",
+   "got": "deny",
+   "pass": true
+  },
+  {
+   "id": "impossible_transition",
+   "group": "behavior",
+   "expect": "deny",
+   "got": "deny",
+   "pass": true
+  },
+  {
+   "id": "new_payload_same_length",
+   "group": "behavior",
+   "expect": "confirm",
+   "got": "logged"
+  },
+  {
+   "id": "new_target_same_class",
+   "group": "behavior",
+   "expect": "confirm",
+   "got": "logged"
+  },
+  {
+   "id": "t01",
+   "group": "triage",
+   "expect": "P2",
+   "got": "P2",
+   "pass": true
+  },
+  {
+   "id": "t02",
+   "group": "triage",
+   "expect": "P1",
+   "got": "P1",
+   "pass": true
+  },
+  {
+   "id": "t03",
+   "group": "triage",
+   "expect": "P0",
+   "got": "P0",
+   "pass": true
+  },
+  {
+   "id": "t04",
+   "group": "triage",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "t05",
+   "group": "triage",
+   "expect": "tools_only",
+   "got": "tools_only",
+   "pass": true
+  },
+  {
+   "id": "t06",
+   "group": "triage",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "t07",
+   "group": "triage_analysis_completeness",
+   "expect": false,
+   "got": "False",
+   "pass": true
+  },
+  {
+   "id": "d01",
+   "group": "degrade",
+   "expect": "rate_limited_429",
+   "got": "rate_limited_429",
+   "pass": true
+  },
+  {
+   "id": "d02",
+   "group": "degrade",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "d03",
+   "group": "degrade",
+   "expect": false,
+   "got": "False",
+   "pass": true
+  },
+  {
+   "id": "d04",
+   "group": "degrade",
+   "expect": false,
+   "got": "False",
+   "pass": true
+  },
+  {
+   "id": "d05",
+   "group": "degrade",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "d06",
+   "group": "degrade",
+   "expect": false,
+   "got": "False",
+   "pass": true
+  },
+  {
+   "id": "d07",
+   "group": "degrade",
+   "expect": false,
+   "got": "False",
+   "pass": true
+  },
+  {
+   "id": "d08",
+   "group": "degrade",
+   "expect": "llm_request_timeout",
+   "got": "llm_request_timeout",
+   "pass": true
+  },
+  {
+   "id": "b01",
+   "group": "budget",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "b02",
+   "group": "budget",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "b03",
+   "group": "budget",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "b04",
+   "group": "budget",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "s01",
+   "group": "sigma_shadow",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "s02",
+   "group": "sigma_shadow",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  },
+  {
+   "id": "s03",
+   "group": "stabilize",
+   "expect": true,
+   "got": "True",
+   "pass": true
+  }
+ ],
+ "honesty": [
+  "25 条复用既有标注集(grounding 13 + behavior 12), 25 条新增语义样本",
+  "known_gap 样本不混入准确率(grounding_cases 维护约定)",
+  "先写 expect 再跑实现; 冲突记为实现问题"
+ ]
+}
