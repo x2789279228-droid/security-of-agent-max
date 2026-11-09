@@ -1635,9 +1635,9 @@ tools/
 | `docs/upgrade-proposals/2026-q3-tech-stack-upgrade-v3.md` | v3 升级方案（实装度核验 + 6 大反例） |
 | `docs/upgrade-proposals/2026-q3-tech-stack-upgrade-v4.md` | v4 升级方案（24 项 + 6 大生产反例） |
 | `docs/upgrade-proposals/2026-q3-tech-stack-upgrade-v5.md` | v5 升级方案（合规 + TCO + 决策树 + 12 反例）⭐ |
-| `D:\揭榜挂帅\v1.3.0_vs_platform_对比分析.md` | 与前身 v1.3.0 对比 |
-| `D:\揭榜挂帅\audit\00-项目状态桌面审查.md` | 桌面级现状审查 |
-| `D:\揭榜挂帅\audit\02-日志中心根因排查报告.md` | 日志中心根因排查 |
+| `v1.3.0_vs_platform_对比分析.md` | 与前身 v1.3.0 对比 |
+| `audit\00-项目状态桌面审查.md` | 桌面级现状审查 |
+| `audit\02-日志中心根因排查报告.md` | 日志中心根因排查 |
 
 ---
 

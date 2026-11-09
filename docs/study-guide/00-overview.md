@@ -76,7 +76,7 @@
 | 自我审计 | ❌ | ❌ | ✅ 5 道闸：Guard / CAD / Stabilizer / Grounding / 熔断 |
 | 可本地跑通 | ⚠️ 重型 | ✅ | ✅ `docker compose up` 即可 |
 
-> 详细对比见 `D:\揭榜挂帅\v1.3.0_vs_platform_对比分析.md`（v1.3.0 是平台前身）。
+> 详细对比见 `v1.3.0_vs_platform_对比分析.md`（v1.3.0 是平台前身）。
 
 ---
 

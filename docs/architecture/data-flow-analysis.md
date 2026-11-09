@@ -1,6 +1,6 @@
 # SOC 安全运营平台：数据流与框架剖析
 
-> 路径：`D:/揭榜挂帅/shared-memory-platform`
+> 路径：`shared-memory-platform`
 > 范围：`backend/` 源码（`.tmp_*.py` 忽略）+ `docker-compose.yml` + `config.py`
 > 方法：read-only 证据级逐文件阅读 + grep 交叉验证
 

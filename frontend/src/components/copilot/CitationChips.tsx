@@ -1,5 +1,5 @@
 /**
- * CitationChips · 知识库引用条（2026-11 传智杯 AI Web 改造）
+ * CitationChips · 知识库引用条（2026-11 AI Web 改造）
  *
  * 回答下方的 [1][2] 引用块：点击跳知识库页（/rag）。编号与回答正文中的
  * [n] 标注一一对应（copilot_service 产出的 citations 顺序即编号）。

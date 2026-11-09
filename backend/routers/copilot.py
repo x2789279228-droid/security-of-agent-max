@@ -1,5 +1,5 @@
 """
-Copilot 路由 — 对话式安全分析助手（2026-11 传智杯 AI Web 改造）
+Copilot 路由 — 对话式安全分析助手（2026-11 AI Web 改造）
 
 端点：
     POST /api/copilot/stream        流式问答（SSE；reasoning/token/citations 分帧）

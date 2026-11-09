@@ -22,7 +22,7 @@
 | **解决方式** | 流式数据底座 + 规则/Sigma 引擎兜底 + LLM 智能审计 + 自动响应 + 红蓝自博弈持续进化 + 工具调用四层控制 |
 | **核心能力** | 27 个后端能力子模块、20 个 Router、230+ REST 端点(openapi operations 口径)、18 个路由页面（24 个页面文件）、6 个 Flink 作业、16 个 Kafka Topic、3283 项后端测试 |
 | **目标用户** | 企业 SOC 运营方 / MSSP 安全托管 / 高校与竞赛团队 / 平台自审计研究 |
-| **场景** | 揭榜挂帅（共享记忆）智能体竞赛 · 校级 SOC 试点 · 攻防演练与红蓝自博弈训练 |
+| **场景** | 全国高校AI Web开发挑战赛 · 校级 SOC 试点 · 攻防演练与红蓝自博弈训练 |
 
 ---
 
@@ -525,8 +525,8 @@ ufw deny 9093
 | 页面 | 路径 | 说明 |
 |------|------|------|
 | **Home** | `pages/Home.tsx` | 守望品牌首页（Hero / Blueprint / Manifesto / ShiftConsole） |
-| **Ingest 接入台** | `pages/Ingest.tsx` | 日志注入窗口（2026-11 传智杯改造：攻击剧本一键注入 / 手动录入 / 文件上传 / 管道状态灯；日志带 inject_source 审计标记） |
-| **Copilot** | `pages/Copilot.tsx` | AI 分析副驾驶（2026-11 传智杯改造：流式问答 + reasoning 思考轨 + RAG 引用溯源 + 截图研判；入口散布于监控事件行/审计页/知识库） |
+| **Ingest 接入台** | `pages/Ingest.tsx` | 日志注入窗口（2026-11 AI Web改造：攻击剧本一键注入 / 手动录入 / 文件上传 / 管道状态灯；日志带 inject_source 审计标记） |
+| **Copilot** | `pages/Copilot.tsx` | AI 分析副驾驶（2026-11 AI Web改造：流式问答 + reasoning 思考轨 + RAG 引用溯源 + 截图研判；入口散布于监控事件行/审计页/知识库） |
 | **Monitor** | `pages/Monitor.tsx` | 实时监控（事件流 / 思维链 / 工具签名 / 管道） |
 | **Operations** | `pages/Operations.tsx` | 运营中心（14 个 Tab：概览 / KPI / 工单 / 案例 / 反馈 / 复盘 / 规则 / 审计 / 跟踪 / 学习 / 资产 / 成本 / 生命周期 / 徽记） |
 | **Sensing** | `pages/Sensing.tsx` | 感知中心（6 域 Tab：Traffic 流量基线 / Encrypted 加密流量 / Intel 威胁情报 / Sandbox 0day / EDR 融合 / Capabilities 能力开关） |
@@ -697,7 +697,7 @@ ufw deny 9093
 ├── demo/                                    # ★ 5 分钟演示（run_demo.ps1 / run-demo.sh / live-drill / production-drill.sh）
 ├── reports/                                 # 评测结果 JSON/MD（消融 / 对抗 / 性能 / CSIC 回放, 含整改前后对照）
 ├── certs/ config/ contracts/                # Kafka 证书 / Nginx·Flink 配置 / 跨运行时契约
-├── .env.example                             # 环境变量模板（172 个变量, 分层注释）
+├── .env.example                             # 环境变量模板（200 个变量, 分层注释）
 └── docs/                                    # ★ 105 篇文档
     ├── INDEX.md                             # 文档导航
     ├── deployment.md / dependency_versions.md

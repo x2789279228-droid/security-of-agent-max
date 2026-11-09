@@ -1,5 +1,5 @@
 /**
- * copilot 流状态归约测试 — applyFrame / applyAction（2026-11 传智杯 AI Web 改造）
+ * copilot 流状态归约测试 — applyFrame / applyAction（2026-11 AI Web 改造）
  *
  * 覆盖：stage upsert（乱序到达按流水线序插入）/ token·reasoning 增量累积 /
  * citations / vision_note / error（active 阶段转 skipped）/ done（content 权威重置、

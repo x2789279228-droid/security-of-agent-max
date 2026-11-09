@@ -848,7 +848,7 @@ export const api = {
   demoSeedStatus: () =>
     fetchJSON<Record<string, number>>('/demo/seed/status'),
 
-  // ── Copilot 对话式安全助手(2026-11 传智杯 AI Web 改造)──
+  // ── Copilot 对话式安全助手(2026-11 AI Web 改造)──
   // 问答本体走 streamSse.consumeSseStream(POST-SSE),这里只管能力自省
   copilotCapabilities: () =>
     fetchJSON<{
@@ -860,7 +860,7 @@ export const api = {
       budget?: Record<string, unknown>
     }>('/copilot/capabilities'),
 
-  // ── 接入台:剧本/手动注入(2026-11 传智杯 AI Web 改造)──
+  // ── 接入台:剧本/手动注入(2026-11 AI Web 改造)──
   scenarios: () =>
     fetchJSON<{
       scenarios: {

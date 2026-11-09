@@ -1,5 +1,5 @@
 /**
- * MessageBubble · Copilot 单轮问答气泡（2026-11 传智杯 AI Web 改造）
+ * MessageBubble · Copilot 单轮问答气泡（2026-11 AI Web 改造）
  *
  * 编辑部风：用户消息 = 右对齐墨底便签；AI 回答 = 左对齐纸面案卷
  * （ThinkingRail 思考轨 + 流式 Markdown + 引用条 + 用量脚注）。

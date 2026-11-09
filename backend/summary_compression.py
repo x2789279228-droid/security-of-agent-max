@@ -202,7 +202,7 @@ class LLMClient:
                 timeout=httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0),
             )
 
-    async def chat(self, messages: list[dict], temperature: float = 0.3) -> str:
+    async def chat(self, messages: list[dict], temperature: float = 0.3, model: str = "") -> str:
         from trace_hook import emit_trace, get_trace_context
 
         t_start = time.time()
@@ -210,12 +210,15 @@ class LLMClient:
         prompt_tokens = estimate_tokens(prompt_text)
         ctx = get_trace_context()
         event_id = int(ctx.get("event_id", 0) or 0)
+        # 2026-11-09: model 纳入缓存键 —— 同一 prompt 走不同模型(如视觉/非视觉)
+        # 的响应不可互串, 否则视觉调用会命中纯文本模型的缓存。
+        use_model = model or self.model
 
         # 响应缓存（相同 prompt + temperature → 缓存响应）: Redis 主源 + 本地 dict 快速路径
         # 缓存命中是零 token 成本路径（不扣预算），必须置于预算门禁之前——
         # 否则预算耗尽期间连免费命中也不可达，缓存"只出不进"随 TTL 枯竭（被门禁饿死）。
         digest = hashlib.md5(
-            f"{prompt_text}:{temperature}".encode("utf-8"), usedforsecurity=False
+            f"{prompt_text}:{temperature}:{use_model}".encode("utf-8"), usedforsecurity=False
         ).hexdigest()
         cache_key = f"llmcache:{digest}"
         cached = await self._cache_get(cache_key)
@@ -250,7 +253,7 @@ class LLMClient:
             return json.dumps({"error": "LLM未配置", "fallback": True}, ensure_ascii=False)
         await self.ensure_client()
         payload = {
-            "model": self.model,
+            "model": use_model,
             "messages": messages,
             "temperature": temperature,
             "reasoning_split": True,  # MiniMax-M3: thinking 拆到独立字段，不污染 JSON 输出
@@ -291,7 +294,7 @@ class LLMClient:
 
     async def chat_stream(self, messages: list[dict], temperature: float = 0.3,
                           model: str = ""):
-        """流式对话 — 逐 delta 产出帧 dict（Copilot 专用，2026-11 传智杯改造）。
+        """流式对话 — 逐 delta 产出帧 dict（Copilot 专用，2026-11 AI Web改造）。
 
         model: 覆盖默认模型（Copilot 图像理解走独立视觉模型时传入），
         空 = 用 self.model。

@@ -28,7 +28,7 @@ TOKEN = os.environ.get("SOC_TOKEN", "")  # JWT Bearer token (mandatory since 202
 # 2026-10-30 A3: 全量覆写事件 severity —— "medium" 使 triage 走 P2/tools_only
 # 车道, 排除 LLM 供应商配额对消费吞吐测量的污染(扩缩测量的正确仪器)。
 SEV_OVERRIDE = os.environ.get("SOC_SEV_OVERRIDE", "").strip().lower() or None  # JWT Bearer token (mandatory since 2026-09-10)
-OUT = os.environ.get("SOC_OUT", r"D:\揭榜挂帅\shared-memory-platform\.tmp_large_attack_20260910.jsonl")
+OUT = os.environ.get("SOC_OUT", r"shared-memory-platform\.tmp_large_attack_20260910.jsonl")
 PROGRESS_EVERY = int(os.environ.get("SOC_PROGRESS_EVERY", "50"))
 
 # ---- threat distribution (mirror 9/2 baseline × ~6.16 to reach 3000) ----

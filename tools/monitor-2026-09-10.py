@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 API = os.environ.get("SOC_API", "http://localhost:8001").rstrip("/")
 TOKEN = os.environ.get("SOC_TOKEN", "")
-OUT = os.environ.get("MON_OUT", r"D:\揭榜挂帅\shared-memory-platform\.tmp_monitor_20260910.jsonl")
+OUT = os.environ.get("MON_OUT", r"shared-memory-platform\.tmp_monitor_20260910.jsonl")
 INTERVAL = int(os.environ.get("MON_INTERVAL", "60"))
 
 

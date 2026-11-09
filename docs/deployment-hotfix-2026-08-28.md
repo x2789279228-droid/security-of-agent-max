@@ -39,7 +39,7 @@
 
 ## 2. 持久化（最关键，5 分钟做完）
 
-> 必须在项目根目录 `D:\揭榜挂帅\shared-memory-platform` 执行。
+> 必须在项目根目录 `shared-memory-platform` 执行。
 
 ```powershell
 # 1. 若 docker cp 时复制的是原始文件，先把容器内当前文件拷回源码树

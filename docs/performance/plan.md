@@ -2,7 +2,7 @@
 
 **日期**: 2026-09-02
 **作者**: Mavis (基于 explore 任务的 evidence-first 探索)
-**范围**: `D:\揭榜挂帅\shared-memory-platform` 攻击检测→响应全链路
+**范围**: `shared-memory-platform` 攻击检测→响应全链路
 **目标读者**: 后端工程师、平台架构师、运维 SRE
 
 > 本方案基于 explore 报告(`docs/performance/explore-report-2026-09-02.md`, 即将归档)产出的 12 个 evidence-backed 性能瓶颈。

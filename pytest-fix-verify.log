@@ -1,0 +1,27 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.2.0, pluggy-1.7.0 -- D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\backend
+configfile: pytest.ini
+plugins: anyio-4.15.1, asyncio-1.4.1, cov-7.1.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=session, asyncio_default_test_loop_scope=session
+collecting ... collected 185 items
+
+tests/test_llm_resilience_matrix.py::test_fault_429_short_retry_then_retryable_marker PASSED [  0%]
+tests/test_llm_resilience_matrix.py::test_fault_timeout_bounded_and_retryable PASSED [  1%]
+tests/test_llm_resilience_matrix.py::test_fault_invalid_key_401_exhausts_then_fallback PASSED [  1%]
+tests/test_llm_resilience_matrix.py::test_fault_network_down_connect_error PASSED [  2%]
+tests/test_llm_resilience_matrix.py::test_fault_model_offline_404 PASSED [  2%]
+tests/test_llm_resilience_matrix.py::test_fault_upstream_5xx_no_retry PASSED [  3%]
+tests/test_llm_resilience_matrix.py::test_cache_hit_zero_upstream_calls PASSED [  3%]
+tests/test_llm_resilience_matrix.py::test_cache_reachable_during_upstream_fault PASSED [  4%]
+tests/test_llm_resilience_matrix.py::test_no_key_gate_no_upstream_call PASSED [  4%]
+tests/test_llm_resilience_matrix.py::test_tier_short_circuit_degrades_low_tier_first PASSED [  5%]
+tests/test_anomaly_timezone_fallback.py::TestEveryFallbackIsLoud::test_missing_tzdata_fallback_is_logged PASSED [  5%]
+tests/test_anomaly_timezone_fallback.py::TestEveryFallbackIsLoud::test_unknown_timezone_name_is_still_logged PASSED [  6%]
+tests/test_anomaly_timezone_fallback.py::TestEveryFallbackIsLoud::test_working_timezone_does_not_warn PASSED [  7%]
+tests/test_anomaly_timezone_fallback.py::TestPayloadTellsTheTruth::test_reported_timezone_is_the_one_actually_used PASSED [  7%]
+tests/test_anomaly_timezone_fallback.py::TestPayloadTellsTheTruth::test_configured_value_is_kept_for_audit PASSED [  8%]
+tests/test_anomaly_timezone_fallback.py::TestPayloadTellsTheTruth::test_normal_machine_reports_no_fallback PASSED [  8%]
+tests/test_anomaly_timezone_fallback.py::TestPayloadTellsTheTruth::test_effective_timezone_property_matches_resolved_tz PASSED [  9%]
+tests/test_anomaly_timezone_fallback.py::TestThePayloadItselfTellsTheTruth::test_analysis_window_reports_the_timezone_actually_used 

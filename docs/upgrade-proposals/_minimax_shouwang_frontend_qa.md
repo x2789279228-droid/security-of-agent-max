@@ -2,7 +2,7 @@
 
 - Role: MiniMax QA only — inspection, no feature work.
 - Contract: `docs/upgrade-proposals/2026-q3-frontend-shouwang.md`
-- Workspace: `D:\揭榜挂帅\shared-memory-platform\frontend`
+- Workspace: `shared-memory-platform\frontend`
 - Date: 2026-09-06
 
 ## Methodology
@@ -27,7 +27,7 @@ No product code was modified.
 
 ### 1. `npx tsc -b --pretty false` exits 0 — PASS
 
-- Command: `cd "D:\揭榜挂帅\shared-memory-platform\frontend"; npx tsc -b --pretty false`
+- Command: `cd "shared-memory-platform\frontend"; npx tsc -b --pretty false`
 - Background task `bg_652fb095-8762-4504-9bfe-fb45d9a5c9fb` returned `exit=0`.
 - No stderr diagnostics emitted on stdout.
 - No code changes were required to satisfy this gate.

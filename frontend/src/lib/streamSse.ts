@@ -1,5 +1,5 @@
 /**
- * POST-SSE 流式消费层 — Copilot 问答（2026-11 传智杯 AI Web 改造）
+ * POST-SSE 流式消费层 — Copilot 问答（2026-11 AI Web 改造）
  *
  * 为什么不用 EventSource：它只支持 GET，而 Copilot 问答是 POST + 大 payload
  * （问题/历史/图片 data URL）。后端 sse_starlette 的 POST-SSE 已有先例

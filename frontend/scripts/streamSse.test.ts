@@ -1,5 +1,5 @@
 /**
- * streamSse 单元测试 — SseParser 纯解析器（2026-11 传智杯 AI Web 改造）
+ * streamSse 单元测试 — SseParser 纯解析器（2026-11 AI Web 改造）
  *
  * 覆盖：完整帧 / 跨 chunk 切割（逐字节喂）/ CRLF / 多 data 行 / 注释行 /
  * event 字段缺省 / 无终止空行的最后一帧（end() 宽容冲洗）。

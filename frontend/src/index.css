@@ -902,7 +902,7 @@ html[data-stage='1'] ::-webkit-scrollbar {
   }
 }
 
-/* ===== v9 · 浅色氛围层（2026-11 传智杯 AI Web 改造） =====
+/* ===== v9 · 浅色氛围层（2026-11 AI Web 改造） =====
    原则：只加「氛围」不加「行为」—— 全部是背景/描边/字距级的装饰 token，
    不新增 keyframes（动效语义仍归 v6 层管），battle 暗肤一律不受影响
    （用 html:not([data-mode="battle"]) 限定作用域）。

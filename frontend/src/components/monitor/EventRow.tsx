@@ -76,7 +76,7 @@ function TraceId({ traceId }: { traceId: string }) {
   )
 }
 
-/** 「追问 AI」— 带事件上下文跳 Copilot（2026-11 传智杯 AI Web 改造） */
+/** 「追问 AI」— 带事件上下文跳 Copilot（2026-11 AI Web 改造） */
 function AskAiLink({ eid }: { eid: number }) {
   const navigate = useNavigate()
   return (

@@ -1,5 +1,5 @@
 /**
- * ImageAttach · Copilot 图片附件（2026-11 传智杯 AI Web 改造 · 多模态）
+ * ImageAttach · Copilot 图片附件（2026-11 AI Web 改造 · 多模态）
  *
  * 支持剪贴板粘贴截图与文件选择，转 data URL（PNG/JPEG/WebP/GIF，≤6MB）。
  * 视觉模型未配置时按钮可见但置灰，tooltip 如实说明原因 —— 明示，不伪装。

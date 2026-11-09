@@ -1,6 +1,6 @@
 # RAG 子系统架构剖析
 
-> 工作区：`D:/揭榜挂帅/shared-memory-platform/backend/rag/`
+> 工作区：`shared-memory-platform/backend/rag/`
 > 周边：`qdrant_store.py` / `vector_store.py` / `grounding_verifier.py` / `llm_enhancer.py`
 > 性质：只读探索报告
 

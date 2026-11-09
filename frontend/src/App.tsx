@@ -23,7 +23,7 @@ const Benchmark = lazy(() => import('./pages/Benchmark'))
 const Demo = lazy(() => import('./pages/Demo'))
 const Screen = lazy(() => import('./pages/Screen'))
 const Poster = lazy(() => import('./pages/Poster'))
-// 2026-11 传智杯 AI Web 改造:对话式安全分析 + 接入台(剧本注入/手动录日志)
+// 2026-11 AI Web 改造:对话式安全分析 + 接入台(剧本注入/手动录日志)
 const Copilot = lazy(() => import('./pages/Copilot'))
 const Ingest = lazy(() => import('./pages/Ingest'))
 

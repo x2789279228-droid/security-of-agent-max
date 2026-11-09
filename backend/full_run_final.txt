@@ -53,7 +53,7 @@ tests/test_http_guards.py::TestJwtRevoke::test_logout_blocks_jti
     decoded = self.decode_complete(
 
 tests/test_llm_enhancers.py::TestLlmEnhancer::test_safe_dispatch_does_not_throw_without_event_loop
-  D:\揭榜挂帅\挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\backend\tests\test_llm_enhancers.py:145: RuntimeWarning: coroutine 'TestLlmEnhancer.test_safe_dispatch_does_not_throw_without_event_loop.<locals>.noop' was never awaited
+  挑战杯-深信服-湖南科技大学-守望——基于多智能体编排的安全运营平台\源代码\backend\tests\test_llm_enhancers.py:145: RuntimeWarning: coroutine 'TestLlmEnhancer.test_safe_dispatch_does_not_throw_without_event_loop.<locals>.noop' was never awaited
     llm_enhancer.safe_dispatch(noop(), log_label="test")
   Enable tracemalloc to get traceback where the object was allocated.
   See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.

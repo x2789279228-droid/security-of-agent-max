@@ -1,6 +1,6 @@
 # Self-Play 红蓝攻防模块：架构剖析
 
-> 工作区：`D:/揭榜挂帅/shared-memory-platform/backend/self_play/`
+> 工作区：`shared-memory-platform/backend/self_play/`
 > 性质：只读探索报告
 
 ---

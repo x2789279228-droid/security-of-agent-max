@@ -290,7 +290,7 @@ export default function RAG() {
                   {(result.transform?.keywords || []).length > 0 && (
                     <span className="ml-2">扩展 {result.transform.keywords.slice(0, 6).join(' / ')}</span>
                   )}
-                  {/* Copilot 入口:带着这些引用生成流式回答(2026-11 传智杯 AI Web 改造) */}
+                  {/* Copilot 入口:带着这些引用生成流式回答(2026-11 AI Web 改造) */}
                   {query.trim() && (
                     <button
                       type="button"

@@ -1,5 +1,5 @@
 /**
- * useCopilotStream — Copilot 问答流状态机（2026-11 传智杯 AI Web 改造）
+ * useCopilotStream — Copilot 问答流状态机（2026-11 AI Web 改造）
  *
  * 消费 POST /api/copilot/stream 的 SSE 帧并归约为可渲染的对话状态。
  * 归约逻辑抽成纯函数 `applyFrame`（scripts/copilotStream.test.ts 单测），

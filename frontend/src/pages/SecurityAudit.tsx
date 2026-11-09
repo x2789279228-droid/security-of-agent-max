@@ -452,7 +452,7 @@ export default function SecurityAudit() {
                       {pipelineData.pipeline_result.threat_type}
                     </span>
                   )}
-                  {/* Copilot 入口:让 AI 解读此审计结论(2026-11 传智杯 AI Web 改造) */}
+                  {/* Copilot 入口:让 AI 解读此审计结论(2026-11 AI Web 改造) */}
                   {pipelineEventId != null && (
                     <button
                       type="button"

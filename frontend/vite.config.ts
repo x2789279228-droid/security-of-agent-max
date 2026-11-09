@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: { '/api': BACKEND_PROXY },
   },
   build: {
-    // 2026-11 传智杯 AI Web 改造:vendor 手动分包 —— react 系/markdown(仅 Copilot 用)/
+    // 2026-11 AI Web 改造:vendor 手动分包 —— react 系/markdown(仅 Copilot 用)/
     // 图表系各自独立,业务代码改动不再打爆整块 vendor 缓存;首屏只加载 react 系。
     rollupOptions: {
       output: {

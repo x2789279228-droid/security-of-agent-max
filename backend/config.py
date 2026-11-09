@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     llm_model: str = ""
     # Audit 路径默认关掉 thinking/reasoning（网关不认则自动剥离重试）
     llm_reasoning_effort: str = "none"
-    # Copilot 图像理解（2026-11 传智杯 AI Web 改造）：空 = 视觉能力关闭，
+    # Copilot 图像理解（2026-11 AI Web 改造）：空 = 视觉能力关闭，
     # Copilot 前端如实置灰并说明原因（明示，不伪装）。需 OpenAI 兼容
     # 视觉模型（如 glm-4v / gpt-4o-mini / minimax-vl），与 llm_base_url 同网关。
     llm_vision_model: str = ""

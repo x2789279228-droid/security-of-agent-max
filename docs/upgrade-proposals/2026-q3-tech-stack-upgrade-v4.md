@@ -65,7 +65,7 @@
 | **MCP spec** | 2026-07-28 | ✅ 对（Cloudflare / byteiota / Octane 三方报道一致） | — |
 | **OCSF** | v1.9 范围 | ✅ 对（Anomali / AppScale / AWS 2026 评估一致） | — |
 | **W3C Trace Context** | v3 提"OTel SDK 标准 trace" | ✅ 对，**MCP 2026-07-28 spec 同时把 W3C Trace Context 标准化在 `_meta`**（SEP-414） | **v4 必报**：`Mcp-Method` + `Mcp-Name` header + W3C Trace Context 在 MCP 层打通 = 端到端 trace 一次到位 |
-| **CIMD** | v3 没提 | **Client ID Metadata Documents** 替代 OAuth DCR（2026-07-28 spec） | 揭榜挂帅信创场景下，CIMD 比 DCR 更适合国产 OAuth（OIDC） |
+| **CIMD** | v3 没提 | **Client ID Metadata Documents** 替代 OAuth DCR（2026-07-28 spec） | 早期赛道信创场景下，CIMD 比 DCR 更适合国产 OAuth（OIDC） |
 | **ClickHouse At-Least-Once** | v3 没提 | **官方 Flink Sink 当前仍 At-Least-Once**（2026 现实） | **本项目用 PG，未用 ClickHouse，影响小；但未来要切 ClickHouse 时 v4 必报** |
 
 ### 1.3 AI Agent GA 时间线
@@ -524,7 +524,7 @@ v3 在 §3.4 提"UEBA-ML 未落地"、隐含"EDR 未接入"、完全没提 IOC �
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│              揭榜挂帅 shared-memory-platform v4 集成架构              │
+│              早期赛道 shared-memory-platform v4 集成架构              │
 └─────────────────────────────────────────────────────────────────────┘
 
                   数据源层（v3 §3.2 + v4 §3.2 数据湖）
@@ -616,7 +616,7 @@ v3 在 §3.4 提"UEBA-ML 未落地"、隐含"EDR 未接入"、完全没提 IOC �
 2. **7 角色 Agent**（含 v4 新增 2 个）—— 实际 SOC 完整闭环
 3. **5 道 Guardrail**—— D3 Morpheus 模式
 4. **双协议**（MCP 2026-07-28 + W3C Trace Context）—— 端到端 trace 一次到位
-5. **信创 + 零信任**—— 揭榜挂帅评审硬性要求
+5. **信创 + 零信任**—— 早期赛道评审硬性要求
 
 ---
 
@@ -739,7 +739,7 @@ v3 在 §3.4 提"UEBA-ML 未落地"、隐含"EDR 未接入"、完全没提 IOC �
 - **6 大反例**用 Apache Flink docs / Qdrant 2026 benchmark / CSDN 综述 / Cloudflare Blog 2026-07-28 验证
 - **本项目基线**用 pom.xml / docker-compose.yml / requirements.txt / package.json / 195 单测 / 46 .j2 模板 / 11 Sigma 规则 直接核实
 
-**给揭榜挂帅评审的"7 天可演示"清单**（v4 沿用 v3 框架 + 加本项目已实装项）：
+**给早期赛道评审的"7 天可演示"清单**（v4 沿用 v3 框架 + 加本项目已实装项）：
 1. OCSF 1.9 字段映射（用 Datadog OCSF 工具验证）
 2. Langfuse 单点接入（演示 LLM 全链路可回放）
 3. Tier 1 分诊 Agent POC（100 条历史告警混淆矩阵）

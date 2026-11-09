@@ -30,7 +30,7 @@
 | 密码库 | `cryptography` + `PyJWT`，**无 gmssl / Tongsuo** | L0 钉死 `gmssl==3.2.2` 纯 Python（**不能申报密评**）；L1 SDF（GM/T 0018）主、厂商 PKCS#11 可选 | 「演示」和「过密评」切开 |
 | TEE | 无 | L2 才上硬件：CSV 主、TDX 备；CPU TEE **不保护** GPU HBM，除非 GPU CC | 不把 TDX 写成政府项目唯一路径 |
 
-**推荐节奏（揭榜挂帅）**: **L0-demo（1–2 人周：抽出客户端 + KAT + 双读字段 + 链哈希 flag 关 + 文档，不能申报密评）→ L0-contract（SM2-JWS 剖面 + SM 会话对端 + QuoteEnvelope fixture，另计人周）→ L1 SDF + Tongsuo → L2 CSV/云 TEE**。没有自有 CSV 机器时，用国内云 CSV/TDX 实例托管 vLLM，应用只做 attestation——加速项，不是跳过国密。
+**推荐节奏（早期赛道）**: **L0-demo（1–2 人周：抽出客户端 + KAT + 双读字段 + 链哈希 flag 关 + 文档，不能申报密评）→ L0-contract（SM2-JWS 剖面 + SM 会话对端 + QuoteEnvelope fixture，另计人周）→ L1 SDF + Tongsuo → L2 CSV/云 TEE**。没有自有 CSV 机器时，用国内云 CSV/TDX 实例托管 vLLM，应用只做 attestation——加速项，不是跳过国密。
 
 **本方案相对 v5 §4.2**: v5 只画了 SM2 Agent→Tool / SM3 审计链 / SM4 PG+Kafka 的 L0/L1/L2，**没有 TEE**。本文件取代那张草图，并把 MCP 工具调用的「SM2 签名」降为可选项——行为签名已在 `mcp_guard/behavior_signature.py` 落地，密码学签名另算，禁止重复造轮子。
 
@@ -69,7 +69,7 @@ cad.py                    只检查 llm_api_key 是否为空，不检查传输�
 
 因此：**v6「本项目当前未启用任何 LLM」只对 `config.py` 默认值成立；按 compose 拉起来，提示词会经普通 HTTPS 到云端网关。** TLS 只能防路径窃听，防不了提供商侧看见明文，也没有推理环境证明。
 
-这与等保「通信保密性 / 数据保密性」和密评「密码应用方案覆盖重要数据全生命周期」直接冲突。政府 / 关基 / 揭榜挂帅客户不会接受「告警原文在小米/任意 MaaS 内存里算完再回来」。
+这与等保「通信保密性 / 数据保密性」和密评「密码应用方案覆盖重要数据全生命周期」直接冲突。政府 / 关基 / 早期赛道客户不会接受「告警原文在小米/任意 MaaS 内存里算完再回来」。
 
 ### 1.2 密码栈是西方默认，而且几处是「模块在、密钥空」
 
@@ -316,7 +316,7 @@ GM/T 0115 测评单元（应用和数据安全常用）：身份鉴别、访问�
 
 | 路径 | 适用 | 不适用于 |
 |------|------|----------|
-| **海光 CSV 机密虚机**（主） | 政府 / 关基 / 揭榜挂帅 | 需要 NVIDIA 生态且必须出海合规的场景 |
+| **海光 CSV 机密虚机**（主） | 政府 / 关基 / 早期赛道 | 需要 NVIDIA 生态且必须出海合规的场景 |
 | 海光 DCU + 厂商机密计算栈 | 国产 GPU 推理 | 成熟度、驱动、vLLM 支持必须单独立项验证 |
 | Intel TDX + NVIDIA CC（Hopper/Blackwell） | 商业市场、出海、已有 Intel 机架 | **不能**作为政府项目唯一方案 |
 | 国内云厂商 CSV/TDX 实例（阿里云/火山/腾讯/移动云等，以当时商用目录为准） | 无自有 CSV 机器时的 L2 加速 | 仍要做 attestation；密钥与审计不能只信云控制台 |
@@ -1134,7 +1134,7 @@ PR7（`SmSessionCodec` + `mock_gateway.py`）+ PR8（`QuoteEnvelope` fixture）�
 | **C. 全栈进 TEE** | PG/Kafka/Flink/backend 全放机密虚机 | 叙事完整 | 不可运维、性能与生态（Kafka JVM、Flink、Qdrant）不现实；仍解不了 GPU | 过度设计，评审会问落地 |
 | **D. 海外 AES-GCM + TLS1.3 + 仅 Intel TDX** | 标准机密计算故事 | 出海、论文、NVIDIA CC 文档全 | 国内密评算法不合规；政府采购 TDX 风险 | 国内密评不行 |
 
-**推荐**: 揭榜挂帅走 **A 的 L0 立刻做 + L1 采购并行 + L2 用 CSV（有机器）或 B（无机器）**。D 只出现在海外交付分支。C 拒绝。
+**推荐**: 早期赛道走 **A 的 L0 立刻做 + L1 采购并行 + L2 用 CSV（有机器）或 B（无机器）**。D 只出现在海外交付分支。C 拒绝。
 
 这与创新矩阵「不要单靠 #10 撑创新」一致：L0 是补漏 PR；L2 是客户有机密计算预算时才上的加分。
 

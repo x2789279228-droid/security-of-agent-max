@@ -116,7 +116,7 @@ A：3 个开关位：`config.py` + `routers/<feature>.py` + 后台 `start()/stop
 
 **Q：和 v1.3.0 区别？**
 A：v1.3.0 是 MCP 控制网关（4 层 Guard）；本平台是完整 SOC 平台，**集成**了 v1.3.0 的 Guard 作为安全中间件。
-详细见 `D:\揭榜挂帅\v1.3.0_vs_platform_对比分析.md`。
+详细见 `v1.3.0_vs_platform_对比分析.md`。
 
 **Q：成本？**
 A：单机 8C16G 可跑 demo；生产 16C32G × 3 节点。LLM API 按调用计费，控频后可预估。

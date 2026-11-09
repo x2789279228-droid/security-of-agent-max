@@ -601,7 +601,7 @@ v8 不再扩 30 项，专注 **6 类修正 + 7 类新增**（已分布在前 6 �
 
 > **v8 写入时间**：2026-08-25 15:50:09
 > **v8 字节数**：~70KB（≈ 1,100 行）
-> **v8 文件**：`D:\揭榜挂帅\shared-memory-platform\docs\upgrade-proposals\2026-q3-tech-stack-upgrade-v8.md`
+> **v8 文件**：`shared-memory-platform\docs\upgrade-proposals\2026-q3-tech-stack-upgrade-v8.md`
 > **v8 上一版**：`2026-q3-tech-stack-upgrade-v7.md`（2026-08-25 15:43:24 / 64256 字节）
 > **v8 增量类别**：6 类修正 + 7 类新增 = 13 类 v8 增量
 > **v8 末轮维度**：13 维度（v7 8 维度 + v8 6.6-6.10 5 维度）

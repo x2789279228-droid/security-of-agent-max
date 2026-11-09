@@ -3,7 +3,7 @@
 > **审计时间**：2026-09-01
 > **审计版本**：v1（基于当前 main 分支 HEAD，含 v8 升级后的全部 30+ 后端模块、5 个 Flink Job、22 个前端页面）
 > **审计方法**：白盒源码审计 + 容器/端口只读探测（**严格只读**，未对运行实例发起任何写操作；未连 PostgreSQL/Redis/Kafka；未发任何攻击 payload）
-> **审计范围**：D:\揭榜挂帅\shared-memory-platform\ 全仓库
+> **审计范围**：shared-memory-platform\ 全仓库
 > **审计标准**：OWASP API Top 10 (2023) / OWASP LLM Top 10 / NIST SP 800-53 / 中国网络安全法 / 公安部 176 号令 / 数据安全法
 
 ---
@@ -1209,7 +1209,7 @@ def test_simulate_requires_admin():
 - **审计主机**：Windows 11 (CN)
 - **审计时间**：2026-09-01 14:23 - 16:30 (CST)
 - **审计工具**：Read / Grep / Glob / Bash（PowerShell）— 无第三方工具
-- **审计范围**：D:\揭榜挂帅\shared-memory-platform\ 全仓库
+- **审计范围**：shared-memory-platform\ 全仓库
 - **运行实例**（只读探测）：
   - `shared-memory-frontend` / `shared-memory-backend` 健康
   - `soc-temporal` / `soc-temporal-worker` **持续 Restarting**（编排失效）

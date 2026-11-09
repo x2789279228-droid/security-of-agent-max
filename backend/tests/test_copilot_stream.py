@@ -1,4 +1,4 @@
-"""Copilot 流式问答测试（2026-11 传智杯 AI Web 改造）。
+"""Copilot 流式问答测试（2026-11 AI Web 改造）。
 
 覆盖：
 - SSE 帧契约：run_copilot_stream 的帧经 /api/copilot/stream 原样转发为 event/data

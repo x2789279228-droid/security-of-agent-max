@@ -374,7 +374,7 @@ async def ingest_log_batch(
     return {"session_id": session_id, **result}
 
 
-# ── 攻击剧本一键注入（接入台专用，2026-11 传智杯 AI Web 改造）──────────────
+# ── 攻击剧本一键注入（接入台专用，2026-11 AI Web 改造）──────────────
 
 async def _run_ingest_pipeline(
     parsed: list[dict],
