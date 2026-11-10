@@ -591,6 +591,10 @@ services:
       SHARED_MEMORY_LLM_API_KEY: ${SHARED_MEMORY_LLM_API_KEY:?LLM_API_KEY_REQUIRED}
       SHARED_MEMORY_LLM_BASE_URL: ${SHARED_MEMORY_LLM_BASE_URL:-https://api.xiaomimimo.com/v1}
       SHARED_MEMORY_LLM_MODEL: ${SHARED_MEMORY_LLM_MODEL:-mimo-v2.5}
+      # 2026-11-10 补: 视觉模型(omni 直通)与开放体验模式 —— 此前 compose 未
+      # 登记这两键, 容器内 vision 恒为空(前端置灰)且开放模式不生效
+      SHARED_MEMORY_LLM_VISION_MODEL: ${SHARED_MEMORY_LLM_VISION_MODEL:-}
+      SHARED_MEMORY_AUTH_OPEN_TOUR: ${SHARED_MEMORY_AUTH_OPEN_TOUR:-false}
       # LLM 成本控制 (日预算 / 输入输出单价, 单位 ¥/千tokens; 0=不估算费用)
       SHARED_MEMORY_LLM_DAILY_BUDGET_TOKENS: ${SHARED_MEMORY_LLM_DAILY_BUDGET_TOKENS:-5000000}  # 日 token 预算(2026-10-23 起默认 5M 有界; 0=无上限)
       SHARED_MEMORY_LLM_BUDGET_UNLIMITED: ${SHARED_MEMORY_LLM_BUDGET_UNLIMITED:-false}       # false=硬门禁(超限低优降级, P0 有预留); true=只记账不关(成本无界)
@@ -1001,7 +1005,9 @@ services:
     volumes:
       - ./config/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
-      - "127.0.0.1:9093:9093"
+      # 2026-11-10: 宿主口改 9096 —— 与 kafka 的 SASL_SSL 数据面(9093)撞口;
+      # Prometheus 走容器网络 alertmanager:9093, 宿主映射仅本机 UI 用, 改名无影响
+      - "127.0.0.1:9096:9093"
     profiles: ["full", "lite"]
 
   prometheus:
