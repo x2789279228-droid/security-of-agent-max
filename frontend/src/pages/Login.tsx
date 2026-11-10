@@ -13,11 +13,12 @@ export default function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  if (token) return <Navigate to="/" replace />
-
   // 开放体验模式(2026-11-10): 无论因何落到 /login(登出残留/直接输 URL),
-  // 探测后端模式并自动送回工作台 —— 开放模式下登录页没有意义
+  // 探测后端模式并自动送回工作台 —— 开放模式下登录页没有意义。
+  // Hook 必须无条件调用(Rules of Hooks): token 早退在 effect 内部做,
+  // 不能放在下方 `if (token) return` 之后(条件式 Hook, oxlint error)。
   useEffect(() => {
+    if (token) return
     let alive = true
     fetch('/api/auth/mode')
       .then((r) => (r.ok ? r.json() : { open_tour: false }))
@@ -31,7 +32,9 @@ export default function Login() {
     return () => {
       alive = false
     }
-  }, [navigate])
+  }, [token, navigate])
+
+  if (token) return <Navigate to="/" replace />
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
