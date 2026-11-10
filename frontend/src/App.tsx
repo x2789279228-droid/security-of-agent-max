@@ -52,7 +52,10 @@ function Guard({ children }: { children: ReactNode }) {
     fetch('/api/auth/mode')
       .then((r) => (r.ok ? r.json() : { open_tour: false }))
       .then((d: { open_tour?: boolean }) => {
-        if (alive) setOpenTour(Boolean(d.open_tour))
+        if (alive) {
+          setOpenTour(Boolean(d.open_tour))
+          useAuthStore.getState().setOpenTour(Boolean(d.open_tour))
+        }
       })
       .catch(() => {
         if (alive) setOpenTour(false)

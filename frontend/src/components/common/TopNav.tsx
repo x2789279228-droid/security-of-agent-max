@@ -16,7 +16,7 @@ import { Logo } from '../brand/Logo'
 export function TopNav() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { username, token, logout } = useAuthStore()
+  const { username, token, logout, openTour } = useAuthStore()
   const { expert, setExpert } = useNavExpert()
   const [openGroup, setOpenGroup] = useState<string | null>(null)
   const navRef = useRef<HTMLElement>(null)
@@ -186,23 +186,33 @@ export function TopNav() {
           {mode === 'dark' ? '☀' : '☾'}
         </button>
 
-        {/* 用户 · 登出 */}
+        {/* 用户 · 登出 —— 开放体验模式下不提供登出(Visitor 无凭证可换,
+            点登出只会把用户困在登录页), 改为静态徽章明示模式 */}
         {token ? (
           <div className="flex items-center gap-1.5 pl-1">
             <span className="hidden font-mono text-[11px] text-ink-faint sm:inline">
               {username || 'admin'}
             </span>
-            <button
-              type="button"
-              onClick={() => {
-                logout()
-                navigate('/login')
-              }}
-              title="登出"
-              className="flex h-8 items-center rounded-[4px] px-2 text-[12px] text-ink-soft transition-colors hover:bg-inset hover:text-alert"
-            >
-              登出
-            </button>
+            {openTour ? (
+              <span
+                title="开放体验模式：免登录、全员同等权力（治理策略照常生效）"
+                className="flex h-8 items-center rounded-[4px] border border-line px-2 font-mono text-[11px] text-ink-faint"
+              >
+                开放体验
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  logout()
+                  navigate('/login')
+                }}
+                title="登出"
+                className="flex h-8 items-center rounded-[4px] px-2 text-[12px] text-ink-soft transition-colors hover:bg-inset hover:text-alert"
+              >
+                登出
+              </button>
+            )}
           </div>
         ) : (
           <NavLink

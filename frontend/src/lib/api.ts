@@ -26,6 +26,11 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
     },
   })
   if (res.status === 401) {
+    // 开放体验模式(2026-11-10): 后端 auth_open_tour 下不应出现 401;
+    // 万一出现(端点遗漏), 不清 Visitor 令牌/不跳登录页 —— 跳过去也回不来
+    if (localStorage.getItem('sm_open_tour') === '1') {
+      throw new Error('开放体验模式下出现认证异常，请刷新页面重试')
+    }
     const hadToken = !!localStorage.getItem('sm_token')
     localStorage.removeItem('sm_token')
     localStorage.removeItem('sm_user')

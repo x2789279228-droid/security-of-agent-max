@@ -92,6 +92,10 @@ export class SseParser {
 /** 与 api.ts fetchJSON 同口径的 401/错误处理 */
 async function raiseForResponse(res: Response): Promise<never> {
   if (res.status === 401) {
+    // 开放体验模式(2026-11-10): 同 api.ts 口径 —— 不清 Visitor 令牌/不跳登录
+    if (localStorage.getItem('sm_open_tour') === '1') {
+      throw new Error('开放体验模式下出现认证异常，请刷新页面重试')
+    }
     const hadToken = !!localStorage.getItem('sm_token')
     localStorage.removeItem('sm_token')
     localStorage.removeItem('sm_user')

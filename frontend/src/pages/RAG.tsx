@@ -75,16 +75,18 @@ export default function RAG() {
   const [bulkStatus, setBulkStatus] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    loadStats()
-  }, [])
-
+  // 2026-11-10: loadStats 声明移到 effect 之前 —— 此前 effect 在声明前调用
+  // (TDZ 形态), React Compiler 图分析报 "read during its own initialization"
   const loadStats = useCallback(async () => {
     try {
       const [s, d] = await Promise.all([api.ragStats(), api.ragDocuments()])
       setStats(s)
       setDocs(d?.documents || [])
     } catch (e: any) { setError(e.message) }
+  }, [])
+
+  useEffect(() => {
+    loadStats()
   }, [])
 
   const doSearch = useCallback(async () => {
