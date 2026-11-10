@@ -98,7 +98,7 @@ def ch1_overview(doc):
         ["检测规则", "1675 条 Sigma（20 自研 + 1641 SigmaHQ + 手适配），184 条经 FP=0 门禁转正"],
         ["REST 端点", "222 paths / 19 routers（openapi 3.1 实测口径）"],
         ["MCP 协议", "标准 JSON-RPC 2.0 端点（initialize/tools/list/tools/call），15 项协议测试"],
-        ["生成侧忠实度", "faithfulness 0.9875 / abstain 5%（20 查询真实 LLM 实测）"],
+        ["生成侧忠实度", "doubao-seed-2.1-lite 实测 faithfulness 1.0（MiniMax-M3 为 0.9875，双模型对照可复现）"],
         ["检索基线", "词法层 MRR 0.9917 / recall@5 1.0（60 语料回归基线，提交入库可复现）"],
         ["前端", "18 条懒加载路由 / 65 组件 / TypeScript strict 全开 / 37 项逻辑测试"],
         ["CI 门禁", "13 个 job：测试覆盖率 55% 门禁、API 契约 diff、密钥泄漏扫描、镜像构建"],
@@ -151,10 +151,12 @@ def ch3_architecture(doc):
 def ch4_ai(doc):
     h1(doc, "四、AI 技术方案（选型 · 集成 · 优化）")
     h2(doc, "4.1 大模型集成")
-    p_body(doc, "选型：LLM 网关采用 OpenAI 兼容协议接入 MiniMax-M3 系列。理由有三："
-                "① 协议兼容使模型可替换——评测脚本能对任意兼容网关复跑；"
-                "② MiniMax-M3 支持 reasoning 拆分（思考独立字段），流式输出不污染 JSON 正文；"
-                "③ 阶段性 token 成本可控。Prompt 全部入库 prompts/*.j2 模板目录（Jinja2），"
+    p_body(doc, "选型：LLM 网关采用 OpenAI 兼容协议接入火山方舟（Ark AgentPlan）——"
+                "doubao-seed-2.1-lite（omni 多模态）+ doubao-embedding-vision（2048 维图文统一向量）。"
+                "理由有三：① 协议兼容使模型可替换——本项目实测过 MiniMax-M3 与豆包两代网关无感切换，"
+                "评测脚本可对任意兼容网关复跑；② 豆包 omni 一体模型让文本与图像走同一模型，"
+                "行为一致且流式自带 reasoning_content 思考字段（正好喂 ThinkingRail）；"
+                "③ 套餐计费 token 成本可控。Prompt 全部入库 prompts/*.j2 模板目录（Jinja2），"
                 "由仓库守卫强制（.py 内不允许出现内联 system prompt），版本化可审计。", first=True)
     p_body(doc, "输出稳定可控的四道防线：① 提示词内嵌 JSON Schema 约束与「无证据自动丢弃」条款；"
                 "② 解析层 extract_json 容错抽取；③ Pydantic 校验，越界值程序化收敛（如严重度枚举），"
@@ -192,10 +194,15 @@ def ch4_ai(doc):
                 "决策与四层检查明细放进 structuredContent.guard 透出给客户端。"
                 "HTTP JWT 角色映射 guard RBAC，客户端无法通过参数自报角色提权。"
                 "15 项协议测试覆盖形状、错误码、通知语义、批量请求与治理不放松。", first=True)
-    h2(doc, "4.5 多模态与诚实降级")
+    h2(doc, "4.5 多模态：omni 视觉 + 图文统一向量")
     p_body(doc, "Copilot 支持单图研判：粘贴/上传截图（PNG/JPEG/WebP/GIF ≤6MB）转 data URL，"
-                "经 OpenAI 兼容 image_url 内容块进入视觉链路。视觉模型未配置时 UI 如实置灰并说明原因，"
-                "后端返回 vision_note 警告条——「不伪装有能力」本身是产品语义。", first=True)
+                "经 OpenAI 兼容 image_url 内容块进入视觉链路，由 doubao-seed-2.1-lite omni 模型"
+                "真实理解（实测：上传纯色图片正确回答颜色，全程流式）。向量侧采用"
+                " doubao-embedding-vision 多模态向量——文本与图像嵌入同一 2048 维空间，"
+                "为「以文搜图/以图搜证」的检索形态预留了能力底座。视觉模型未配置时 UI 仍如实置灰"
+                "并说明原因、后端返回 vision_note——「不伪装有能力」本身是产品语义。"
+                "工程侧同步修复了多模态消息在缓存键拼接与向量协议上的三处兼容缺陷"
+                "（content 数组 join 崩溃、MiniMax texts 硬编码、批量零向量静默降级）。", first=True)
     h2(doc, "4.6 AI 安全与可控性（最强项）")
     add_figure(doc, "fig-guard-layers.png", "图 4-3 七层 grounding 与治理闸")
     p_body(doc, "七层防幻觉：未信日志包裹（<untrusted_log>，日志不是指令）→ 输入清洗 → "
@@ -241,7 +248,7 @@ def ch6_test(doc):
         ["CSIC-2010 全量回放", "FP=0/36000 门禁", "公开数据集，逐层消融对照"],
         ["EVTX-ATTACK 解析", "364/364 = 100%", "公开攻击样本集"],
         ["RAG 词法检索", "MRR 0.9917 / recall@5 1.0", "60 语料回归基线（自建，提交入库）"],
-        ["RAG 生成忠实度", "0.9875 / abstain 5%", "真实 LLM + 生产同款闸，逐断言评分"],
+        ["RAG 生成忠实度", "doubao 1.0 / MiniMax 0.9875", "真实 LLM + 生产同款闸，逐断言评分"],
         ["LLM 容错矩阵", "429/超时/坏key/断网/5xx 全降级路径", "故障注入测试"],
         ["压测", "24,447 条零丢失", "Kafka 全链路"],
     ], widths=w(4.2, 4.8, 5.7))
@@ -308,7 +315,7 @@ def ch10_summary(doc):
     h1(doc, "十、总结与展望")
     h2(doc, "10.1 已知限制（诚实清单）")
     add_table(doc, ["限制", "现状与计划"], [
-        ["多模态广度", "仅图像单模态且视觉模型未配置时走诚实降级；语音/视频未实现"],
+        ["多模态广度", "图像理解+图文向量已真实启用；语音/视频未实现"],
         ["连接器生态", "对比商业 SOC 落后 1-2 个数量级，当前聚焦 Sysmon/Suricata/MISP/KEV"],
         ["RAG 语料规模", "60 条评测语料为回归基线；更大规模语料与 hybrid 实跑数字待栈就绪后补"],
         ["响应执行", "默认 dry_run，真实执行需凭据与审批（演示环境为模拟执行器）"],

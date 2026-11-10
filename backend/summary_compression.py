@@ -202,11 +202,31 @@ class LLMClient:
                 timeout=httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0),
             )
 
+    @staticmethod
+    def _prompt_text(messages: list[dict]) -> str:
+        """拼接消息文本(缓存键/用量估算用)。
+
+        2026-11-10 多模态兼容: content 可能是 OpenAI 多模态数组
+        [{type:image_url},{type:text},...] —— 只取 text 片段, 图像不计字符。
+        MiniMax 时代视觉链路从未真实启用, 此前 "\n".join 直接炸 TypeError。
+        """
+        parts = []
+        for m in messages:
+            c = m.get("content", "")
+            if isinstance(c, str):
+                parts.append(c)
+            elif isinstance(c, list):
+                parts.append(" ".join(
+                    p.get("text", "") for p in c
+                    if isinstance(p, dict) and p.get("type") == "text"
+                ))
+        return "\n".join(p for p in parts if p)
+
     async def chat(self, messages: list[dict], temperature: float = 0.3, model: str = "") -> str:
         from trace_hook import emit_trace, get_trace_context
 
         t_start = time.time()
-        prompt_text = "\n".join(m.get("content", "") for m in messages)
+        prompt_text = self._prompt_text(messages)
         prompt_tokens = estimate_tokens(prompt_text)
         ctx = get_trace_context()
         event_id = int(ctx.get("event_id", 0) or 0)
@@ -319,7 +339,7 @@ class LLMClient:
         from trace_hook import emit_trace, get_trace_context
 
         t_start = time.time()
-        prompt_text = "\n".join(m.get("content", "") for m in messages)
+        prompt_text = self._prompt_text(messages)
         prompt_tokens = estimate_tokens(prompt_text)
         ctx = get_trace_context()
         event_id = int(ctx.get("event_id", 0) or 0)
@@ -872,12 +892,15 @@ class EmbeddingClient:
         self._stats["misses"] += 1
 
         await self.ensure_client()
-        # MiniMax embo-01 协议：texts 数组 + type 字段
-        payload = {
-            "model": self.model,
-            "texts": [text],
-            "type": type_,
-        }
+        # 双协议负载(2026-11-10): MiniMax embo 系用 texts+type; OpenAI 兼容
+        # 端点(火山方舟/DeepSeek/标准网关)用 input 数组。判定口径与
+        # _post_embedding() 批量路径一致 —— 此前单条路径硬编码 MiniMax 协议,
+        # 切方舟后 400(embed: unexpected field 'texts')。
+        _low = (str(self.model or "") + "|" + str(self.base_url or "")).lower()
+        if "embo" in _low or "minimax" in _low:
+            payload = {"model": self.model, "texts": [text], "type": type_}
+        else:
+            payload = {"model": self.model, "input": [text]}
         last_error = None
         for attempt in range(2):
             try:
@@ -913,7 +936,10 @@ class EmbeddingClient:
 
     async def _post_embedding(self, texts, type_):
         import os as _o
-        batch_key = _o.environ.get("SHARED_MEMORY_EMBEDDING_BATCH_KEY", "").strip() or "texts"
+        # 2026-11-10 修复: 默认值原为 "texts"(MiniMax 硬编码) —— 切 OpenAI 兼容
+        # 端点(火山方舟等)后批量路径必 400 且静默降级零向量。改为默认 auto:
+        # 按模型/网关自适应; 显式设 texts/input 时尊重人工指定。
+        batch_key = _o.environ.get("SHARED_MEMORY_EMBEDDING_BATCH_KEY", "").strip().lower() or "auto"
         low = (str(self.model or "") + "|" + str(self.base_url or "")).lower()
         if batch_key not in ("texts", "input"):
             batch_key = "texts" if ("embo" in low or "minimax" in low) else "input"
