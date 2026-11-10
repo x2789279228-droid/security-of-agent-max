@@ -161,3 +161,24 @@ def test_client_cannot_self_declare_role():
         user_role="viewer",
     ))
     assert resp["result"]["isError"] is True, "伪报角色不得提权"
+
+
+# ── 5. HTTP 层回归(2026-11-10) ────────────────────────────────
+
+def test_http_endpoint_accepts_json_body():
+    """端点参数必须是 Body —— 此前裸 Any 被 FastAPI 当 query 参数, HTTP 一律 422。"""
+    from fastapi.testclient import TestClient
+    from app import app
+    from config import settings
+    from unittest.mock import patch
+    with patch.object(settings, "auth_open_tour", True):
+        c = TestClient(app)
+        r = c.post("/api/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        assert r.status_code == 200, r.text[:200]
+        assert r.json()["result"] == {}
+        # 批量
+        r = c.post("/api/mcp", json=[
+            {"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ])
+        assert r.status_code == 200 and len(r.json()) == 2

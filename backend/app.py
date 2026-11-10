@@ -548,6 +548,7 @@ app = FastAPI(
 _PUBLIC_PATHS = frozenset({
     "/api/auth/login",
     "/api/auth/register",
+    "/api/auth/mode",  # 认证模式自省(2026-11-10): 未登录前端探测开放体验开关用, 必须免认证
     "/api/health",
     "/docs", "/redoc", "/openapi.json",
     "/metrics",
@@ -565,6 +566,14 @@ async def auth_middleware(request: Request, call_next):
     if mtls_err:
         return JSONResponse(status_code=403, content={"detail": mtls_err})
     if path.startswith("/api/") and path not in _PUBLIC_PATHS:
+        # 开放体验模式(2026-11-10): 短路 token 校验, 端点层 get_current_user
+        # 统一授予 admin/Visitor —— 治理(审批/MCP守卫/否决闸)在策略层照常生效
+        from config import settings
+        if getattr(settings, "auth_open_tour", False):
+            response = await call_next(request)
+            if "server" in response.headers:
+                del response.headers["server"]
+            return response
         # 支持 Authorization header 和 query param (SSE EventSource 不支持自定义 header)
         token = None
         auth_header = request.headers.get("authorization", "")

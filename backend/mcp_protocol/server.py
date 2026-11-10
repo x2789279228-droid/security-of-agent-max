@@ -14,7 +14,7 @@ import asyncio
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 
 from auth import UserInfo, RequireRole
 
@@ -214,12 +214,15 @@ router = APIRouter(prefix="/api/mcp", tags=["mcp-protocol"])
 
 @router.post("")
 async def mcp_endpoint(
-    payload: Any,
+    payload: "dict | list" = Body(...),
     user: UserInfo = Depends(RequireRole("admin", "operator")),
 ):
     """MCP JSON-RPC 2.0 端点(单条与批量)。
 
     认证与 /api/audit/guard/call 同口径(operator 及以上); 角色取自 JWT,
     客户端无法通过参数自报角色提权。
+    注: 参数必须显式 Body —— 此前注解为裸 Any, FastAPI 将其解析为
+    query 参数, HTTP 层 POST 一律 422(2026-11-10 开放体验测试首次
+    走到 HTTP 层暴露; 此前 15 条协议测试全走函数直调未覆盖)。
     """
     return await handle_jsonrpc(payload, user_role=user.role)

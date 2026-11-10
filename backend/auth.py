@@ -156,6 +156,12 @@ async def decode_access_token(token: str) -> dict:
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
 ) -> UserInfo:
+    # 开放体验模式(2026-11-10): 免登录直通, 一律 admin/Visitor —— 短路点必须在
+    # decode 之前(不带/带无效 token 都直通)。治理语义不在此层: 审批/MCP 守卫/
+    # 否决闸照常拦截, 与登录与否无关。
+    from config import settings
+    if getattr(settings, "auth_open_tour", False):
+        return UserInfo(username="Visitor", role="admin", jti="open-tour")
     token = credentials.credentials if credentials else ""
     payload = await decode_access_token(token)
     return UserInfo(

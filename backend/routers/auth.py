@@ -251,6 +251,13 @@ async def revoke_tokens(
 _is_prod = os.environ.get("SHARED_MEMORY_ENV_NAME", settings.env_name) == "prod"
 
 
+@router.get("/auth/mode")
+async def auth_mode():
+    """认证模式自省(免认证): 前端据此决定是否进入开放体验直通。"""
+    from config import settings
+    return {"open_tour": bool(getattr(settings, "auth_open_tour", False))}
+
+
 @router.get("/health")
 async def health():
     # 进程存活探针。刻意不探测依赖 —— 保持无鉴权/可公开，便于 LB 使用。

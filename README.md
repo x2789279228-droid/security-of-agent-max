@@ -361,6 +361,10 @@ python log_simulator.py --mode chain --api http://localhost:8001
 
 bash demo/run-demo.sh            # Linux/macOS 等价脚本
 bash demo/production-drill.sh    # 生产演练剧本（含核实步骤）
+
+# 开放体验模式（评审/路演直通）: .env 设 SHARED_MEMORY_AUTH_OPEN_TOUR=true
+# → 免登录自动以 admin/Visitor 身份进入, 任何人同等权力体验全部功能;
+#   治理语义不变（审批队列/MCP 守卫/否决闸照常拦截）。默认 false 认证行为不变。
 ```
 
 ---

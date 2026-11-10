@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { RootLayout } from './layouts/RootLayout'
 import { ROUTES } from './lib/constants'
@@ -41,8 +41,36 @@ function PageLoader() {
 
 function Guard({ children }: { children: ReactNode }) {
   const token = useAuthStore((s) => s.token)
-  if (!token) return <Navigate to="/login" replace />
-  return <>{children}</>
+  const setAuth = useAuthStore((s) => s.setAuth)
+  // 开放体验模式(2026-11-10, 评审直通): 无 token 时先探后端认证模式,
+  // open_tour=true 则以 Visitor/admin 直通 —— 任何人同等权力体验全部功能;
+  // 探测失败/关闭时维持原行为(跳登录)。探测仅一次, 不阻塞已有会话。
+  const [openTour, setOpenTour] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (token) return
+    let alive = true
+    fetch('/api/auth/mode')
+      .then((r) => (r.ok ? r.json() : { open_tour: false }))
+      .then((d: { open_tour?: boolean }) => {
+        if (alive) setOpenTour(Boolean(d.open_tour))
+      })
+      .catch(() => {
+        if (alive) setOpenTour(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [token])
+
+  // 直通身份在 effect 内提交(渲染期写 store 是 React Compiler 违规);
+  // token 落位后下一帧渲染业务内容
+  useEffect(() => {
+    if (openTour === true && !token) setAuth('open-tour', 'Visitor')
+  }, [openTour, token, setAuth])
+
+  if (token) return <>{children}</>
+  if (openTour === null) return <PageLoader />
+  return <Navigate to="/login" replace />
 }
 
 /**

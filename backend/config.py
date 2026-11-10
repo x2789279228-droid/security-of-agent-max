@@ -164,6 +164,11 @@ class Settings(BaseSettings):
     # 修复前 demo 路由无条件挂载在生产路由上, operator 即可灌/清演示数据,
     # 且退出演示态只能靠人工记得跑 clear。
     demo_mode: bool = False
+    # 开放体验模式(2026-11-10, 评审/路演): true 时所有请求免登录自动获得
+    # admin 身份(Visitor), 任何人同等权力体验全部功能。治理语义不变 ——
+    # 审批队列/MCP 守卫/否决闸照常生效(治理不依赖登录, 依赖策略)。
+    # 默认 false: 生产/常规部署的认证行为与历史完全一致。
+    auth_open_tour: bool = False
     # 日志格式: ""=按 env 自动(prod=json, 其余=text); 显式 "json"|"text" 覆盖
     log_format: str = ""
     # 启动时自动执行 alembic upgrade head（生产/容器部署建议开启;
